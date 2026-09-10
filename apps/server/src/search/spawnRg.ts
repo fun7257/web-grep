@@ -47,10 +47,6 @@ export async function detectRgBinary(
   return undefined;
 }
 
-/**
- * `@vscode/ripgrep` ships platform binaries as optionalDependencies
- * (no postinstall network fetch). Missing native package throws on import.
- */
 export async function detectBundledRg(): Promise<string | undefined> {
   try {
     const { rgPath } = await import("@vscode/ripgrep");

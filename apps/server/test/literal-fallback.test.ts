@@ -57,6 +57,7 @@ describe("LiteralEngine walker", () => {
     outside = await mkdtemp(path.join(os.tmpdir(), "web-grep-lit-out-"));
     await writeFile(path.join(root, "ok.txt"), "hello NEEDLE world\n");
     await writeFile(path.join(root, ".env"), "SECRET=NEEDLE\n");
+    await writeFile(path.join(root, "credentials.json"), "DENYNEEDLE\n");
     await writeFile(path.join(root, ".gitignore"), "ignored.txt\n");
     await writeFile(path.join(root, "ignored.txt"), "gitignored NEEDLE\n");
     await writeFile(path.join(root, "regex.txt"), "aaa\nliteral a+ here\n");
@@ -86,7 +87,8 @@ describe("LiteralEngine walker", () => {
   it("skips denylisted files", async () => {
     const hits = await collect(new LiteralEngine(), {
       ...input(rootReal),
-      query: "SECRET",
+      query: "DENYNEEDLE",
+      hidden: true,
     });
     expect(hits).toHaveLength(0);
   });

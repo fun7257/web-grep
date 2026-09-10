@@ -205,7 +205,7 @@ export class LiteralEngine implements SearchEngine {
     if (signal.aborted) {
       return { exitCode: 0 };
     }
-    // Regex is refused in preflight (ENGINE_UNSUPPORTED). Do not interpret the query.
+    // Last-resort engine: never compile or run the query as regex.
     if (input.regex) {
       return { exitCode: 0 };
     }
