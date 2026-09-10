@@ -10,13 +10,28 @@ import type {
 } from "./types.ts";
 
 function waitExit(child: ChildProcess): Promise<number | null> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve(child.exitCode);
-  }
   return new Promise((resolve) => {
-    child.once("exit", (code) => {
+    let settled = false;
+    const finish = (code: number | null): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      child.removeListener("exit", onExit);
+      child.removeListener("error", onError);
       resolve(code);
-    });
+    };
+    const onExit = (code: number | null): void => {
+      finish(code);
+    };
+    const onError = (): void => {
+      finish(2);
+    };
+    child.once("exit", onExit);
+    child.once("error", onError);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      finish(child.exitCode);
+    }
   });
 }
 
@@ -43,43 +58,50 @@ export class RgEngine implements SearchEngine {
       stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
+    const exited = waitExit(child);
 
     const kill = (): void => {
       terminateChild(child);
     };
     if (signal.aborted) {
       kill();
-      return { exitCode: await waitExit(child) };
+      return { exitCode: await exited };
     }
     signal.addEventListener("abort", kill, { once: true });
 
+    let failed = false;
     try {
       child.stderr?.resume();
       if (!child.stdout) {
-        kill();
-        return { exitCode: 2 };
-      }
-      const rl = readline.createInterface({ input: child.stdout });
-      try {
-        for await (const line of rl) {
-          if (signal.aborted) {
-            break;
+        failed = true;
+      } else {
+        const rl = readline.createInterface({ input: child.stdout });
+        try {
+          for await (const line of rl) {
+            if (signal.aborted) {
+              break;
+            }
+            const match = parseRgMatchLine(line);
+            if (!match) {
+              continue;
+            }
+            await onMatch(match);
           }
-          const match = parseRgMatchLine(line);
-          if (!match) {
-            continue;
-          }
-          await onMatch(match);
+        } finally {
+          rl.close();
         }
-      } finally {
-        rl.close();
       }
     } catch {
-      kill();
+      failed = true;
+    } finally {
+      if (signal.aborted || failed) {
+        kill();
+      }
+    }
+    try {
+      return { exitCode: await exited };
     } finally {
       signal.removeEventListener("abort", kill);
-      kill();
     }
-    return { exitCode: await waitExit(child) };
   }
 }

@@ -228,6 +228,24 @@ export function createSearchService(opts: {
           return;
         }
 
+        // Denied includes are dropped; if none remain, do not widen to the tree.
+        if (
+          pre.request.globInclude.length > 0 &&
+          pre.globInclude.length === 0
+        ) {
+          await sendDone({
+            truncated: false,
+            timedOut: false,
+            cancelled: false,
+          });
+          log.info("search done", {
+            searchId: pre.searchId,
+            elapsedMs: Date.now() - started,
+            matchCount,
+          });
+          return;
+        }
+
         const result = await searchEngine.search(
           {
             rootReal: opts.config.rootReal,
@@ -338,8 +356,9 @@ export function createSearchService(opts: {
         log.error("search failed", {
           searchId: pre.searchId,
           code: "ENGINE",
+          err: err instanceof Error ? err.message : String(err),
         });
-        await sendError(err instanceof Error ? err.message : "ripgrep failed");
+        await sendError("ripgrep failed");
       } finally {
         clearInterval(heartbeat);
         clearTimeout(timeoutTimer);

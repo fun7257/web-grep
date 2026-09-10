@@ -218,13 +218,21 @@ describe("POST /api/search contract (fake engine)", () => {
   });
 
   it("emits no hits when globInclude is .env", async () => {
-    const { events } = await searchEvents({
+    const secret = await searchEvents({
       query: "SECRET",
       globInclude: [".env"],
       regex: false,
     });
-    expect(events.filter((e) => e.event === "hit")).toHaveLength(0);
-    expect(events.filter((e) => e.event === "done")).toHaveLength(1);
+    expect(secret.events.filter((e) => e.event === "hit")).toHaveLength(0);
+    expect(secret.events.filter((e) => e.event === "done")).toHaveLength(1);
+
+    const other = await searchEvents({
+      query: "hello-needle",
+      globInclude: [".env"],
+      regex: false,
+    });
+    expect(other.events.filter((e) => e.event === "hit")).toHaveLength(0);
+    expect(other.events.filter((e) => e.event === "done")).toHaveLength(1);
   });
 
   it("returns inflight to 0 on abort", async () => {
@@ -306,6 +314,36 @@ describe("POST /api/search contract (fake engine)", () => {
     }
     expect(done.data.timedOut).toBe(true);
     expect(done.data.cancelled).toBe(false);
+  });
+
+  it("does not leak internal error messages on SSE error", async () => {
+    const config = testConfig({
+      rootReal: fixture.rootReal,
+      rootLabel: path.basename(fixture.rootReal),
+    });
+    const search = createSearchService({
+      config,
+      engine: "rg",
+      searchEngine: {
+        kind: "rg",
+        search: async () => {
+          throw new Error("ENOENT: /opt/secret/rg");
+        },
+      },
+    });
+    const app = createApp({ config, engine: "rg", search });
+    const res = await postSearch(app, { query: "hello-needle" });
+    const events = eventsFrom(await res.text());
+    const errors = events.filter((e) => e.event === "error");
+    expect(errors).toHaveLength(1);
+    const err = errors[0];
+    expect(err?.event).toBe("error");
+    if (err?.event !== "error") {
+      return;
+    }
+    expect(err.data.message).toBe("ripgrep failed");
+    expect(err.data.message).not.toContain("/opt/secret");
+    expect(events.filter((e) => e.event === "done")).toHaveLength(0);
   });
 });
 
