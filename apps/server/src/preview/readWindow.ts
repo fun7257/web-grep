@@ -1,4 +1,5 @@
-import { type FileHandle, open, realpath } from "node:fs/promises";
+import { constants, type Stats } from "node:fs";
+import { type FileHandle, open, realpath, stat } from "node:fs/promises";
 import * as nodePath from "node:path";
 import {
   type FileQuery,
@@ -104,6 +105,35 @@ function windowLines(
   };
 }
 
+function assertRegularFile(st: Stats, previewBytes: number): void {
+  if (!st.isFile() || st.isDirectory()) {
+    throw new PreviewError("INVALID_PATH", 400, "not a file");
+  }
+  if (st.size > previewBytes) {
+    throw new PreviewError("INVALID_PATH", 413, "file too large");
+  }
+}
+
+async function readCapped(
+  fh: FileHandle,
+  previewBytes: number,
+): Promise<Buffer> {
+  const cap = previewBytes + 1;
+  const buf = Buffer.alloc(cap);
+  let offset = 0;
+  while (offset < cap) {
+    const { bytesRead } = await fh.read(buf, offset, cap - offset, offset);
+    if (bytesRead === 0) {
+      break;
+    }
+    offset += bytesRead;
+  }
+  if (offset > previewBytes) {
+    throw new PreviewError("INVALID_PATH", 413, "file too large");
+  }
+  return buf.subarray(0, offset);
+}
+
 export async function readWindow(
   args: ReadWindowArgs,
 ): Promise<FileWindowResponse> {
@@ -126,21 +156,25 @@ export async function readWindow(
     throw new PreviewError("DENIED", 403, "path is denied");
   }
 
+  // stat before open so a FIFO/device cannot block the request.
+  let pre: Stats;
+  try {
+    pre = await stat(resolved.abs);
+  } catch {
+    throw new PreviewError("INVALID_PATH", 404, "path does not exist");
+  }
+  assertRegularFile(pre, previewBytes);
+
   let fh: FileHandle;
   try {
-    fh = await open(resolved.abs, "r");
+    fh = await open(resolved.abs, constants.O_RDONLY | constants.O_NONBLOCK);
   } catch {
     throw new PreviewError("INVALID_PATH", 404, "path does not exist");
   }
 
   try {
     const st = await fh.stat();
-    if (!st.isFile() || st.isDirectory()) {
-      throw new PreviewError("INVALID_PATH", 400, "not a file");
-    }
-    if (st.size > previewBytes) {
-      throw new PreviewError("INVALID_PATH", 413, "file too large");
-    }
+    assertRegularFile(st, previewBytes);
 
     const realAbs = await realpath(resolved.abs);
     const realRel = posixRelOrThrow(rootReal, realAbs);
@@ -148,10 +182,7 @@ export async function readWindow(
       throw new PreviewError("DENIED", 403, "path is denied");
     }
 
-    const bytes = await fh.readFile();
-    if (bytes.byteLength > previewBytes) {
-      throw new PreviewError("INVALID_PATH", 413, "file too large");
-    }
+    const bytes = await readCapped(fh, previewBytes);
     const sniff = bytes.subarray(
       0,
       Math.min(BINARY_SNIFF_BYTES, bytes.byteLength),

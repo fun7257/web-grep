@@ -1,4 +1,12 @@
-import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
+import {
+  mkdir,
+  mkdtemp,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { FileWindowResponseSchema } from "@web-grep/shared";
@@ -38,6 +46,7 @@ describe("GET /api/file", () => {
       path.join(outside, "outside.txt"),
       path.join(root, "link-out"),
     );
+    await mkdir(path.join(root, "subdir"));
     rootReal = await realpath(root);
   });
 
@@ -110,6 +119,31 @@ describe("GET /api/file", () => {
       "http://127.0.0.1:8787/api/file?path=does-not-exist&line=1",
     );
     expect(res.status).toBe(404);
+    await expect(res.json()).resolves.toMatchObject({
+      code: "INVALID_PATH",
+    });
+  });
+
+  it("rejects a directory", async () => {
+    const res = await apiRequest(
+      app(),
+      "http://127.0.0.1:8787/api/file?path=subdir&line=1",
+    );
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      code: "INVALID_PATH",
+    });
+  });
+
+  it("rejects a FIFO without blocking", async () => {
+    const fifo = path.join(root, "pipe.fifo");
+    const mk = spawnSync("mkfifo", [fifo], { encoding: "utf8" });
+    expect(mk.status).toBe(0);
+    const res = await apiRequest(
+      app(),
+      "http://127.0.0.1:8787/api/file?path=pipe.fifo&line=1",
+    );
+    expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({
       code: "INVALID_PATH",
     });

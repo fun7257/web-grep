@@ -1,4 +1,4 @@
-import { type FileQuery, FileQuerySchema } from "@web-grep/shared";
+import { FileQuerySchema } from "@web-grep/shared";
 import type { Hono } from "hono";
 import * as z from "zod";
 import type { Config } from "../config.ts";
@@ -35,16 +35,12 @@ function coerceFileQuery(value: unknown): unknown {
 // Query values are strings; FileQuerySchema expects numbers.
 const FileQueryFromQuerySchema = z.preprocess(coerceFileQuery, FileQuerySchema);
 
-function parseFileQuery(value: unknown): FileQuery {
-  return FileQuerySchema.parse(coerceFileQuery(value));
-}
-
 export function registerFileRoutes(app: Hono, config: Config): void {
   app.get(
     "/api/file",
     jsonErrorValidator("query", FileQueryFromQuerySchema),
     async (c) => {
-      const query = parseFileQuery(c.req.query());
+      const query = c.req.valid("query");
       try {
         const body = await readWindow({
           rootReal: config.rootReal,
