@@ -50,10 +50,17 @@ describe("globInclude denylist", () => {
 });
 
 describe("denylistRgGlobs", () => {
-  it("emits negated globs then the .env.example allow-exception", () => {
+  it("emits only negated globs unless a user include whitelist exists", () => {
     const globs = denylistRgGlobs(false);
-    expect(globs.at(-1)).toBe(".env.example");
-    expect(globs[0]?.startsWith("!")).toBe(true);
+    expect(globs.every((g) => g.startsWith("!"))).toBe(true);
+    expect(globs).toContain("!.env.*");
+    expect(globs).not.toContain(".env.example");
+
+    const withInclude = denylistRgGlobs(false, true);
+    expect(withInclude.at(-1)).toBe(".env.example");
+    expect(withInclude.slice(0, -1).every((g) => g.startsWith("!"))).toBe(true);
+
     expect(denylistRgGlobs(true)).toEqual([]);
+    expect(denylistRgGlobs(true, true)).toEqual([]);
   });
 });

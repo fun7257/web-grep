@@ -17,7 +17,6 @@ export class PathSandboxError extends Error {
 }
 
 function escapesRoot(rel: string, sep: string): boolean {
-  // Segment-aware: "..%2F" is a literal filename, not traversal.
   return rel === ".." || rel.startsWith(`..${sep}`);
 }
 

@@ -47,11 +47,20 @@ export function isDenied(relPosix: string, allowSecrets: boolean): boolean {
   return denyMatchers.some((match) => match(relPosix) || match(base));
 }
 
-export function denylistRgGlobs(allowSecrets: boolean): string[] {
+export function denylistRgGlobs(
+  allowSecrets: boolean,
+  hasUserInclude = false,
+): string[] {
   if (allowSecrets) {
     return [];
   }
-  return [...DENY_GLOBS.map((g) => `!${g}`), ".env.example"];
+  const negated = DENY_GLOBS.map((g) => `!${g}`);
+  // A non-! glob enables rg whitelist mode, so only re-include
+  // .env.example when user includes already turned that on.
+  if (hasUserInclude) {
+    return [...negated, ".env.example"];
+  }
+  return negated;
 }
 
 export function sanitizeUserGlob(glob: string): string {
