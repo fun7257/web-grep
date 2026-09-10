@@ -1,0 +1,17 @@
+export const LIMITS = {
+  queryMaxChars: 512,
+  pathMaxChars: 4096,
+  globMaxChars: 256,
+  globMaxCount: 32,
+  maxResultsDefault: 10_000,
+  maxResultsHard: 50_000,
+  timeoutMsDefault: 30_000,
+  previewBytes: 1_048_576,
+  previewLines: 201,
+  beforeAfterDefault: 20,
+  beforeAfterMax: 100,
+  lineTextMaxChars: 2048,
+  maxFilesizeRg: "8M",
+  heartbeatMs: 5_000,
+  perFileMaxCount: 100,
+} as const;
