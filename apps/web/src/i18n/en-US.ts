@@ -1,0 +1,32 @@
+import type { MsgKey } from "./keys.ts";
+
+export const enUS = {
+  queryPlaceholder: "Search file contents (regex)",
+  search: "Search",
+  cancel: "Cancel",
+  path: "Path prefix",
+  include: "Include glob",
+  exclude: "Exclude glob",
+  regex: "Regex",
+  literal: "Literal",
+  caseSensitive: "Case sensitive",
+  wordMatch: "Whole word",
+  hidden: "Hidden files",
+  emptyHint: "Enter a query and press ⌘⏎ to search",
+  noResults: "No matches",
+  truncated: "Results truncated",
+  copyPath: "Copy path",
+  tokenPrompt: "Enter access token",
+  tokenSubmit: "Continue",
+  literalEngineBanner:
+    "ripgrep not found; using literal search (no gitignore, no regex)",
+  engineNoneBanner: "ripgrep not found; search is unavailable",
+  loading: "Searching…",
+  cancelled: "Cancelled",
+  timedOut: "Timed out",
+  resultsStatus: "{matchCount} matches · {fileCount} files · {elapsedMs} ms",
+  hostNotAllowed: "Host not allowed; set WEB_GREP_PUBLIC_HOST",
+  searchFailed: "Search failed",
+  localeZh: "中",
+  localeEn: "EN",
+} as const satisfies Record<MsgKey, string>;

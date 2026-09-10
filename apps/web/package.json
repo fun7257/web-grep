@@ -9,6 +9,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@tanstack/react-virtual": "3.14.10",
     "@web-grep/shared": "workspace:*",
     "react": "19.3.0",
     "react-dom": "19.3.0"

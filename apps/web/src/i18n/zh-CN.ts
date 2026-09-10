@@ -1,0 +1,32 @@
+import type { MsgKey } from "./keys.ts";
+
+export const zhCN = {
+  queryPlaceholder: "搜索文件内容（正则）",
+  search: "搜索",
+  cancel: "取消",
+  path: "路径前缀",
+  include: "包含 glob",
+  exclude: "排除 glob",
+  regex: "正则",
+  literal: "字面量",
+  caseSensitive: "区分大小写",
+  wordMatch: "整词",
+  hidden: "隐藏文件",
+  emptyHint: "输入查询并按 ⌘⏎ 搜索",
+  noResults: "没有匹配",
+  truncated: "结果已截断",
+  copyPath: "复制路径",
+  tokenPrompt: "输入访问令牌",
+  tokenSubmit: "继续",
+  literalEngineBanner:
+    "未找到 ripgrep，已降级为字面量搜索（不读取 gitignore，不支持正则）",
+  engineNoneBanner: "未找到 ripgrep，搜索不可用",
+  loading: "搜索中…",
+  cancelled: "已取消",
+  timedOut: "超时",
+  resultsStatus: "{matchCount} 条结果 · {fileCount} 个文件 · {elapsedMs} ms",
+  hostNotAllowed: "Host 不被允许；请设置 WEB_GREP_PUBLIC_HOST",
+  searchFailed: "搜索失败",
+  localeZh: "中",
+  localeEn: "EN",
+} as const satisfies Record<MsgKey, string>;
