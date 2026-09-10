@@ -1,6 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SseHit } from "@web-grep/shared";
-import { useEffect, useRef } from "react";
+import { type RefObject, useEffect } from "react";
 import { ResultRow } from "./ResultRow.tsx";
 
 const ROW_HEIGHT = 28;
@@ -9,15 +9,16 @@ export function ResultList({
   hits,
   selectedIndex,
   onSelect,
+  listRef,
 }: {
   hits: SseHit[];
   selectedIndex: number;
   onSelect: (index: number) => void;
+  listRef: RefObject<HTMLDivElement | null>;
 }) {
-  const parentRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: hits.length,
-    getScrollElement: () => parentRef.current,
+    getScrollElement: () => listRef.current,
     estimateSize: () => ROW_HEIGHT,
     overscan: 16,
     initialRect: { width: 800, height: 600 },
@@ -31,7 +32,7 @@ export function ResultList({
   }, [hits.length, selectedIndex, virtualizer]);
 
   return (
-    <div ref={parentRef} className="result-list" role="list">
+    <div ref={listRef} className="result-list" role="list" tabIndex={0}>
       <div
         className="result-list-inner"
         style={{ height: `${virtualizer.getTotalSize()}px` }}

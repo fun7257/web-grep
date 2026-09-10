@@ -1,6 +1,7 @@
 import type { SearchRequestInput } from "@web-grep/shared";
 import { useCallback, useRef, useState } from "react";
 import { EmptyState } from "./components/EmptyState.tsx";
+import { copyRelativePath, FilePreview } from "./components/FilePreview.tsx";
 import { ResultList } from "./components/ResultList.tsx";
 import { SearchBar } from "./components/SearchBar.tsx";
 import {
@@ -53,6 +54,8 @@ function AppShell() {
   const token = useToken();
   const search = useSearch({ onAuthFailure: token.handleAuthFailure });
   const queryRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const previewRef = useRef<HTMLElement>(null);
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<SearchOptionValues>({
     path: "",
@@ -67,6 +70,11 @@ function AppShell() {
 
   const runSearch = search.submit;
   const cancelSearch = search.cancel;
+  const selectedIndexClamped =
+    search.hits.length === 0
+      ? 0
+      : Math.min(selectedIndex, search.hits.length - 1);
+  const selectedHit = search.hits[selectedIndexClamped] ?? null;
 
   const submit = useCallback(() => {
     const input: SearchRequestInput = {
@@ -83,12 +91,21 @@ function AppShell() {
     runSearch(input);
   }, [options, query, runSearch]);
 
+  const copySelectedPath = useCallback(() => {
+    if (selectedHit !== null) {
+      copyRelativePath(selectedHit.path);
+    }
+  }, [selectedHit]);
+
   useHotkeys({
     onSearch: submit,
     onCancel: cancelSearch,
+    onCopyPath: copySelectedPath,
     running: search.status === "running",
     modalOpen: token.promptOpen && !token.hostForbidden,
     queryRef,
+    listRef,
+    previewRef,
     hitCount: search.hits.length,
     setSelectedIndex,
   });
@@ -125,15 +142,23 @@ function AppShell() {
           ) : (
             <ResultList
               hits={search.hits}
-              selectedIndex={Math.min(
-                selectedIndex,
-                Math.max(0, search.hits.length - 1),
-              )}
+              selectedIndex={selectedIndexClamped}
               onSelect={setSelectedIndex}
+              listRef={listRef}
             />
           )}
         </section>
-        <aside className="preview-pane" aria-hidden="true" />
+        <aside
+          className="preview-pane"
+          ref={previewRef}
+          tabIndex={-1}
+          aria-hidden={selectedHit === null}
+        >
+          <FilePreview
+            hit={selectedHit}
+            onAuthFailure={token.handleAuthFailure}
+          />
+        </aside>
       </div>
       <StatusBar
         status={search.status}

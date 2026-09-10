@@ -16,6 +16,7 @@ export const zhCN = {
   noResults: "没有匹配",
   truncated: "结果已截断",
   copyPath: "复制路径",
+  previewBinary: "二进制文件",
   tokenPrompt: "输入访问令牌",
   tokenSubmit: "继续",
   literalEngineBanner:

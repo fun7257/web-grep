@@ -14,6 +14,7 @@ export const MSG_KEYS = [
   "noResults",
   "truncated",
   "copyPath",
+  "previewBinary",
   "tokenPrompt",
   "tokenSubmit",
   "literalEngineBanner",

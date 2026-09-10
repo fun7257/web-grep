@@ -16,6 +16,7 @@ export const enUS = {
   noResults: "No matches",
   truncated: "Results truncated",
   copyPath: "Copy path",
+  previewBinary: "Binary file",
   tokenPrompt: "Enter access token",
   tokenSubmit: "Continue",
   literalEngineBanner:

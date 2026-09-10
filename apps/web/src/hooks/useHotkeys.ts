@@ -18,21 +18,34 @@ function isTypingTarget(target: EventTarget | null): boolean {
   );
 }
 
+function isWithin(
+  root: HTMLElement | null,
+  target: EventTarget | null,
+): boolean {
+  return root !== null && target instanceof Node && root.contains(target);
+}
+
 export function useHotkeys(opts: {
   onSearch: () => void;
   onCancel: () => void;
+  onCopyPath: () => void;
   running: boolean;
   modalOpen: boolean;
   queryRef: RefObject<HTMLInputElement | null>;
+  listRef: RefObject<HTMLElement | null>;
+  previewRef: RefObject<HTMLElement | null>;
   hitCount: number;
   setSelectedIndex: Dispatch<SetStateAction<number>>;
 }): void {
   const {
     onSearch,
     onCancel,
+    onCopyPath,
     running,
     modalOpen,
     queryRef,
+    listRef,
+    previewRef,
     hitCount,
     setSelectedIndex,
   } = opts;
@@ -60,7 +73,7 @@ export function useHotkeys(opts: {
         }
         return;
       }
-      if (isTypingTarget(event.target)) {
+      if (isTypingTarget(event.target) || modalOpen) {
         return;
       }
       if (event.key === "/") {
@@ -73,11 +86,35 @@ export function useHotkeys(opts: {
         setSelectedIndex((index) =>
           hitCount === 0 ? 0 : Math.min(hitCount - 1, index + 1),
         );
+        listRef.current?.focus({ preventScroll: true });
         return;
       }
       if (event.key === "k" || event.key === "ArrowUp") {
         event.preventDefault();
         setSelectedIndex((index) => Math.max(0, index - 1));
+        listRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      const listFocused =
+        isWithin(listRef.current, event.target) ||
+        isWithin(listRef.current, document.activeElement);
+      if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {
+        if (listFocused && hitCount > 0) {
+          event.preventDefault();
+          previewRef.current?.focus();
+        }
+        return;
+      }
+      if (
+        (event.metaKey || event.ctrlKey) &&
+        event.key.toLowerCase() === "c" &&
+        !event.shiftKey &&
+        !event.altKey
+      ) {
+        if (listFocused && hitCount > 0) {
+          event.preventDefault();
+          onCopyPath();
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -86,9 +123,12 @@ export function useHotkeys(opts: {
     };
   }, [
     hitCount,
+    listRef,
     modalOpen,
     onCancel,
+    onCopyPath,
     onSearch,
+    previewRef,
     queryRef,
     running,
     setSelectedIndex,

@@ -116,8 +116,23 @@ function neverSettle(init?: RequestInit): Promise<Response> {
   });
 }
 
+function fileWindowForUrl(url: string) {
+  const parsed = new URL(url, "http://localhost");
+  const path = parsed.searchParams.get("path") ?? "";
+  const line = Number(parsed.searchParams.get("line") ?? "1");
+  return {
+    path,
+    startLine: line,
+    lineCount: 1,
+    truncated: false,
+    binary: false,
+    lines: [{ n: line, text: `${path} line ${line}` }],
+  };
+}
+
 function mockFetch(
   search: (init?: RequestInit) => Promise<Response> | Response,
+  file?: (url: string, init?: RequestInit) => Promise<Response> | Response,
 ): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
@@ -127,12 +142,26 @@ function mockFetch(
     if (url.includes("/api/search")) {
       return Promise.resolve(search(init));
     }
+    if (url.includes("/api/file")) {
+      if (file !== undefined) {
+        return Promise.resolve(file(url, init));
+      }
+      return Promise.resolve(jsonResponse(200, fileWindowForUrl(url)));
+    }
     return Promise.resolve(
       jsonResponse(404, { code: "INTERNAL", message: "not found" }),
     );
   });
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
+}
+
+function fileCalls(
+  fetchMock: ReturnType<typeof vi.fn>,
+): { url: string; init?: RequestInit }[] {
+  return fetchMock.mock.calls
+    .filter((call) => requestUrl(call[0]).includes("/api/file"))
+    .map((call) => ({ url: requestUrl(call[0]), init: call[1] }));
 }
 
 function typeQuery(value: string): void {
@@ -173,6 +202,7 @@ describe("search flow", () => {
         get: () => 800,
       });
     }
+    Element.prototype.scrollIntoView = vi.fn();
   });
 
   afterEach(() => {
@@ -376,5 +406,89 @@ describe("search flow", () => {
     const before = searchCalls();
     fireEvent.keyDown(window, { key: "Enter", metaKey: true });
     expect(searchCalls()).toBe(before);
+  });
+
+  it("aborts the in-flight preview fetch on selection change and ignores a stale response", async () => {
+    let finishFirst: ((res: Response) => void) | undefined;
+    const firstPromise = new Promise<Response>((resolve) => {
+      finishFirst = resolve;
+    });
+    let files = 0;
+    const fetchMock = mockFetch(
+      () =>
+        sseResponse([
+          sseEvent("hit", HIT_A),
+          sseEvent("hit", HIT_B),
+          sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
+        ]),
+      (url) => {
+        files += 1;
+        if (files === 1) {
+          return firstPromise;
+        }
+        return jsonResponse(200, fileWindowForUrl(url));
+      },
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    });
+    await waitFor(() => {
+      expect(fileCalls(fetchMock)).toHaveLength(1);
+    });
+    fireEvent.click(screen.getByText("src/b.ts:3"));
+    await waitFor(() => {
+      expect(screen.getByText("src/b.ts line 3")).toBeTruthy();
+    });
+    const first = fileCalls(fetchMock)[0];
+    expect(first?.init?.signal?.aborted).toBe(true);
+    finishFirst?.(
+      jsonResponse(200, fileWindowForUrl("/api/file?path=src/a.ts&line=1")),
+    );
+    await waitFor(() => {
+      expect(screen.getByText("src/b.ts line 3")).toBeTruthy();
+    });
+    expect(screen.queryByText("src/a.ts line 1")).toBeNull();
+  });
+
+  it("copies the selected relative path from the button and from ⌘C when the list is focused", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Copy path" })).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("src/a.ts line 1")).toBeTruthy();
+    });
+    expect(
+      document.querySelector(".preview-line.current")?.textContent,
+    ).toMatch(/src\/a\.ts line 1/);
+    fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
+    expect(writeText).toHaveBeenCalledWith("src/a.ts");
+
+    writeText.mockClear();
+    const query = screen.getByPlaceholderText("Search file contents (regex)");
+    query.focus();
+    fireEvent.keyDown(query, { key: "c", metaKey: true });
+    expect(writeText).not.toHaveBeenCalled();
+
+    const list = screen.getByRole("list");
+    list.focus();
+    fireEvent.keyDown(list, { key: "c", metaKey: true });
+    expect(writeText).toHaveBeenCalledWith("src/a.ts");
   });
 });
