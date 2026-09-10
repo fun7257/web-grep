@@ -292,4 +292,89 @@ describe("search flow", () => {
       /Enter access token/,
     );
   });
+
+  it("keeps previous hits when a later submit returns 401", async () => {
+    let searches = 0;
+    mockFetch(() => {
+      searches += 1;
+      if (searches === 1) {
+        return sseResponse([
+          sseEvent("hit", HIT_A),
+          sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+        ]);
+      }
+      return jsonResponse(401, {
+        code: "UNAUTHORIZED",
+        message: "missing or invalid token",
+      });
+    });
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByText("src/a.ts:1")).toBeTruthy();
+    });
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeTruthy();
+    });
+    expect(screen.getByText("src/a.ts:1")).toBeTruthy();
+  });
+
+  it("sends a brace glob as one include pattern", async () => {
+    const fetchMock = mockFetch((init) => neverSettle(init));
+    render(<App />);
+    typeQuery("needle");
+    fireEvent.change(screen.getByLabelText("Include glob"), {
+      target: { value: "*.{ts,tsx}, *.md" },
+    });
+    clickSearch();
+    await waitFor(() => {
+      const call = fetchMock.mock.calls.find(
+        (entry) =>
+          typeof entry[0] === "string" && entry[0].includes("/api/search"),
+      );
+      expect(call).toBeTruthy();
+      const raw = call?.[1]?.body;
+      expect(typeof raw).toBe("string");
+      if (typeof raw !== "string") {
+        return;
+      }
+      const body = JSON.parse(raw) as { globInclude: string[] };
+      expect(body.globInclude).toEqual(["*.{ts,tsx}", "*.md"]);
+    });
+  });
+
+  it("blurs the query on Escape when not running", () => {
+    mockFetch((init) => neverSettle(init));
+    render(<App />);
+    const input = screen.getByPlaceholderText("Search file contents (regex)");
+    input.focus();
+    expect(document.activeElement).toBe(input);
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(document.activeElement === input).toBe(false);
+  });
+
+  it("does not search on ⌘Enter while the token prompt is open", async () => {
+    const fetchMock = mockFetch(() =>
+      jsonResponse(401, {
+        code: "UNAUTHORIZED",
+        message: "missing or invalid token",
+      }),
+    );
+    render(<App />);
+    typeQuery("needle");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeTruthy();
+    });
+    const searchCalls = (): number =>
+      fetchMock.mock.calls.filter(
+        (entry) =>
+          typeof entry[0] === "string" && entry[0].includes("/api/search"),
+      ).length;
+    const before = searchCalls();
+    fireEvent.keyDown(window, { key: "Enter", metaKey: true });
+    expect(searchCalls()).toBe(before);
+  });
 });

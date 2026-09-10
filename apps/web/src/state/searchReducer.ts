@@ -12,6 +12,7 @@ export type SearchState = {
 
 export type SearchAction =
   | { type: "search/start" }
+  | { type: "search/stream" }
   | { type: "search/meta"; meta: SseMeta }
   | { type: "search/hit"; hit: SseHit }
   | { type: "search/done"; done: SseDone }
@@ -32,7 +33,15 @@ export function searchReducer(
 ): SearchState {
   switch (action.type) {
     case "search/start":
-      return { ...initialSearchState, status: "running" };
+      return {
+        ...state,
+        status: "running",
+        meta: null,
+        done: null,
+        error: null,
+      };
+    case "search/stream":
+      return { ...state, hits: [] };
     case "search/meta":
       return { ...state, meta: action.meta };
     case "search/hit":
@@ -44,7 +53,6 @@ export function searchReducer(
         done: action.done,
       };
     case "search/error":
-      // Keep already-rendered hits when the stream errors after hits.
       return { ...state, status: "error", error: action.error };
     case "search/cancelled":
       return { ...state, status: "cancelled" };

@@ -43,10 +43,15 @@ export function useSearch(opts?: {
 
     void (async () => {
       let sawTerminal = false;
+      let streamStarted = false;
       try {
         for await (const event of streamSearch(input, ac.signal)) {
           if (gen !== genRef.current) {
             return;
+          }
+          if (!streamStarted) {
+            streamStarted = true;
+            dispatch({ type: "search/stream" });
           }
           if (event.event === "meta") {
             dispatch({ type: "search/meta", meta: event.data });

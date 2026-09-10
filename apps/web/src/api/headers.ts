@@ -12,7 +12,6 @@ export function writeToken(token: string): void {
   sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
 }
 
-/** Token lives in sessionStorage only — never localStorage or the URL. */
 export function apiHeaders(): Record<string, string> {
   const token = readToken();
   if (token === "") {

@@ -22,16 +22,27 @@ export function useHotkeys(opts: {
   onSearch: () => void;
   onCancel: () => void;
   running: boolean;
+  modalOpen: boolean;
   queryRef: RefObject<HTMLInputElement | null>;
   hitCount: number;
   setSelectedIndex: Dispatch<SetStateAction<number>>;
 }): void {
-  const { onSearch, onCancel, running, queryRef, hitCount, setSelectedIndex } =
-    opts;
+  const {
+    onSearch,
+    onCancel,
+    running,
+    modalOpen,
+    queryRef,
+    hitCount,
+    setSelectedIndex,
+  } = opts;
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        if (modalOpen) {
+          return;
+        }
         event.preventDefault();
         onSearch();
         return;
@@ -40,6 +51,12 @@ export function useHotkeys(opts: {
         if (running) {
           event.preventDefault();
           onCancel();
+          return;
+        }
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && isTypingTarget(active)) {
+          event.preventDefault();
+          active.blur();
         }
         return;
       }
@@ -67,5 +84,13 @@ export function useHotkeys(opts: {
     return () => {
       window.removeEventListener("keydown", onKeyDown);
     };
-  }, [hitCount, onCancel, onSearch, queryRef, running, setSelectedIndex]);
+  }, [
+    hitCount,
+    modalOpen,
+    onCancel,
+    onSearch,
+    queryRef,
+    running,
+    setSelectedIndex,
+  ]);
 }

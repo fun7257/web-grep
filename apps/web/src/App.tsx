@@ -15,13 +15,38 @@ import { useSearch } from "./hooks/useSearch.ts";
 import { useToken } from "./hooks/useToken.ts";
 
 function splitGlobs(raw: string): string[] {
-  if (raw.trim() === "") {
-    return [];
+  const out: string[] = [];
+  let current = "";
+  let braceDepth = 0;
+  const flush = (): void => {
+    const trimmed = current.trim();
+    if (trimmed !== "") {
+      out.push(trimmed);
+    }
+    current = "";
+  };
+  for (const ch of raw) {
+    if (ch === "{") {
+      braceDepth += 1;
+      current += ch;
+      continue;
+    }
+    if (ch === "}" && braceDepth > 0) {
+      braceDepth -= 1;
+      current += ch;
+      continue;
+    }
+    if (
+      braceDepth === 0 &&
+      (ch === "," || ch === " " || ch === "\t" || ch === "\n" || ch === "\r")
+    ) {
+      flush();
+      continue;
+    }
+    current += ch;
   }
-  return raw
-    .split(",")
-    .map((part) => part.trim())
-    .filter((part) => part.length > 0);
+  flush();
+  return out;
 }
 
 function AppShell() {
@@ -62,6 +87,7 @@ function AppShell() {
     onSearch: submit,
     onCancel: cancelSearch,
     running: search.status === "running",
+    modalOpen: token.promptOpen && !token.hostForbidden,
     queryRef,
     hitCount: search.hits.length,
     setSelectedIndex,
