@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { authMiddleware, hostOriginMiddleware } from "./auth.ts";
 import type { Config, EngineKind } from "./config.ts";
+import { registerFileRoutes } from "./routes/file.ts";
 import { registerHealthRoutes } from "./routes/health.ts";
 import { registerMetaRoutes } from "./routes/meta.ts";
 import { registerSearchRoutes } from "./routes/search.ts";
@@ -31,5 +32,6 @@ export function createApp(deps: AppDeps): Hono {
   app.use("/api/*", authMiddleware(deps.config));
   registerMetaRoutes(app, deps.config, deps.engine, deps.rgVersion ?? null);
   registerSearchRoutes(app, search);
+  registerFileRoutes(app, deps.config);
   return app;
 }
