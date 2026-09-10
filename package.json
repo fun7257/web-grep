@@ -12,6 +12,8 @@
     "dev:shared": "pnpm --filter @web-grep/shared dev",
     "dev:server": "pnpm --filter @web-grep/server dev",
     "dev:web": "pnpm --filter @web-grep/web dev",
+    "build": "tsc -b --force && pnpm --filter @web-grep/web build",
+    "start": "pnpm --filter @web-grep/server start",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "lint": "oxlint --type-aware --type-check",

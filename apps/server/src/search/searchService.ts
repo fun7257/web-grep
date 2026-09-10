@@ -4,6 +4,7 @@ import type { Config, EngineKind } from "../config.ts";
 import { log } from "../log.ts";
 import { GlobError, isDenied, sanitizeUserGlob } from "../sandbox/denylist.ts";
 import { PathSandboxError, resolveUnderRoot } from "../sandbox/resolvePath.ts";
+import { LiteralEngine } from "./literalFallback.ts";
 import { RgEngine } from "./rgEngine.ts";
 import { toRelativeHit } from "./toRelativeHit.ts";
 import type {
@@ -57,7 +58,9 @@ export function createSearchService(opts: {
     opts.searchEngine ??
     (opts.engine === "rg" && opts.rgBin !== undefined
       ? new RgEngine(opts.rgBin)
-      : undefined);
+      : opts.engine === "literal"
+        ? new LiteralEngine()
+        : undefined);
 
   const cancel = (searchId: string): void => {
     inflight.get(searchId)?.abort.abort();
@@ -69,11 +72,21 @@ export function createSearchService(opts: {
     },
 
     async preflight(request): Promise<SearchPreflight> {
-      if (opts.engine !== "rg" || searchEngine === undefined) {
+      if (opts.engine === "none" || searchEngine === undefined) {
         return {
           ok: false,
           error: { code: "ENGINE", message: "ripgrep is not available" },
           status: 503,
+        };
+      }
+      if (opts.engine === "literal" && request.regex) {
+        return {
+          ok: false,
+          error: {
+            code: "ENGINE_UNSUPPORTED",
+            message: "regex is not supported without ripgrep",
+          },
+          status: 400,
         };
       }
 
@@ -224,7 +237,11 @@ export function createSearchService(opts: {
         }
 
         if (searchEngine === undefined) {
-          await sendError("ripgrep is not available");
+          await sendError(
+            opts.engine === "literal"
+              ? "search failed"
+              : "ripgrep is not available",
+          );
           return;
         }
 
@@ -339,7 +356,11 @@ export function createSearchService(opts: {
             searchId: pre.searchId,
             code: "ENGINE",
           });
-          await sendError("ripgrep failed");
+          await sendError(
+            searchEngine.kind === "literal"
+              ? "search failed"
+              : "ripgrep failed",
+          );
           return;
         }
         await sendDone({
@@ -358,7 +379,9 @@ export function createSearchService(opts: {
           code: "ENGINE",
           err: err instanceof Error ? err.message : String(err),
         });
-        await sendError("ripgrep failed");
+        await sendError(
+          searchEngine?.kind === "literal" ? "search failed" : "ripgrep failed",
+        );
       } finally {
         clearInterval(heartbeat);
         clearTimeout(timeoutTimer);

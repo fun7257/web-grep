@@ -11,6 +11,7 @@
   "dependencies": {
     "@hono/node-server": "2.1.1",
     "@hono/zod-validator": "0.9.1",
+    "@vscode/ripgrep": "1.18.0",
     "@web-grep/shared": "workspace:*",
     "hono": "4.13.7",
     "picomatch": "4.0.7",

@@ -9,6 +9,7 @@ import {
   createSearchService,
   type SearchService,
 } from "./search/searchService.ts";
+import { registerStaticRoutes } from "./static.ts";
 
 export type AppDeps = {
   config: Config;
@@ -16,6 +17,7 @@ export type AppDeps = {
   rgVersion?: string | null;
   search?: SearchService;
   rgBin?: string;
+  webDist?: string;
 };
 
 export function createApp(deps: AppDeps): Hono {
@@ -33,5 +35,8 @@ export function createApp(deps: AppDeps): Hono {
   registerMetaRoutes(app, deps.config, deps.engine, deps.rgVersion ?? null);
   registerSearchRoutes(app, search);
   registerFileRoutes(app, deps.config);
+  if (deps.webDist !== undefined) {
+    registerStaticRoutes(app, deps.webDist);
+  }
   return app;
 }

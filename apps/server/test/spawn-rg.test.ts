@@ -4,7 +4,13 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { denylistRgGlobs } from "../src/sandbox/denylist.ts";
 import type { RgArgvInput } from "../src/search/spawnRg.ts";
-import { buildRgArgv, detectRgBinary, rgEnv } from "../src/search/spawnRg.ts";
+import {
+  buildRgArgv,
+  detectBundledRg,
+  detectRgBinary,
+  resolveRgBinary,
+  rgEnv,
+} from "../src/search/spawnRg.ts";
 
 function baseArgv(overrides: Partial<RgArgvInput> = {}): string[] {
   return buildRgArgv({
@@ -130,5 +136,11 @@ describe("detectRgBinary", () => {
     dirs.push(dir);
     await mkdir(path.join(dir, "rg"));
     await expect(detectRgBinary(undefined, dir)).resolves.toBeUndefined();
+  });
+
+  it("resolveRgBinary falls back to @vscode/ripgrep when PATH is empty", async () => {
+    const bundled = await detectBundledRg();
+    await expect(resolveRgBinary(undefined, "")).resolves.toBe(bundled);
+    await expect(detectRgBinary(undefined, "")).resolves.toBeUndefined();
   });
 });

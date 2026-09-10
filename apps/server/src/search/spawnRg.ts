@@ -47,6 +47,30 @@ export async function detectRgBinary(
   return undefined;
 }
 
+/**
+ * `@vscode/ripgrep` ships platform binaries as optionalDependencies
+ * (no postinstall network fetch). Missing native package throws on import.
+ */
+export async function detectBundledRg(): Promise<string | undefined> {
+  try {
+    const { rgPath } = await import("@vscode/ripgrep");
+    if (await isExecutableFile(rgPath)) {
+      return rgPath;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+/** WEB_GREP_RG → PATH walk → @vscode/ripgrep rgPath. */
+export async function resolveRgBinary(
+  override: string | undefined,
+  pathEnv: string | undefined = process.env.PATH,
+): Promise<string | undefined> {
+  return (await detectRgBinary(override, pathEnv)) ?? (await detectBundledRg());
+}
+
 export function rgEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     LANG: process.env.LANG ?? "C.UTF-8",
