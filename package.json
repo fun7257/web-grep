@@ -1,0 +1,33 @@
+{
+  "name": "web-grep",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.4.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "predev": "pnpm --filter @web-grep/shared build",
+    "dev": "pnpm run --parallel dev:shared dev:server dev:web",
+    "dev:shared": "pnpm --filter @web-grep/shared dev",
+    "dev:server": "pnpm --filter @web-grep/server dev",
+    "dev:web": "pnpm --filter @web-grep/web dev",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "lint": "oxlint --type-aware --type-check",
+    "format": "biome check --write ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.13",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "24.13.4",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "oxlint": "1.82.0",
+    "oxlint-tsgolint": "7.0.2001",
+    "typescript": "7.0.2",
+    "vite": "8.3.0",
+    "vitest": "5.0.0"
+  }
+}

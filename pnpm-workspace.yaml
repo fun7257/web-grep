@@ -1,0 +1,6 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Exact pins include packages published within pnpm 12's default release-age window.
+minimumReleaseAge: 0
