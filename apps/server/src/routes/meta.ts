@@ -2,10 +2,14 @@ import { LIMITS, type MetaResponse } from "@web-grep/shared";
 import type { Hono } from "hono";
 import type { Config, EngineKind } from "../config.ts";
 
-export function metaPayload(config: Config, engine: EngineKind): MetaResponse {
+export function metaPayload(
+  config: Config,
+  engine: EngineKind,
+  rgVersion: string | null = null,
+): MetaResponse {
   return {
     engine,
-    rgVersion: null,
+    rgVersion,
     rootLabel: config.rootLabel,
     followSymlinks: config.followSymlinks,
     limits: {
@@ -25,6 +29,7 @@ export function registerMetaRoutes(
   app: Hono,
   config: Config,
   engine: EngineKind,
+  rgVersion: string | null = null,
 ): void {
-  app.get("/api/meta", (c) => c.json(metaPayload(config, engine)));
+  app.get("/api/meta", (c) => c.json(metaPayload(config, engine, rgVersion)));
 }

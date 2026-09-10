@@ -1,0 +1,6 @@
+{"type":"begin","data":{"path":{"text":"cjk.txt"}}}
+{"type":"match","data":{"path":{"text":"cjk.txt"},"lines":{"text":"hello 你 world\n"},"line_number":1,"absolute_offset":0,"submatches":[{"match":{"text":"你"},"start":6,"end":9}]}}
+{"type":"match","data":{"path":{"text":"/etc/passwd"},"lines":{"text":"root:x:0:0\n"},"line_number":1,"absolute_offset":0,"submatches":[{"match":{"text":"root"},"start":0,"end":4}]}}
+{"type":"context","data":{"path":{"text":"cjk.txt"},"lines":{"text":"ignored\n"},"line_number":2,"absolute_offset":16,"submatches":[]}}
+{"type":"end","data":{"path":{"text":"cjk.txt"}}}
+{"type":"summary","data":{"elapsed_total":{"secs":0,"nanos":1,"human":"0.000001s"}}}
