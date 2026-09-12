@@ -8,6 +8,8 @@ export {
   type FileQuery,
   type FileQueryInput,
   FileQuerySchema,
+  type FileSliceQuery,
+  FileSliceQuerySchema,
   type FileWindowResponse,
   FileWindowResponseSchema,
 } from "./file.ts";
@@ -23,9 +25,19 @@ export {
   SseHitSchema,
   type SseMeta,
   SseMetaSchema,
+  type SseProgress,
+  SseProgressSchema,
 } from "./searchEvents.ts";
 export {
   type SearchRequest,
   type SearchRequestInput,
   SearchRequestSchema,
 } from "./searchRequest.ts";
+export {
+  type TreeEntry,
+  TreeEntrySchema,
+  type TreeListing,
+  TreeListingSchema,
+  type TreeQuery,
+  TreeQuerySchema,
+} from "./tree.ts";

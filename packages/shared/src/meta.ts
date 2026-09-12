@@ -4,6 +4,7 @@ export const MetaResponseSchema = z.object({
   engine: z.enum(["rg", "literal", "none"]),
   rgVersion: z.string().nullable(),
   rootLabel: z.string(),
+  root: z.string(),
   followSymlinks: z.boolean(),
   limits: z.object({
     maxResults: z.number(),

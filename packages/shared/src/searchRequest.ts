@@ -12,10 +12,10 @@ export const SearchRequestSchema = z.object({
     .array(z.string().max(LIMITS.globMaxChars))
     .max(LIMITS.globMaxCount)
     .default([]),
-  regex: z.boolean().default(true),
-  caseSensitive: z.boolean().default(true),
+  regex: z.boolean().default(false),
+  caseSensitive: z.boolean().default(false),
   wordMatch: z.boolean().default(false),
-  hidden: z.boolean().default(false),
+  hidden: z.boolean().default(true),
   maxResults: z.number().int().positive().max(LIMITS.maxResultsHard).optional(),
 });
 export type SearchRequestInput = z.input<typeof SearchRequestSchema>;

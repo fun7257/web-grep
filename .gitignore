@@ -1,6 +1,7 @@
 node_modules
 dist
 .env
+apps/server/web-grep
 coverage
 .DS_Store
 *.log
@@ -9,5 +10,6 @@ coverage
 .output
 .turbo
 .idea
+.tmp-ui
 .vscode/*
 !.vscode/extensions.json

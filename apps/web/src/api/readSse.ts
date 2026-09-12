@@ -4,6 +4,7 @@ import {
   type SseEvent,
   SseHitSchema,
   SseMetaSchema,
+  SseProgressSchema,
 } from "@web-grep/shared";
 
 function parseSseFrame(frame: string): SseEvent | "skip" | "malformed" {
@@ -38,6 +39,12 @@ function parseSseFrame(frame: string): SseEvent | "skip" | "malformed" {
   if (eventName === "meta") {
     const parsed = SseMetaSchema.safeParse(json);
     return parsed.success ? { event: "meta", data: parsed.data } : "malformed";
+  }
+  if (eventName === "progress") {
+    const parsed = SseProgressSchema.safeParse(json);
+    return parsed.success
+      ? { event: "progress", data: parsed.data }
+      : "malformed";
   }
   if (eventName === "hit") {
     const parsed = SseHitSchema.safeParse(json);

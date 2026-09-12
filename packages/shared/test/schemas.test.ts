@@ -2,9 +2,12 @@ import { describe, expect, it } from "vitest";
 import {
   ErrorCodeSchema,
   FileQuerySchema,
+  FileSliceQuerySchema,
+  FileWindowResponseSchema,
   LIMITS,
   SearchRequestSchema,
   SseMetaSchema,
+  TreeListingSchema,
 } from "../src/index.ts";
 
 describe("SearchRequestSchema", () => {
@@ -22,8 +25,10 @@ describe("SearchRequestSchema", () => {
 
   it("rejects maxResults above the hard cap", () => {
     expect(
-      SearchRequestSchema.safeParse({ query: "foo", maxResults: 99_999 })
-        .success,
+      SearchRequestSchema.safeParse({
+        query: "foo",
+        maxResults: LIMITS.maxResultsHard + 1,
+      }).success,
     ).toBe(false);
   });
 
@@ -33,10 +38,10 @@ describe("SearchRequestSchema", () => {
     expect(parsed.path).toBe("");
     expect(parsed.globInclude).toEqual([]);
     expect(parsed.globExclude).toEqual([]);
-    expect(parsed.regex).toBe(true);
-    expect(parsed.caseSensitive).toBe(true);
+    expect(parsed.regex).toBe(false);
+    expect(parsed.caseSensitive).toBe(false);
     expect(parsed.wordMatch).toBe(false);
-    expect(parsed.hidden).toBe(false);
+    expect(parsed.hidden).toBe(true);
     expect(parsed.maxResults).toBeUndefined();
   });
 });
@@ -91,6 +96,43 @@ describe("FileQuerySchema", () => {
         after: LIMITS.beforeAfterMax + 1,
       }).success,
     ).toBe(false);
+  });
+});
+
+describe("FileSliceQuerySchema", () => {
+  it("accepts path plus from/count", () => {
+    const parsed = FileSliceQuerySchema.parse({
+      path: "src/app.ts",
+      from: 1,
+      count: LIMITS.previewChunk,
+    });
+    expect(parsed.from).toBe(1);
+    expect(parsed.count).toBe(LIMITS.previewChunk);
+  });
+});
+
+describe("FileWindowResponseSchema", () => {
+  it("defaults eof to false", () => {
+    const parsed = FileWindowResponseSchema.parse({
+      path: "a.ts",
+      startLine: 1,
+      lineCount: 1,
+      truncated: false,
+      binary: false,
+      lines: [{ n: 1, text: "x" }],
+    });
+    expect(parsed.eof).toBe(false);
+  });
+});
+
+describe("TreeListingSchema", () => {
+  it("parses a directory listing", () => {
+    const parsed = TreeListingSchema.parse({
+      path: "",
+      truncated: false,
+      entries: [{ name: "src", path: "src", dir: true }],
+    });
+    expect(parsed.entries[0]?.dir).toBe(true);
   });
 });
 

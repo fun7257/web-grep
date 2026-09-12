@@ -1,27 +1,67 @@
-import type { JsonError, MetaResponse, SseDone } from "@web-grep/shared";
+import type {
+  JsonError,
+  MetaResponse,
+  SseDone,
+  SseProgress,
+} from "@web-grep/shared";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
+
+export function LocaleToggle() {
+  const { locale, setLocale, t } = useLocale();
+  return (
+    <div className="locale-toggle">
+      <button
+        type="button"
+        aria-pressed={locale === "zh-CN"}
+        onClick={() => {
+          setLocale("zh-CN");
+        }}
+      >
+        {t("localeZh")}
+      </button>
+      <span aria-hidden="true">/</span>
+      <button
+        type="button"
+        aria-pressed={locale === "en-US"}
+        onClick={() => {
+          setLocale("en-US");
+        }}
+      >
+        {t("localeEn")}
+      </button>
+    </div>
+  );
+}
 
 export function StatusBar({
   status,
   done,
+  progress,
   error,
   hostForbidden,
   meta,
 }: {
   status: SearchStatus;
   done: SseDone | null;
+  progress: SseProgress | null;
   error: JsonError | null;
   hostForbidden: boolean;
   meta: MetaResponse | null;
 }) {
-  const { locale, setLocale, t } = useLocale();
+  const { t } = useLocale();
 
   let text = "";
   if (hostForbidden) {
     text = t("hostNotAllowed");
   } else if (status === "running") {
-    text = t("loading");
+    text =
+      progress !== null
+        ? t("searchProgress", {
+            files: progress.files,
+            matches: progress.matches,
+          })
+        : t("loading");
   } else if (status === "cancelled") {
     text = t("cancelled");
   } else if (status === "error") {
@@ -51,8 +91,12 @@ export function StatusBar({
     !isAlert &&
     (status === "running" || status === "cancelled" || status === "done");
 
+  if (text === "" && meta?.engine !== "literal" && meta?.engine !== "none") {
+    return null;
+  }
+
   return (
-    <footer className="status-bar">
+    <div className="status-bar" data-status={status}>
       <div
         className="status-text"
         role={isAlert ? "alert" : isStatus ? "status" : undefined}
@@ -66,27 +110,6 @@ export function StatusBar({
       {meta?.engine === "none" ? (
         <div className="status-banner">{t("engineNoneBanner")}</div>
       ) : null}
-      <div className="locale-toggle">
-        <button
-          type="button"
-          aria-pressed={locale === "zh-CN"}
-          onClick={() => {
-            setLocale("zh-CN");
-          }}
-        >
-          {t("localeZh")}
-        </button>
-        <span aria-hidden="true">/</span>
-        <button
-          type="button"
-          aria-pressed={locale === "en-US"}
-          onClick={() => {
-            setLocale("en-US");
-          }}
-        >
-          {t("localeEn")}
-        </button>
-      </div>
-    </footer>
+    </div>
   );
 }

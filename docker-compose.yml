@@ -1,0 +1,22 @@
+# Bind 0.0.0.0 requires both a token and WEB_GREP_PUBLIC_HOST.
+# Open http://localhost:8787 and put the token in the prompt.
+#
+#   docker compose up --build
+#   WEB_GREP_DATA=/var/log docker compose up --build
+
+services:
+  web-grep:
+    build: .
+    ports:
+      - "8787:8787"
+    environment:
+      WEB_GREP_ROOT: /data
+      WEB_GREP_HOST: 0.0.0.0
+      WEB_GREP_PORT: "8787"
+      WEB_GREP_TOKEN: changeme
+      WEB_GREP_PUBLIC_HOST: localhost
+      WEB_GREP_RG: /usr/bin/rg
+      WEB_GREP_WEB_DIST: /app/web
+    volumes:
+      - ${WEB_GREP_DATA:-./}:/data:ro
+    restart: unless-stopped

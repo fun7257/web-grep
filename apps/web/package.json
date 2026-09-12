@@ -11,6 +11,8 @@
   "dependencies": {
     "@tanstack/react-virtual": "3.14.10",
     "@web-grep/shared": "workspace:*",
+    "dompurify": "3.2.6",
+    "marked": "15.0.12",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

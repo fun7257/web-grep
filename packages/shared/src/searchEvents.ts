@@ -33,8 +33,15 @@ export type SseDone = z.output<typeof SseDoneSchema>;
 export const SseErrorSchema = JsonErrorSchema;
 export type SseError = z.output<typeof SseErrorSchema>;
 
+export const SseProgressSchema = z.object({
+  files: z.number().int().nonnegative(),
+  matches: z.number().int().nonnegative(),
+});
+export type SseProgress = z.output<typeof SseProgressSchema>;
+
 export type SseEvent =
   | { event: "meta"; data: SseMeta }
+  | { event: "progress"; data: SseProgress }
   | { event: "hit"; data: SseHit }
   | { event: "done"; data: SseDone }
   | { event: "error"; data: SseError };

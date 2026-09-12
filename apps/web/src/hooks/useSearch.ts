@@ -1,4 +1,4 @@
-import type { SearchRequestInput } from "@web-grep/shared";
+import type { SearchRequestInput, SseHit } from "@web-grep/shared";
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { SearchHttpError, streamSearch } from "../api/searchClient.ts";
 import {
@@ -15,8 +15,12 @@ function isAbortError(err: unknown): boolean {
 }
 
 export type UseSearch = SearchState & {
-  submit: (input: SearchRequestInput) => void;
+  submit: (
+    input: SearchRequestInput,
+    opts?: { acceptHit?: (hit: SseHit) => boolean },
+  ) => void;
   cancel: () => void;
+  reset: () => void;
 };
 
 export function useSearch(opts?: {
@@ -34,7 +38,17 @@ export function useSearch(opts?: {
     abortRef.current?.abort();
   }, []);
 
-  const submit = useCallback((input: SearchRequestInput) => {
+  const reset = useCallback(() => {
+    genRef.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    dispatch({ type: "search/reset" });
+  }, []);
+
+  const submit = useCallback((
+    input: SearchRequestInput,
+    filter?: { acceptHit?: (hit: SseHit) => boolean },
+  ) => {
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -44,6 +58,9 @@ export function useSearch(opts?: {
     void (async () => {
       let sawTerminal = false;
       let streamStarted = false;
+      let kept = 0;
+      const files = new Set<string>();
+      const accept = filter?.acceptHit;
       try {
         for await (const event of streamSearch(input, ac.signal)) {
           if (gen !== genRef.current) {
@@ -55,11 +72,28 @@ export function useSearch(opts?: {
           }
           if (event.event === "meta") {
             dispatch({ type: "search/meta", meta: event.data });
+          } else if (event.event === "progress") {
+            dispatch({ type: "search/progress", progress: event.data });
           } else if (event.event === "hit") {
+            if (accept !== undefined && !accept(event.data)) {
+              continue;
+            }
+            kept += 1;
+            files.add(event.data.path);
             dispatch({ type: "search/hit", hit: event.data });
           } else if (event.event === "done") {
             sawTerminal = true;
-            dispatch({ type: "search/done", done: event.data });
+            dispatch({
+              type: "search/done",
+              done:
+                accept === undefined
+                  ? event.data
+                  : {
+                      ...event.data,
+                      matchCount: kept,
+                      fileCount: files.size,
+                    },
+            });
           } else if (event.event === "error") {
             sawTerminal = true;
             dispatch({ type: "search/error", error: event.data });
@@ -97,5 +131,5 @@ export function useSearch(opts?: {
     })();
   }, []);
 
-  return { ...state, submit, cancel };
+  return { ...state, submit, cancel, reset };
 }

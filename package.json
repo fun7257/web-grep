@@ -8,14 +8,14 @@
   },
   "scripts": {
     "predev": "pnpm --filter @web-grep/shared build",
-    "dev": "pnpm run --parallel dev:shared dev:server dev:web",
+    "dev": "bash scripts/dev.sh",
     "dev:shared": "pnpm --filter @web-grep/shared dev",
-    "dev:server": "pnpm --filter @web-grep/server dev",
+    "dev:server": "WEB_GREP_DEV=1 go run -C apps/server ./cmd/web-grep",
     "dev:web": "pnpm --filter @web-grep/web dev",
-    "build": "tsc -b --force && pnpm --filter @web-grep/web build",
-    "start": "pnpm --filter @web-grep/server start",
+    "build": "tsc -b --force && pnpm --filter @web-grep/web build && mkdir -p dist && go build -C apps/server -o ../../dist/web-grep ./cmd/web-grep",
+    "start": "./dist/web-grep",
     "typecheck": "tsc -b",
-    "test": "vitest run",
+    "test": "vitest run && go test -C apps/server ./...",
     "lint": "oxlint --type-aware --type-check",
     "format": "biome check --write ."
   },
@@ -32,5 +32,8 @@
     "jsdom": "30.0.1",
     "vite": "8.3.0",
     "vitest": "5.0.0"
+  },
+  "optionalDependencies": {
+    "@vscode/ripgrep": "1.18.0"
   }
 }

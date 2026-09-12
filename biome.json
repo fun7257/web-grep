@@ -14,7 +14,8 @@
       "!**/dist",
       "!**/node_modules",
       "!**/coverage",
-      "!**/pnpm-lock.yaml"
+      "!**/pnpm-lock.yaml",
+      "!**/apps/server/**"
     ]
   }
 }

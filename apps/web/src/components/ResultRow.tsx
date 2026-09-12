@@ -1,5 +1,6 @@
 import type { SseHit } from "@web-grep/shared";
-import { type ReactNode } from "react";
+import { memo, type ReactNode } from "react";
+import { FileIcon } from "./icons.tsx";
 
 type MatchSpan = { start: number; end: number };
 
@@ -48,29 +49,41 @@ export function HighlightedText({
   return <>{parts}</>;
 }
 
-export function ResultRow({
+export const ResultRow = memo(function ResultRow({
   hit,
   selected,
+  index,
   onSelect,
 }: {
   hit: SseHit;
   selected: boolean;
-  onSelect: () => void;
+  index: number;
+  onSelect: (index: number) => void;
 }) {
+  const slash = hit.path.lastIndexOf("/");
+  const dir = slash === -1 ? "" : hit.path.slice(0, slash + 1);
+  const file = slash === -1 ? hit.path : hit.path.slice(slash + 1);
   return (
     <button
       type="button"
       role="listitem"
       className={selected ? "result-row selected" : "result-row"}
       aria-current={selected ? "true" : undefined}
-      onClick={onSelect}
+      onClick={() => {
+        onSelect(index);
+      }}
     >
-      <span className="result-loc">
-        {hit.path}:{hit.line}
-      </span>
+      <div className="result-row-head">
+        <FileIcon path={hit.path} />
+        <span className="result-loc">
+          <span className="result-dir">{dir}</span>
+          <span className="result-file">{file}</span>
+          <span className="result-line">{`:${hit.line}`}</span>
+        </span>
+      </div>
       <span className="result-text">
         <HighlightedText text={hit.text} matches={hit.matches} />
       </span>
     </button>
   );
-}
+});

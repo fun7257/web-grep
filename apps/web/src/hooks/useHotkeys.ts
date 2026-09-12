@@ -29,6 +29,7 @@ export function useHotkeys(opts: {
   onSearch: () => void;
   onCancel: () => void;
   onCopyPath: () => void;
+  onToggleHelp?: () => void;
   running: boolean;
   modalOpen: boolean;
   queryRef: RefObject<HTMLInputElement | null>;
@@ -41,6 +42,7 @@ export function useHotkeys(opts: {
     onSearch,
     onCancel,
     onCopyPath,
+    onToggleHelp,
     running,
     modalOpen,
     queryRef,
@@ -79,6 +81,11 @@ export function useHotkeys(opts: {
       if (event.key === "/") {
         event.preventDefault();
         queryRef.current?.focus();
+        return;
+      }
+      if (event.key === "?") {
+        event.preventDefault();
+        onToggleHelp?.();
         return;
       }
       if (event.key === "j" || event.key === "ArrowDown") {
@@ -128,6 +135,7 @@ export function useHotkeys(opts: {
     onCancel,
     onCopyPath,
     onSearch,
+    onToggleHelp,
     previewRef,
     queryRef,
     running,

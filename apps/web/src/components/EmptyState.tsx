@@ -1,6 +1,7 @@
 import type { JsonError, SseDone } from "@web-grep/shared";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
+import { IconSearch } from "./icons.tsx";
 
 export function EmptyState({
   status,
@@ -41,5 +42,13 @@ export function EmptyState({
   if (status === "done" && (done?.matchCount === 0 || hitCount === 0)) {
     return <div className="empty-state">{t("noResults")}</div>;
   }
-  return <div className="empty-state">{t("emptyHint")}</div>;
+  return (
+    <div className="empty-state empty-idle">
+      <div className="empty-icon">
+        <IconSearch />
+      </div>
+      <p className="empty-lead">{t("queryPlaceholder")}</p>
+      <p>{t("emptyHint")}</p>
+    </div>
+  );
 }

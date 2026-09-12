@@ -5,13 +5,20 @@ import {
 import { apiHeaders } from "./headers.ts";
 import { readJsonError, SearchHttpError } from "./searchClient.ts";
 
+export const PREVIEW_CHUNK = 160;
+
 export async function fetchFileWindow(
-  query: { path: string; line: number },
+  query: { path: string; from?: number; count?: number; tail?: boolean },
   signal: AbortSignal,
 ): Promise<FileWindowResponse> {
   const params = new URLSearchParams();
   params.set("path", query.path);
-  params.set("line", String(query.line));
+  if (query.tail === true) {
+    params.set("tail", "1");
+  } else if (query.from !== undefined) {
+    params.set("from", String(query.from));
+  }
+  params.set("count", String(query.count ?? PREVIEW_CHUNK));
   const res = await fetch(`/api/file?${params.toString()}`, {
     headers: apiHeaders(),
     signal,

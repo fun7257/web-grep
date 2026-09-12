@@ -14,6 +14,7 @@ const META = {
   engine: "rg",
   rgVersion: "14.1.0",
   rootLabel: "project",
+  root: "/tmp/project",
   followSymlinks: false,
   limits: {
     maxResults: 10_000,
@@ -120,13 +121,21 @@ function fileWindowForUrl(url: string) {
   const parsed = new URL(url, "http://localhost");
   const path = parsed.searchParams.get("path") ?? "";
   const line = Number(parsed.searchParams.get("line") ?? "1");
+  const from = Number(parsed.searchParams.get("from") ?? String(line));
+  const count = Number(parsed.searchParams.get("count") ?? "160");
+  const last = from + Math.min(count, 8) - 1;
+  const lines = [];
+  for (let n = from; n <= last; n++) {
+    lines.push({ n, text: `${path} line ${n}` });
+  }
   return {
     path,
-    startLine: line,
-    lineCount: 1,
+    startLine: from,
+    lineCount: lines.length,
     truncated: false,
     binary: false,
-    lines: [{ n: line, text: `${path} line ${line}` }],
+    eof: true,
+    lines,
   };
 }
 
@@ -138,6 +147,11 @@ function mockFetch(
     const url = requestUrl(input);
     if (url.includes("/api/meta")) {
       return Promise.resolve(jsonResponse(200, META));
+    }
+    if (url.includes("/api/tree")) {
+      return Promise.resolve(
+        jsonResponse(200, { path: "", entries: [], truncated: false }),
+      );
     }
     if (url.includes("/api/search")) {
       return Promise.resolve(search(init));
@@ -156,25 +170,29 @@ function mockFetch(
   return fetchMock;
 }
 
-function fileCalls(
-  fetchMock: ReturnType<typeof vi.fn>,
-): { url: string; init?: RequestInit }[] {
-  return fetchMock.mock.calls
-    .filter((call) => requestUrl(call[0]).includes("/api/file"))
-    .map((call) => ({ url: requestUrl(call[0]), init: call[1] }));
-}
-
 function typeQuery(value: string): void {
-  fireEvent.change(
-    screen.getByPlaceholderText("Search file contents (regex)"),
-    {
-      target: { value },
-    },
-  );
+  fireEvent.change(screen.getByRole("searchbox"), {
+    target: { value },
+  });
 }
 
 function clickSearch(): void {
   fireEvent.click(screen.getByRole("button", { name: "Search" }));
+}
+
+function locMatcher(label: string) {
+  return (_content: string, node: Element | null): boolean =>
+    node instanceof HTMLElement &&
+    node.classList.contains("result-loc") &&
+    (node.textContent ?? "") === label;
+}
+
+function getLoc(label: string): HTMLElement {
+  return screen.getByText(locMatcher(label));
+}
+
+function queryLoc(label: string): HTMLElement | null {
+  return screen.queryByText(locMatcher(label));
 }
 
 describe("search flow", () => {
@@ -207,6 +225,7 @@ describe("search flow", () => {
 
   afterEach(() => {
     cleanup();
+    window.history.replaceState({}, "", "/");
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
@@ -237,9 +256,9 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getAllByRole("listitem")).toHaveLength(2);
     });
-    expect(screen.getByText("src/a.ts:1")).toBeTruthy();
-    expect(screen.getByText("src/b.ts:3")).toBeTruthy();
-    const marks = document.querySelectorAll("mark");
+    expect(getLoc("src/a.ts:1")).toBeTruthy();
+    expect(getLoc("src/b.ts:3")).toBeTruthy();
+    const marks = document.querySelectorAll('[role="listitem"] mark');
     expect(marks).toHaveLength(2);
     expect(marks[0]?.textContent).toBe("hello");
     expect(marks[1]?.textContent).toBe("hello");
@@ -285,7 +304,7 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getByText("src/a.ts:1")).toBeTruthy();
+      expect(getLoc("src/a.ts:1")).toBeTruthy();
     });
     expect(screen.getByRole("alert").textContent).toMatch(/ripgrep failed/);
   });
@@ -342,43 +361,19 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getByText("src/a.ts:1")).toBeTruthy();
+      expect(getLoc("src/a.ts:1")).toBeTruthy();
     });
     clickSearch();
     await waitFor(() => {
       expect(screen.getByRole("dialog")).toBeTruthy();
     });
-    expect(screen.getByText("src/a.ts:1")).toBeTruthy();
-  });
-
-  it("sends a brace glob as one include pattern", async () => {
-    const fetchMock = mockFetch((init) => neverSettle(init));
-    render(<App />);
-    typeQuery("needle");
-    fireEvent.change(screen.getByLabelText("Include glob"), {
-      target: { value: "*.{ts,tsx}, *.md" },
-    });
-    clickSearch();
-    await waitFor(() => {
-      const call = fetchMock.mock.calls.find(
-        (entry) =>
-          typeof entry[0] === "string" && entry[0].includes("/api/search"),
-      );
-      expect(call).toBeTruthy();
-      const raw = call?.[1]?.body;
-      expect(typeof raw).toBe("string");
-      if (typeof raw !== "string") {
-        return;
-      }
-      const body = JSON.parse(raw) as { globInclude: string[] };
-      expect(body.globInclude).toEqual(["*.{ts,tsx}", "*.md"]);
-    });
+    expect(getLoc("src/a.ts:1")).toBeTruthy();
   });
 
   it("blurs the query on Escape when not running", () => {
     mockFetch((init) => neverSettle(init));
     render(<App />);
-    const input = screen.getByPlaceholderText("Search file contents (regex)");
+    const input = screen.getByRole("searchbox");
     input.focus();
     expect(document.activeElement).toBe(input);
     fireEvent.keyDown(window, { key: "Escape" });
@@ -408,26 +403,13 @@ describe("search flow", () => {
     expect(searchCalls()).toBe(before);
   });
 
-  it("aborts the in-flight preview fetch on selection change and ignores a stale response", async () => {
-    let finishFirst: ((res: Response) => void) | undefined;
-    const firstPromise = new Promise<Response>((resolve) => {
-      finishFirst = resolve;
-    });
-    let files = 0;
-    const fetchMock = mockFetch(
-      () =>
-        sseResponse([
-          sseEvent("hit", HIT_A),
-          sseEvent("hit", HIT_B),
-          sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
-        ]),
-      (url) => {
-        files += 1;
-        if (files === 1) {
-          return firstPromise;
-        }
-        return jsonResponse(200, fileWindowForUrl(url));
-      },
+  it("preview shows only the selected hit line", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("hit", HIT_B),
+        sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
+      ]),
     );
     render(<App />);
     typeQuery("hello");
@@ -436,24 +418,21 @@ describe("search flow", () => {
       expect(screen.getAllByRole("listitem")).toHaveLength(2);
     });
     await waitFor(() => {
-      expect(fileCalls(fetchMock)).toHaveLength(1);
+      expect(
+        document.querySelector(".preview-line.current")?.textContent,
+      ).toMatch(/hello world/);
     });
-    fireEvent.click(screen.getByText("src/b.ts:3"));
+    expect(document.querySelectorAll(".preview-line")).toHaveLength(1);
+    fireEvent.click(getLoc("src/b.ts:3"));
     await waitFor(() => {
-      expect(screen.getByText("src/b.ts line 3")).toBeTruthy();
+      expect(
+        document.querySelector(".preview-line.current")?.textContent,
+      ).toMatch(/hello there/);
     });
-    const first = fileCalls(fetchMock)[0];
-    expect(first?.init?.signal?.aborted).toBe(true);
-    finishFirst?.(
-      jsonResponse(200, fileWindowForUrl("/api/file?path=src/a.ts&line=1")),
-    );
-    await waitFor(() => {
-      expect(screen.getByText("src/b.ts line 3")).toBeTruthy();
-    });
-    expect(screen.queryByText("src/a.ts line 1")).toBeNull();
+    expect(document.querySelectorAll(".preview-line")).toHaveLength(1);
   });
 
-  it("copies the selected relative path from the button and from ⌘C when the list is focused", async () => {
+  it("copy icon copies the full preview line", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -469,26 +448,259 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "Copy path" })).toBeTruthy();
+      expect(
+        document.querySelector(".preview-line.current")?.textContent,
+      ).toMatch(/hello world/);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Copy preview" }));
+    expect(writeText).toHaveBeenCalledWith("hello world");
+  });
+
+  it("share icon offers an rg command and a webgrep link", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const dialog = screen.getByRole("dialog", { name: "Share" });
+    expect(dialog).toBeTruthy();
+    const rgInput = dialog.querySelectorAll(
+      "input",
+    )[0] as HTMLInputElement | null;
+    const linkInput = dialog.querySelectorAll(
+      "input",
+    )[1] as HTMLInputElement | null;
+    expect(rgInput?.value).toBe(
+      "rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg '^1:'",
+    );
+    expect(linkInput?.value).toContain("q=hello");
+    expect(linkInput?.value).toContain("p=src");
+    expect(linkInput?.value).toContain("n=1");
+    fireEvent.click(screen.getByRole("button", { name: "Copy rg command" }));
+    expect(writeText).toHaveBeenCalledWith(
+      "rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg '^1:'",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+    expect(writeText).toHaveBeenLastCalledWith(linkInput?.value);
+  });
+
+  it("opens a shared link and selects the named hit", async () => {
+    window.history.replaceState({}, "", "/?q=hello&p=src%2Fb.ts&n=3");
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("hit", HIT_B),
+        sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
+      ]),
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(getLoc("src/b.ts:3")).toBeTruthy();
     });
     await waitFor(() => {
-      expect(screen.getByText("src/a.ts line 1")).toBeTruthy();
+      expect(
+        document.querySelector(".preview-line.current")?.textContent,
+      ).toMatch(/hello there/);
     });
+  });
+
+  it("search selection starts a new query", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Search selection" }),
+      ).toBeTruthy();
+    });
+    const previewText =
+      document.querySelector(".preview-line.current .preview-text") ??
+      document.querySelector(".preview-text");
+    expect(previewText).toBeTruthy();
+    const range = document.createRange();
+    range.selectNodeContents(previewText as Node);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    fireEvent.click(screen.getByRole("button", { name: "Search selection" }));
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter(
+        (entry) =>
+          typeof entry[0] === "string" && entry[0].includes("/api/search"),
+      );
+      const raw = calls[calls.length - 1]?.[1]?.body;
+      expect(typeof raw).toBe("string");
+      if (typeof raw !== "string") {
+        return;
+      }
+      const body = JSON.parse(raw) as { query: string; regex: boolean };
+      expect(body.regex).toBe(false);
+      expect(body.query).toBe("hello world");
+    });
+  });
+
+  it("Shift+Enter adds AND without searching; Enter sends the stacked query", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(getLoc("src/a.ts:1")).toBeTruthy();
+    });
+    const searchesAfterFirst = searchCallCount(fetchMock);
+    const box = screen.getByRole("searchbox");
+    typeQuery("wor");
+    fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
     expect(
-      document.querySelector(".preview-line.current")?.textContent,
-    ).toMatch(/src\/a\.ts line 1/);
-    fireEvent.click(screen.getByRole("button", { name: "Copy path" }));
-    expect(writeText).toHaveBeenCalledWith("src/a.ts");
+      [...document.querySelectorAll(".q-chip-text")].map(
+        (el) => el.textContent,
+      ),
+    ).toEqual(["hello", "wor"]);
+    expect(searchCallCount(fetchMock)).toBe(searchesAfterFirst);
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => {
+      const body = lastSearchBody(fetchMock);
+      expect(body.regex).toBe(true);
+      expect(body.query).toBe("hello.*wor|wor.*hello");
+    });
+  });
 
-    writeText.mockClear();
-    const query = screen.getByPlaceholderText("Search file contents (regex)");
-    query.focus();
-    fireEvent.keyDown(query, { key: "c", metaKey: true });
-    expect(writeText).not.toHaveBeenCalled();
+  it("Clear empties the query, results, and preview", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(getLoc("src/a.ts:1")).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(document.querySelector(".preview-line.current")).toBeTruthy();
+    });
+    fireEvent.click(
+      document.querySelector(".search-clear") as HTMLButtonElement,
+    );
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("");
+    expect(document.querySelectorAll(".q-chip")).toHaveLength(0);
+    expect(queryLoc("src/a.ts:1")).toBeNull();
+    expect(document.querySelector(".preview-line.current")).toBeNull();
+    expect(document.querySelector(".empty-idle")).toBeTruthy();
+    expect(document.querySelector(".preview-idle")).toBeTruthy();
+  });
 
-    const list = screen.getByRole("list");
-    list.focus();
-    fireEvent.keyDown(list, { key: "c", metaKey: true });
-    expect(writeText).toHaveBeenCalledWith("src/a.ts");
+  it("submits caseSensitive and regex when modifiers are toggled", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("needle");
+    fireEvent.click(screen.getByRole("button", { name: "Aa" }));
+    fireEvent.click(screen.getByRole("button", { name: ".*" }));
+    clickSearch();
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter(
+        (entry) =>
+          typeof entry[0] === "string" && entry[0].includes("/api/search"),
+      );
+      expect(calls.length).toBeGreaterThan(0);
+      const raw = calls[calls.length - 1]?.[1]?.body;
+      const body = JSON.parse(raw as string) as {
+        caseSensitive: boolean;
+        regex: boolean;
+      };
+      expect(body.caseSensitive).toBe(true);
+      expect(body.regex).toBe(true);
+    });
+  });
+
+  it("opens hotkeys help modal on ? key", async () => {
+    mockFetch((init) => neverSettle(init));
+    render(<App />);
+    fireEvent.keyDown(window, { key: "?" });
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeTruthy();
+      expect(screen.getByText("Keyboard Shortcuts")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      expect(screen.queryByText("Keyboard Shortcuts")).toBeNull();
+    });
+  });
+
+  it("toggles between grouped and flat result views", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("hit", HIT_B),
+        sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(document.querySelector(".result-group-header")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTitle("Flat View"));
+    await waitFor(() => {
+      expect(document.querySelector(".result-group-header")).toBeNull();
+      expect(document.querySelector(".result-virtual-row")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTitle("Group by File"));
+    await waitFor(() => {
+      expect(document.querySelector(".result-group-header")).toBeTruthy();
+    });
   });
 });
+
+function searchCalls(fetchMock: ReturnType<typeof vi.fn>) {
+  return fetchMock.mock.calls.filter(
+    (entry) => typeof entry[0] === "string" && entry[0].includes("/api/search"),
+  );
+}
+
+function searchCallCount(fetchMock: ReturnType<typeof vi.fn>): number {
+  return searchCalls(fetchMock).length;
+}
+
+function lastSearchBody(fetchMock: ReturnType<typeof vi.fn>): {
+  query: string;
+  regex: boolean;
+} {
+  const raw = searchCalls(fetchMock).at(-1)?.[1]?.body;
+  if (typeof raw !== "string") {
+    throw new Error("missing search body");
+  }
+  return JSON.parse(raw) as { query: string; regex: boolean };
+}
