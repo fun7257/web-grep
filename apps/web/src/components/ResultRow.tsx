@@ -1,47 +1,42 @@
 import type { SseHit } from "@web-grep/shared";
 import { memo, type ReactNode } from "react";
+import {
+  DEFAULT_HL_OPTS,
+  HL_TONES,
+  type HlOpts,
+  highlightSpans,
+} from "../highlight.ts";
 import { FileIcon } from "./icons.tsx";
-
-type MatchSpan = { start: number; end: number };
-
-function clampMatches(text: string, matches: MatchSpan[]): MatchSpan[] {
-  const clamped: MatchSpan[] = [];
-  for (const match of matches) {
-    const start = Math.min(Math.max(0, match.start), text.length);
-    const end = Math.min(Math.max(start, match.end), text.length);
-    if (end > start) {
-      clamped.push({ start, end });
-    }
-  }
-  clamped.sort((a, b) => a.start - b.start);
-  return clamped;
-}
 
 export function HighlightedText({
   text,
-  matches,
+  matches = [],
+  terms = [],
+  opts = DEFAULT_HL_OPTS,
 }: {
   text: string;
-  matches: MatchSpan[];
+  matches?: Array<{ start: number; end: number }>;
+  terms?: string[];
+  opts?: HlOpts;
 }) {
+  const spans = highlightSpans(text, terms, opts, matches);
   const parts: ReactNode[] = [];
   let cursor = 0;
   let part = 0;
-  for (const match of clampMatches(text, matches)) {
-    if (match.start < cursor) {
-      continue;
-    }
-    if (match.start > cursor) {
+  for (const span of spans) {
+    if (span.start > cursor) {
       parts.push(
-        <span key={`t${part}`}>{text.slice(cursor, match.start)}</span>,
+        <span key={`t${part}`}>{text.slice(cursor, span.start)}</span>,
       );
       part += 1;
     }
     parts.push(
-      <mark key={`m${part}`}>{text.slice(match.start, match.end)}</mark>,
+      <mark key={`m${part}`} className={`hl-${span.tone % HL_TONES}`}>
+        {text.slice(span.start, span.end)}
+      </mark>,
     );
     part += 1;
-    cursor = match.end;
+    cursor = span.end;
   }
   if (cursor < text.length) {
     parts.push(<span key={`t${part}`}>{text.slice(cursor)}</span>);
@@ -54,11 +49,15 @@ export const ResultRow = memo(function ResultRow({
   selected,
   index,
   onSelect,
+  terms = [],
+  opts = DEFAULT_HL_OPTS,
 }: {
   hit: SseHit;
   selected: boolean;
   index: number;
   onSelect: (index: number) => void;
+  terms?: string[];
+  opts?: HlOpts;
 }) {
   const slash = hit.path.lastIndexOf("/");
   const dir = slash === -1 ? "" : hit.path.slice(0, slash + 1);
@@ -82,7 +81,12 @@ export const ResultRow = memo(function ResultRow({
         </span>
       </div>
       <span className="result-text">
-        <HighlightedText text={hit.text} matches={hit.matches} />
+        <HighlightedText
+          text={hit.text}
+          matches={hit.matches}
+          terms={terms}
+          opts={opts}
+        />
       </span>
     </button>
   );

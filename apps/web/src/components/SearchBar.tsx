@@ -1,9 +1,43 @@
-import type { FormEvent, RefObject } from "react";
-import { useRef, useState } from "react";
+import type { FormEvent, KeyboardEvent, RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { QueryPart, SearchModifiers } from "../searchStack.ts";
 import { newPart } from "../searchStack.ts";
-import { IconFilter, IconSearch } from "./icons.tsx";
+import { IconCaret, IconSearch } from "./icons.tsx";
+
+function QueryChips({
+  parts,
+  onRemove,
+  opAnd,
+}: {
+  parts: QueryPart[];
+  onRemove: (id: string) => void;
+  opAnd: string;
+}) {
+  return (
+    <>
+      {parts.map((part, index) => (
+        <span key={part.id} className="q-token">
+          {index > 0 ? <span className="q-op">{opAnd}</span> : null}
+          <span className={`q-chip hl-${index % 4}`}>
+            <span className="q-chip-text">{part.value}</span>
+            <button
+              type="button"
+              className="q-x"
+              aria-label="remove"
+              onClick={(event) => {
+                event.stopPropagation();
+                onRemove(part.id);
+              }}
+            >
+              ×
+            </button>
+          </span>
+        </span>
+      ))}
+    </>
+  );
+}
 
 export function SearchBar({
   parts,
@@ -42,7 +76,11 @@ export function SearchBar({
 }) {
   const { t } = useLocale();
   const andLock = useRef(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const editorRef = useRef<HTMLTextAreaElement>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const extraCount = Math.max(0, parts.length - 1);
+  const leadPart = parts[0];
 
   const addTerm = (value: string): void => {
     const trimmed = value.trim();
@@ -60,6 +98,7 @@ export function SearchBar({
   const sendSearch = (): void => {
     const raw = draft.trim();
     onDraftChange("");
+    setEditorOpen(false);
     onFlushSearch(raw !== "" ? [...parts, newPart(raw)] : parts);
   };
 
@@ -68,183 +107,213 @@ export function SearchBar({
     sendSearch();
   };
 
+  const toggleEditor = (): void => {
+    setEditorOpen((open) => !open);
+  };
+
+  useEffect(() => {
+    if (!editorOpen) {
+      return;
+    }
+    const node = editorRef.current;
+    if (node !== null) {
+      node.focus();
+      const at = node.value.length;
+      node.setSelectionRange(at, at);
+    }
+    const onDown = (event: MouseEvent): void => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        rootRef.current !== null &&
+        !rootRef.current.contains(target)
+      ) {
+        setEditorOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+    };
+  }, [editorOpen]);
+
+  const onQueryKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
+    if (event.altKey && (event.key === "c" || event.key === "C")) {
+      event.preventDefault();
+      onModifiersChange?.({
+        caseSensitive: !modifiers?.caseSensitive,
+        wordMatch: modifiers?.wordMatch ?? false,
+        regex: modifiers?.regex ?? false,
+      });
+      return;
+    }
+    if (event.altKey && (event.key === "w" || event.key === "W")) {
+      event.preventDefault();
+      onModifiersChange?.({
+        caseSensitive: modifiers?.caseSensitive ?? false,
+        wordMatch: !modifiers?.wordMatch,
+        regex: modifiers?.regex ?? false,
+      });
+      return;
+    }
+    if (event.altKey && (event.key === "r" || event.key === "R")) {
+      event.preventDefault();
+      onModifiersChange?.({
+        caseSensitive: modifiers?.caseSensitive ?? false,
+        wordMatch: modifiers?.wordMatch ?? false,
+        regex: !modifiers?.regex,
+      });
+      return;
+    }
+    if (event.key === "Escape" && editorOpen) {
+      event.preventDefault();
+      setEditorOpen(false);
+      queryRef.current?.focus();
+      return;
+    }
+    if (event.key === "Backspace" && draft === "" && parts.length > 0) {
+      event.preventDefault();
+      onPartsChange(parts.slice(0, -1));
+      return;
+    }
+    if (event.key !== "Enter") {
+      return;
+    }
+    if (event.metaKey || event.ctrlKey) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (event.shiftKey) {
+      addTerm(draft);
+      return;
+    }
+    sendSearch();
+  };
+
+  const removePart = (id: string): void => {
+    onPartsChange(parts.filter((item) => item.id !== id));
+  };
+
   return (
-    <div className="search-container">
+    <div className="search-container" ref={rootRef}>
       <form
-        className="search-bar"
+        className={editorOpen ? "search-bar is-open" : "search-bar"}
         onSubmit={handleSubmit}
         noValidate
         role="search"
       >
-        <div
-          className="search-field"
-          onClick={() => {
-            queryRef.current?.focus();
-          }}
-        >
-          <span className="search-icon">
-            <IconSearch />
-          </span>
-          {parts.map((part, index) => (
-            <span key={part.id} className="q-token">
-              {index > 0 ? <span className="q-op">{t("opAnd")}</span> : null}
-              <span className="q-chip">
-                <span className="q-chip-text">{part.value}</span>
+        <div className="search-field-wrap">
+          <div
+            className="search-field"
+            onClick={() => {
+              queryRef.current?.focus();
+            }}
+          >
+            <span className="search-icon">
+              <IconSearch />
+            </span>
+            <div className="search-chip-row">
+              {leadPart !== undefined ? (
+                <span className="q-token">
+                  <span className="q-chip hl-0">
+                    <span className="q-chip-text">{leadPart.value}</span>
+                    <button
+                      type="button"
+                      className="q-x"
+                      aria-label="remove"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        removePart(leadPart.id);
+                      }}
+                    >
+                      ×
+                    </button>
+                  </span>
+                </span>
+              ) : null}
+              {extraCount > 0 ? (
                 <button
                   type="button"
-                  className="q-x"
-                  aria-label="remove"
+                  className="search-more"
+                  aria-label={t("queryMore", { n: extraCount })}
                   onClick={(event) => {
                     event.stopPropagation();
-                    onPartsChange(parts.filter((item) => item.id !== part.id));
+                    setEditorOpen(true);
                   }}
                 >
-                  ×
+                  {t("queryMore", { n: extraCount })}
                 </button>
-              </span>
-            </span>
-          ))}
-          <input
-            ref={queryRef}
-            type="search"
-            name="query"
-            autoFocus
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            aria-label={t("queryPlaceholder")}
-            placeholder={
-              parts.length === 0 ? t("queryPlaceholder") : t("queryAdd")
-            }
-            value={draft}
-            onChange={(event) => {
-              onDraftChange(event.target.value);
-            }}
-            onKeyDown={(event) => {
-              if (event.nativeEvent.isComposing) {
-                return;
-              }
-              if (event.altKey && (event.key === "c" || event.key === "C")) {
-                event.preventDefault();
-                onModifiersChange?.({
-                  caseSensitive: !modifiers?.caseSensitive,
-                  wordMatch: modifiers?.wordMatch ?? false,
-                  regex: modifiers?.regex ?? false,
-                });
-                return;
-              }
-              if (event.altKey && (event.key === "w" || event.key === "W")) {
-                event.preventDefault();
-                onModifiersChange?.({
-                  caseSensitive: modifiers?.caseSensitive ?? false,
-                  wordMatch: !modifiers?.wordMatch,
-                  regex: modifiers?.regex ?? false,
-                });
-                return;
-              }
-              if (event.altKey && (event.key === "r" || event.key === "R")) {
-                event.preventDefault();
-                onModifiersChange?.({
-                  caseSensitive: modifiers?.caseSensitive ?? false,
-                  wordMatch: modifiers?.wordMatch ?? false,
-                  regex: !modifiers?.regex,
-                });
-                return;
-              }
-              if (
-                event.key === "Backspace" &&
-                draft === "" &&
-                parts.length > 0
-              ) {
-                event.preventDefault();
-                onPartsChange(parts.slice(0, -1));
-                return;
-              }
-              if (event.key !== "Enter") {
-                return;
-              }
-              if (event.metaKey || event.ctrlKey) {
-                return;
-              }
-              event.preventDefault();
-              event.stopPropagation();
-              if (event.shiftKey) {
-                addTerm(draft);
-                return;
-              }
-              sendSearch();
-            }}
-          />
-          <div className="search-modifiers">
+              ) : null}
+            </div>
+            <input
+              ref={queryRef}
+              type="search"
+              name="query"
+              autoFocus
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              aria-label={t("queryPlaceholder")}
+              placeholder={parts.length === 0 ? t("queryPlaceholder") : ""}
+              value={draft}
+              onChange={(event) => {
+                onDraftChange(event.target.value);
+              }}
+              onKeyDown={onQueryKeyDown}
+            />
             <button
               type="button"
-              className={
-                modifiers?.caseSensitive ? "mod-btn active" : "mod-btn"
-              }
-              title={t("caseSensitive")}
-              aria-pressed={modifiers?.caseSensitive}
-              onClick={(e) => {
-                e.stopPropagation();
-                onModifiersChange?.({
-                  caseSensitive: !modifiers?.caseSensitive,
-                  wordMatch: modifiers?.wordMatch ?? false,
-                  regex: modifiers?.regex ?? false,
-                });
+              className={editorOpen ? "search-caret is-open" : "search-caret"}
+              aria-expanded={editorOpen}
+              aria-label={t("queryExpand")}
+              title={t("queryExpand")}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                toggleEditor();
               }}
             >
-              Aa
-            </button>
-            <button
-              type="button"
-              className={modifiers?.wordMatch ? "mod-btn active" : "mod-btn"}
-              title={t("wordMatch")}
-              aria-pressed={modifiers?.wordMatch}
-              onClick={(e) => {
-                e.stopPropagation();
-                onModifiersChange?.({
-                  caseSensitive: modifiers?.caseSensitive ?? false,
-                  wordMatch: !modifiers?.wordMatch,
-                  regex: modifiers?.regex ?? false,
-                });
-              }}
-            >
-              \b
-            </button>
-            <button
-              type="button"
-              className={modifiers?.regex ? "mod-btn active" : "mod-btn"}
-              title={t("regex")}
-              aria-pressed={modifiers?.regex}
-              onClick={(e) => {
-                e.stopPropagation();
-                onModifiersChange?.({
-                  caseSensitive: modifiers?.caseSensitive ?? false,
-                  wordMatch: modifiers?.wordMatch ?? false,
-                  regex: !modifiers?.regex,
-                });
-              }}
-            >
-              .*
-            </button>
-            <button
-              type="button"
-              className={
-                filtersOpen || Boolean(includeGlobs) || Boolean(excludeGlobs)
-                  ? "mod-btn active"
-                  : "mod-btn"
-              }
-              title={t("toggleFilters")}
-              aria-expanded={filtersOpen}
-              onClick={(e) => {
-                e.stopPropagation();
-                setFiltersOpen(!filtersOpen);
-              }}
-            >
-              <IconFilter />
+              <IconCaret open={editorOpen} />
             </button>
           </div>
-          <kbd className="search-kbd">{t("kbdSearch")}</kbd>
+          {editorOpen ? (
+            <div
+              className="search-dropdown"
+              role="dialog"
+              aria-label={t("queryExpand")}
+            >
+              {parts.length > 0 ? (
+                <div className="search-editor-chips">
+                  <QueryChips
+                    parts={parts}
+                    onRemove={removePart}
+                    opAnd={t("opAnd")}
+                  />
+                </div>
+              ) : null}
+              <textarea
+                ref={editorRef}
+                className="search-editor-input"
+                rows={3}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                placeholder={t("queryPlaceholder")}
+                value={draft}
+                onChange={(event) => {
+                  onDraftChange(event.target.value);
+                }}
+                onKeyDown={onQueryKeyDown}
+              />
+              <p className="search-editor-hint">{t("queryAdd")}</p>
+            </div>
+          ) : null}
         </div>
         <div className="search-actions">
           <button
@@ -268,35 +337,94 @@ export function SearchBar({
           </button>
         </div>
       </form>
-      {filtersOpen ? (
-        <div className="search-filters-row">
+      <div className="search-advanced">
+        <span className="search-advanced-label">{t("advancedOptions")}</span>
+        <button
+          type="button"
+          className={modifiers?.caseSensitive ? "mod-btn active" : "mod-btn"}
+          title={t("caseSensitive")}
+          aria-pressed={modifiers?.caseSensitive}
+          onClick={() => {
+            onModifiersChange?.({
+              caseSensitive: !modifiers?.caseSensitive,
+              wordMatch: modifiers?.wordMatch ?? false,
+              regex: modifiers?.regex ?? false,
+            });
+          }}
+        >
+          Aa
+        </button>
+        <button
+          type="button"
+          className={modifiers?.wordMatch ? "mod-btn active" : "mod-btn"}
+          title={t("wordMatch")}
+          aria-pressed={modifiers?.wordMatch}
+          onClick={() => {
+            onModifiersChange?.({
+              caseSensitive: modifiers?.caseSensitive ?? false,
+              wordMatch: !modifiers?.wordMatch,
+              regex: modifiers?.regex ?? false,
+            });
+          }}
+        >
+          \b
+        </button>
+        <button
+          type="button"
+          className={modifiers?.regex ? "mod-btn active" : "mod-btn"}
+          title={t("regex")}
+          aria-pressed={modifiers?.regex}
+          onClick={() => {
+            onModifiersChange?.({
+              caseSensitive: modifiers?.caseSensitive ?? false,
+              wordMatch: modifiers?.wordMatch ?? false,
+              regex: !modifiers?.regex,
+            });
+          }}
+        >
+          .*
+        </button>
+        <label className="filter-field">
+          <span className="filter-label">{t("includeGlobLabel")}</span>
           <input
             type="text"
             className="filter-input"
             placeholder={t("includeGlobs")}
             value={includeGlobs}
-            onChange={(e) => onIncludeGlobsChange?.(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
+            onChange={(event) => onIncludeGlobsChange?.(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
                 sendSearch();
               }
             }}
           />
+        </label>
+        <label className="filter-field">
+          <span className="filter-label">{t("excludeGlobLabel")}</span>
           <input
             type="text"
             className="filter-input"
             placeholder={t("excludeGlobs")}
             value={excludeGlobs}
-            onChange={(e) => onExcludeGlobsChange?.(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") {
-                e.preventDefault();
+            onChange={(event) => onExcludeGlobsChange?.(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
                 sendSearch();
               }
             }}
           />
-        </div>
+        </label>
+      </div>
+      {editorOpen ? (
+        <div
+          className="search-drop-backdrop"
+          onMouseDown={(event) => {
+            event.preventDefault();
+            setEditorOpen(false);
+          }}
+        />
       ) : null}
     </div>
   );

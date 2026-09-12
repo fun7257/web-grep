@@ -422,6 +422,12 @@ describe("search flow", () => {
         document.querySelector(".preview-line.current")?.textContent,
       ).toMatch(/hello world/);
     });
+    expect(document.querySelector(".preview-text mark")?.textContent).toBe(
+      "hello",
+    );
+    expect(document.querySelector(".preview-text mark")?.className).toContain(
+      "hl-0",
+    );
     expect(document.querySelectorAll(".preview-line")).toHaveLength(1);
     fireEvent.click(getLoc("src/b.ts:3"));
     await waitFor(() => {
@@ -576,16 +582,25 @@ describe("search flow", () => {
     typeQuery("wor");
     fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
     expect(
-      [...document.querySelectorAll(".q-chip-text")].map(
+      [...document.querySelectorAll(".search-chip-row .q-chip-text")].map(
         (el) => el.textContent,
       ),
-    ).toEqual(["hello", "wor"]);
+    ).toEqual(["hello"]);
+    expect(screen.getByRole("button", { name: "+1" })).toBeTruthy();
     expect(searchCallCount(fetchMock)).toBe(searchesAfterFirst);
     fireEvent.keyDown(box, { key: "Enter" });
     await waitFor(() => {
       const body = lastSearchBody(fetchMock);
       expect(body.regex).toBe(true);
       expect(body.query).toBe("hello.*wor|wor.*hello");
+    });
+    await waitFor(() => {
+      expect(document.querySelector(".preview-text mark.hl-0")?.textContent).toBe(
+        "hello",
+      );
+      expect(document.querySelector(".preview-text mark.hl-1")?.textContent).toBe(
+        "wor",
+      );
     });
   });
 
@@ -614,6 +629,20 @@ describe("search flow", () => {
     expect(document.querySelector(".preview-line.current")).toBeNull();
     expect(document.querySelector(".empty-idle")).toBeTruthy();
     expect(document.querySelector(".preview-idle")).toBeTruthy();
+  });
+
+  it("expands a query overlay from the caret button", async () => {
+    mockFetch((init) => neverSettle(init));
+    render(<App />);
+    expect(document.querySelector(".search-dropdown")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Expand search" }));
+    expect(document.querySelector(".search-dropdown")).toBeTruthy();
+    expect(document.querySelector(".search-drop-backdrop")).toBeTruthy();
+    expect(document.querySelector(".search-editor-input")).toBeTruthy();
+    fireEvent.mouseDown(
+      document.querySelector(".search-drop-backdrop") as Element,
+    );
+    expect(document.querySelector(".search-dropdown")).toBeNull();
   });
 
   it("submits caseSensitive and regex when modifiers are toggled", async () => {

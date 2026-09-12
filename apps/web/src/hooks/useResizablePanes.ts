@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 const TREE_WIDTH_KEY = "web-grep.treeWidth.v1";
 const HITS_WIDTH_KEY = "web-grep.hitsWidth.v1";
 
-const DEFAULT_TREE_WIDTH = 240;
+const DEFAULT_TREE_WIDTH = 280;
 const DEFAULT_HITS_WIDTH = 420;
 
 function clamp(val: number, min: number, max: number): number {
@@ -13,7 +13,7 @@ function clamp(val: number, min: number, max: number): number {
 export function useResizablePanes() {
   const [treeWidth, setTreeWidth] = useState<number>(() => {
     const saved = localStorage.getItem(TREE_WIDTH_KEY);
-    return saved ? clamp(Number(saved), 160, 500) : DEFAULT_TREE_WIDTH;
+    return saved ? clamp(Number(saved), 220, 520) : DEFAULT_TREE_WIDTH;
   });
 
   const [hitsWidth, setHitsWidth] = useState<number>(() => {
@@ -47,7 +47,7 @@ export function useResizablePanes() {
 
     const onMouseMove = (e: MouseEvent) => {
       if (resizing === "tree") {
-        const next = clamp(e.clientX, 160, 500);
+        const next = clamp(e.clientX, 220, 520);
         setTreeWidth(next);
         localStorage.setItem(TREE_WIDTH_KEY, String(next));
       } else if (resizing === "hits") {

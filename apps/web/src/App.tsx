@@ -84,6 +84,12 @@ function AppShell() {
       : Math.min(selectedIndex, search.hits.length - 1);
   const selectedHit = search.hits[selectedIndexClamped] ?? null;
   const lastStack = stackRef.current;
+  const hlTerms = lastStack?.parts.map((part) => part.value) ?? [];
+  const hlOpts = {
+    caseSensitive: lastStack?.caseSensitive ?? false,
+    wordMatch: lastStack?.wordMatch ?? false,
+    regex: lastStack?.regex ?? false,
+  };
   const rootAbs = token.meta?.root;
   const webUrl =
     selectedHit !== null && lastStack !== null && lastStack.parts.length > 0
@@ -446,6 +452,8 @@ function AppShell() {
             onSelect={selectHit}
             listRef={listRef}
             viewMode={viewMode}
+            terms={hlTerms}
+            opts={hlOpts}
           />
         )}
       </section>
@@ -467,6 +475,8 @@ function AppShell() {
         ) : null}
         <FilePreview
           hit={selectedHit}
+          terms={hlTerms}
+          opts={hlOpts}
           {...(webUrl !== null || rgCommand !== null
             ? { onShare: () => setShareOpen(true) }
             : {})}

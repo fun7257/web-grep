@@ -67,6 +67,18 @@ export function IconChevron({ open }: { open: boolean }) {
   );
 }
 
+export function IconCaret({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={open ? "icon caret open" : "icon caret"}
+      viewBox="0 0 16 16"
+      aria-hidden="true"
+    >
+      <path d="M3.8 6.2 8 10.4 12.2 6.2" {...stroke} />
+    </svg>
+  );
+}
+
 export function IconFilter() {
   return (
     <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">

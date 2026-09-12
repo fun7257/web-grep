@@ -1,8 +1,9 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SseHit } from "@web-grep/shared";
 import { memo, type RefObject, useEffect, useMemo, useState } from "react";
-import { HighlightedText, ResultRow } from "./ResultRow.tsx";
+import { DEFAULT_HL_OPTS, type HlOpts } from "../highlight.ts";
 import { FileIcon, IconChevron } from "./icons.tsx";
+import { HighlightedText, ResultRow } from "./ResultRow.tsx";
 
 const FLAT_ROW = 64;
 const GROUP_HEADER = 34;
@@ -22,11 +23,15 @@ const GroupedHitRow = memo(function GroupedHitRow({
   selected,
   index,
   onSelect,
+  terms,
+  opts,
 }: {
   hit: SseHit;
   selected: boolean;
   index: number;
   onSelect: (index: number) => void;
+  terms: string[];
+  opts: HlOpts;
 }) {
   const slash = hit.path.lastIndexOf("/");
   const dir = slash === -1 ? "" : hit.path.slice(0, slash + 1);
@@ -35,7 +40,9 @@ const GroupedHitRow = memo(function GroupedHitRow({
     <button
       type="button"
       role="listitem"
-      className={selected ? "result-row grouped selected" : "result-row grouped"}
+      className={
+        selected ? "result-row grouped selected" : "result-row grouped"
+      }
       aria-current={selected ? "true" : undefined}
       onClick={() => {
         onSelect(index);
@@ -48,7 +55,12 @@ const GroupedHitRow = memo(function GroupedHitRow({
       </span>
       <span className="result-line-pill">{hit.line}</span>
       <span className="result-text">
-        <HighlightedText text={hit.text} matches={hit.matches} />
+        <HighlightedText
+          text={hit.text}
+          matches={hit.matches}
+          terms={terms}
+          opts={opts}
+        />
       </span>
     </button>
   );
@@ -60,12 +72,16 @@ export function ResultList({
   onSelect,
   listRef,
   viewMode = "grouped",
+  terms = [],
+  opts = DEFAULT_HL_OPTS,
 }: {
   hits: SseHit[];
   selectedIndex: number;
   onSelect: (index: number) => void;
   listRef: RefObject<HTMLDivElement | null>;
   viewMode?: "grouped" | "flat";
+  terms?: string[];
+  opts?: HlOpts;
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
@@ -202,6 +218,8 @@ export function ResultList({
                   selected={row.index === selectedIndex}
                   index={row.index}
                   onSelect={onSelect}
+                  terms={terms}
+                  opts={opts}
                 />
               ) : (
                 <GroupedHitRow
@@ -209,6 +227,8 @@ export function ResultList({
                   selected={row.index === selectedIndex}
                   index={row.index}
                   onSelect={onSelect}
+                  terms={terms}
+                  opts={opts}
                 />
               )}
             </div>

@@ -1,6 +1,7 @@
 import type { SseHit } from "@web-grep/shared";
 import { useEffect, useRef, useState } from "react";
 import { canFormat, detectLineKind, kindLabel } from "../formats/detect.ts";
+import { DEFAULT_HL_OPTS, type HlOpts } from "../highlight.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import { FormattedLine } from "./FormattedPreview.tsx";
 import { IconCheck, IconCopy, IconShare } from "./icons.tsx";
@@ -38,11 +39,15 @@ function selectionIn(root: HTMLElement | null): string {
 
 export function FilePreview({
   hit,
+  terms = [],
+  opts = DEFAULT_HL_OPTS,
   onShare,
   onSearchSelected,
   onCopyNotice,
 }: {
   hit: SseHit | null;
+  terms?: string[];
+  opts?: HlOpts;
   onShare?: () => void;
   onSearchSelected?: (text: string) => void;
   onCopyNotice?: (msg: string) => void;
@@ -54,6 +59,8 @@ export function FilePreview({
     <FilePreviewReady
       key={`${hit.path}:${hit.line}`}
       hit={hit}
+      terms={terms}
+      opts={opts}
       {...(onShare !== undefined ? { onShare } : {})}
       {...(onSearchSelected !== undefined ? { onSearchSelected } : {})}
       {...(onCopyNotice !== undefined ? { onCopyNotice } : {})}
@@ -63,11 +70,15 @@ export function FilePreview({
 
 function FilePreviewReady({
   hit,
+  terms,
+  opts,
   onShare,
   onSearchSelected,
   onCopyNotice,
 }: {
   hit: SseHit;
+  terms: string[];
+  opts: HlOpts;
   onShare?: () => void;
   onSearchSelected?: (text: string) => void;
   onCopyNotice?: (msg: string) => void;
@@ -115,7 +126,12 @@ function FilePreviewReady({
 
   const formatted =
     mode === "formatted" && formattedAvailable ? (
-      <FormattedLine path={hit.path} text={hit.text} />
+      <FormattedLine
+        path={hit.path}
+        text={hit.text}
+        terms={terms}
+        opts={opts}
+      />
     ) : null;
 
   return (
@@ -201,7 +217,12 @@ function FilePreviewReady({
           <div className="preview-line current" aria-current="location">
             <span className="preview-n">{hit.line}</span>
             <span className="preview-text">
-              <HighlightedText text={hit.text} matches={hit.matches} />
+              <HighlightedText
+                text={hit.text}
+                matches={hit.matches}
+                terms={terms}
+                opts={opts}
+              />
             </span>
           </div>
         </div>

@@ -1,4 +1,13 @@
 import type { ReactNode } from "react";
+import { HighlightedText } from "../components/ResultRow.tsx";
+import { DEFAULT_HL_OPTS, type HlOpts } from "../highlight.ts";
+
+function highlightCell(text: string, terms: string[], opts: HlOpts): ReactNode {
+  if (terms.length === 0) {
+    return text;
+  }
+  return <HighlightedText text={text} terms={terms} opts={opts} />;
+}
 
 function parseRow(line: string, delim: string): string[] {
   const out: string[] = [];
@@ -37,9 +46,13 @@ function parseRow(line: string, delim: string): string[] {
 export function CsvView({
   text,
   path,
+  terms = [],
+  opts = DEFAULT_HL_OPTS,
 }: {
   text: string;
   path: string;
+  terms?: string[];
+  opts?: HlOpts;
 }): ReactNode {
   const delim = path.toLowerCase().endsWith(".tsv") ? "\t" : ",";
   const raw = text.split(/\r?\n/).filter((line, i, arr) => {
@@ -60,7 +73,7 @@ export function CsvView({
         <thead>
           <tr>
             {header.map((cell, i) => (
-              <th key={i}>{cell}</th>
+              <th key={i}>{highlightCell(cell, terms, opts)}</th>
             ))}
           </tr>
         </thead>
@@ -68,7 +81,7 @@ export function CsvView({
           {body.map((row, ri) => (
             <tr key={ri}>
               {header.map((_, ci) => (
-                <td key={ci}>{row[ci] ?? ""}</td>
+                <td key={ci}>{highlightCell(row[ci] ?? "", terms, opts)}</td>
               ))}
             </tr>
           ))}
