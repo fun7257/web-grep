@@ -5,7 +5,25 @@ import type {
   SseProgress,
 } from "@web-grep/shared";
 import { useLocale } from "../hooks/useLocale.ts";
+import { useTheme } from "../hooks/useTheme.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
+import { IconMoon, IconSun } from "./icons.tsx";
+
+export function ThemeToggle() {
+  const { theme, toggle } = useTheme();
+  const { t } = useLocale();
+  return (
+    <button
+      type="button"
+      className="theme-toggle"
+      onClick={toggle}
+      aria-label={t("themeToggle")}
+      title={theme === "dark" ? t("themeLight") : t("themeDark")}
+    >
+      {theme === "dark" ? <IconSun /> : <IconMoon />}
+    </button>
+  );
+}
 
 export function LocaleToggle() {
   const { locale, setLocale, t } = useLocale();
@@ -41,6 +59,7 @@ export function StatusBar({
   error,
   hostForbidden,
   meta,
+  onCancel,
 }: {
   status: SearchStatus;
   done: SseDone | null;
@@ -48,6 +67,7 @@ export function StatusBar({
   error: JsonError | null;
   hostForbidden: boolean;
   meta: MetaResponse | null;
+  onCancel?: () => void;
 }) {
   const { t } = useLocale();
 
@@ -104,6 +124,15 @@ export function StatusBar({
       >
         {text}
       </div>
+      {status === "running" && onCancel !== undefined ? (
+        <button
+          type="button"
+          className="status-cancel"
+          onClick={onCancel}
+        >
+          {t("cancel")}
+        </button>
+      ) : null}
       {meta?.engine === "literal" ? (
         <div className="status-banner">{t("literalEngineBanner")}</div>
       ) : null}

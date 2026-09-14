@@ -8,13 +8,14 @@ describe("parseShareSearch", () => {
   });
 
   it("reads stacked terms and a hit location", () => {
-    expect(parseShareSearch("?q=hello&q=world&p=src/a.ts&n=12&s=1")).toEqual({
+    expect(parseShareSearch("?q=hello&q=world&p=src/a.ts&n=12&s=1&t=7d")).toEqual({
       parts: ["hello", "world"],
       caseSensitive: true,
       wordMatch: false,
       regex: false,
       path: "src/a.ts",
       line: 12,
+      timeRange: "7d",
     });
   });
 });

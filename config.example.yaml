@@ -1,0 +1,40 @@
+# 复制为 config.yaml（已 gitignore）。WEB_GREP_* 环境变量可临时覆盖任意项。
+#   WEB_GREP_LOG_LEVEL=debug ./dist/web-grep
+
+# 要搜索的目录。必填。支持 ~。Docker 容器内必须是 /data。
+root: /path/to/search
+
+# 监听地址，只表示绑在哪块网卡。不要把 0.0.0.0 当成浏览器里的 Host。
+host: 127.0.0.1
+port: 8787
+
+# 浏览器地址栏里的主机名/IP。非 127.0.0.1 绑定时必填。禁止写 0.0.0.0。
+# public_host:
+#   - 127.0.0.1
+#   - test.example.com
+
+# 登录密码。非本机绑定时必填。明文启动后会被改写成 sha256:<64位hex>。
+# token: change-me
+
+# rg 绝对路径。留空则自动探测 PATH / @vscode/ripgrep。
+# rg: /usr/bin/rg
+
+# 前端构建产物目录。留空则在二进制旁边找。Docker 用 /app/web。
+# web_dist: /app/web
+
+# true 时不提供 SPA（pnpm dev 会设 WEB_GREP_DEV=1）。
+dev: false
+
+log_level: info # debug | info | warn | error
+
+max_results: 20000 # 0 = 不限制
+max_results_hard: 0 # 硬上限；0 = 不限制
+timeout_ms: 0 # 搜索超时，毫秒；0 = 不超时
+preview_lines: 201
+threads: 0 # 0 = 交给 rg
+max_concurrent: 8 # 同时进行的搜索路数
+
+search_zip: true # 是否搜压缩包
+follow_symlinks: true # 是否跟随符号链接
+no_ignore: true # true = 忽略 gitignore，日志目录才能搜全
+allow_secrets: false # true = 允许搜 .env 等密钥文件（默认拒绝）

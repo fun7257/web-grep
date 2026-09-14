@@ -1,7 +1,7 @@
 import type { JsonError, SseDone } from "@web-grep/shared";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
-import { IconSearch } from "./icons.tsx";
+import { IdleMark } from "./icons.tsx";
 
 export function EmptyState({
   status,
@@ -25,29 +25,44 @@ export function EmptyState({
     return <div className="empty-state">{t("hostNotAllowed")}</div>;
   }
   if (status === "running") {
-    return <div className="empty-state">{t("loading")}</div>;
+    return (
+      <div className="empty-state empty-idle is-running">
+        <IdleMark kind="hits" />
+        <p>{t("loading")}</p>
+      </div>
+    );
   }
   if (status === "cancelled") {
-    return <div className="empty-state">{t("cancelled")}</div>;
+    return (
+      <div className="empty-state empty-idle">
+        <IdleMark kind="nomatch" />
+        <p>{t("cancelled")}</p>
+      </div>
+    );
   }
   if (status === "error") {
     return (
-      <div className="empty-state">
-        {error?.code === "FORBIDDEN_HOST"
-          ? t("hostNotAllowed")
-          : (error?.message ?? t("searchFailed"))}
+      <div className="empty-state empty-idle">
+        <IdleMark kind="nomatch" />
+        <p>
+          {error?.code === "FORBIDDEN_HOST"
+            ? t("hostNotAllowed")
+            : (error?.message ?? t("searchFailed"))}
+        </p>
       </div>
     );
   }
   if (status === "done" && (done?.matchCount === 0 || hitCount === 0)) {
-    return <div className="empty-state">{t("noResults")}</div>;
+    return (
+      <div className="empty-state empty-idle">
+        <IdleMark kind="nomatch" />
+        <p>{t("noResults")}</p>
+      </div>
+    );
   }
   return (
     <div className="empty-state empty-idle">
-      <div className="empty-icon">
-        <IconSearch />
-      </div>
-      <p className="empty-lead">{t("queryPlaceholder")}</p>
+      <IdleMark kind="hits" />
       <p>{t("emptyHint")}</p>
     </div>
   );

@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  AuthStatusSchema,
   ErrorCodeSchema,
+  LoginRequestSchema,
+  LoginResponseSchema,
   FileQuerySchema,
   FileSliceQuerySchema,
   FileWindowResponseSchema,
@@ -9,6 +12,30 @@ import {
   SseMetaSchema,
   TreeListingSchema,
 } from "../src/index.ts";
+
+describe("auth schemas", () => {
+  it("parses login request and response", () => {
+    expect(LoginRequestSchema.parse({ password: "secret1" })).toEqual({
+      password: "secret1",
+    });
+    expect(LoginResponseSchema.parse({ token: "sess-abc" }).token).toBe(
+      "sess-abc",
+    );
+    expect(
+      LoginResponseSchema.parse({
+        token: "sess-abc",
+        expiresAt: 1_800_000_000_000,
+      }).expiresAt,
+    ).toBe(1_800_000_000_000);
+    expect(AuthStatusSchema.parse({ authRequired: true })).toEqual({
+      authRequired: true,
+    });
+  });
+
+  it("rejects an empty password", () => {
+    expect(LoginRequestSchema.safeParse({ password: "" }).success).toBe(false);
+  });
+});
 
 describe("SearchRequestSchema", () => {
   it("rejects an empty query", () => {
@@ -43,6 +70,15 @@ describe("SearchRequestSchema", () => {
     expect(parsed.wordMatch).toBe(false);
     expect(parsed.hidden).toBe(true);
     expect(parsed.maxResults).toBeUndefined();
+    expect(parsed.mtimeAfter).toBeUndefined();
+  });
+
+  it("accepts mtimeAfter as unix milliseconds", () => {
+    const parsed = SearchRequestSchema.parse({
+      query: "foo",
+      mtimeAfter: 1_726_300_000_000,
+    });
+    expect(parsed.mtimeAfter).toBe(1_726_300_000_000);
   });
 });
 

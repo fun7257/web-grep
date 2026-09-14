@@ -9,6 +9,7 @@ export const ErrorCodeSchema = z.enum([
   "ENGINE",
   "ENGINE_UNSUPPORTED",
   "UNAUTHORIZED",
+  "INVALID_AUTH",
   "FORBIDDEN_HOST",
   "INTERNAL",
 ]);

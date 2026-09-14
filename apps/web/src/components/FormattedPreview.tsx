@@ -1,6 +1,4 @@
 import { detectLineKind } from "../formats/detect.ts";
-import { CsvView } from "../formats/renderCsv.tsx";
-import { HtmlView } from "../formats/renderHtml.tsx";
 import { JsonView } from "../formats/renderJson.tsx";
 import { MarkdownView } from "../formats/renderMarkdown.tsx";
 import { DEFAULT_HL_OPTS, type HlOpts } from "../highlight.ts";
@@ -25,12 +23,6 @@ export function FormattedLine({
     if (view !== null) {
       return view;
     }
-  }
-  if (kind === "csv") {
-    return <CsvView text={text} path={path} terms={terms} opts={opts} />;
-  }
-  if (kind === "html") {
-    return <HtmlView text={text} />;
   }
   return null;
 }

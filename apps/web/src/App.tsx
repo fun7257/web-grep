@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ContextModal } from "./components/ContextModal.tsx";
 import { EmptyState } from "./components/EmptyState.tsx";
 import { FilePreview } from "./components/FilePreview.tsx";
 import {
@@ -13,12 +14,12 @@ import { SearchBar } from "./components/SearchBar.tsx";
 import { ShareModal } from "./components/ShareModal.tsx";
 import { StatusBar } from "./components/StatusBar.tsx";
 import { Toast } from "./components/Toast.tsx";
-import { TokenPrompt } from "./components/TokenPrompt.tsx";
+import { AuthDialog } from "./components/AuthDialog.tsx";
 import { useHotkeys } from "./hooks/useHotkeys.ts";
 import { LocaleProvider, useLocale } from "./hooks/useLocale.ts";
 import { useResizablePanes } from "./hooks/useResizablePanes.ts";
 import { useSearch } from "./hooks/useSearch.ts";
-import { useToken } from "./hooks/useToken.ts";
+import { useAuth } from "./hooks/useAuth.ts";
 import { buildShareUrl, parseShareSearch } from "./searchShare.ts";
 import {
   compileParts,
@@ -30,7 +31,21 @@ import {
   toRequest,
   toRgShareCommand,
 } from "./searchStack.ts";
-import { picksToGlobs, type TreePick, togglePick } from "./treePicks.ts";
+import {
+  loadSearchHistory,
+  pushSearchHistory,
+  type SearchHistoryItem,
+} from "./searchHistory.ts";
+import { pushSearchNav, type SearchNavEntry } from "./searchNav.ts";
+import {
+  loadTimeRange,
+  mtimeAfterMs,
+  saveTimeRange,
+  type TimeRange,
+} from "./timeRange.ts";
+import { picksToSearchGlobs, type TreePick, togglePick } from "./treePicks.ts";
+
+const EMPTY_HL_TERMS: string[] = [];
 
 function parseGlobs(raw: string): string[] {
   return raw
@@ -41,7 +56,7 @@ function parseGlobs(raw: string): string[] {
 
 function AppShell() {
   const { t } = useLocale();
-  const token = useToken();
+  const token = useAuth();
   const search = useSearch({ onAuthFailure: token.handleAuthFailure });
   const queryRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -68,6 +83,14 @@ function AppShell() {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [timeRange, setTimeRange] = useState<TimeRange | null>(loadTimeRange);
+  const [searchHistory, setSearchHistory] = useState(loadSearchHistory);
+  const [nav, setNav] = useState<{ stack: SearchNavEntry[]; index: number }>({
+    stack: [],
+    index: -1,
+  });
+  const skipNavRef = useRef(false);
   const stackRef = useRef<SearchStack | null>(null);
   const bootstrapped = useRef(false);
   const pendingSelect = useRef<{ path: string; line: number } | null>(null);
@@ -84,12 +107,18 @@ function AppShell() {
       : Math.min(selectedIndex, search.hits.length - 1);
   const selectedHit = search.hits[selectedIndexClamped] ?? null;
   const lastStack = stackRef.current;
-  const hlTerms = lastStack?.parts.map((part) => part.value) ?? [];
-  const hlOpts = {
-    caseSensitive: lastStack?.caseSensitive ?? false,
-    wordMatch: lastStack?.wordMatch ?? false,
-    regex: lastStack?.regex ?? false,
-  };
+  const hlTerms = useMemo(
+    () => lastStack?.parts.map((part) => part.value) ?? EMPTY_HL_TERMS,
+    [lastStack],
+  );
+  const hlOpts = useMemo(
+    () => ({
+      caseSensitive: lastStack?.caseSensitive ?? false,
+      wordMatch: lastStack?.wordMatch ?? false,
+      regex: lastStack?.regex ?? false,
+    }),
+    [lastStack],
+  );
   const rootAbs = token.meta?.root;
   const webUrl =
     selectedHit !== null && lastStack !== null && lastStack.parts.length > 0
@@ -100,6 +129,7 @@ function AppShell() {
           regex: lastStack.regex,
           path: selectedHit.path,
           line: selectedHit.line,
+          ...(timeRange !== null ? { timeRange } : {}),
         })
       : null;
   let rgCommand: string | null = null;
@@ -133,6 +163,8 @@ function AppShell() {
       nextScope: "all" | "include" | "exclude" = scope,
       extraInclude: string[] = [],
       nextModifiers: SearchModifiers = modifiers,
+      nextTime: TimeRange | null = timeRange,
+      nextPicks: TreePick[] = picks,
     ) => {
       if (nextParts.length === 0) {
         return;
@@ -141,44 +173,24 @@ function AppShell() {
       if (compiled.query === "") {
         return;
       }
-      const globs = picksToGlobs(picks);
-      let effective: "all" | "include" | "exclude" = "all";
-      if (picks.length > 0) {
-        if (nextScope === "exclude") {
-          effective = "exclude";
-        } else if (nextScope === "include") {
-          effective = "include";
-        } else {
-          effective = scope === "exclude" ? "exclude" : "include";
-        }
-      }
-
-      const manualIncludes = parseGlobs(includeGlobs);
-      const manualExcludes = parseGlobs(excludeGlobs);
-
-      const prev = stackRef.current;
-      const baseIncludes =
-        extraInclude.length > 0
-          ? extraInclude
-          : effective === "include"
-            ? [...globs, ...manualIncludes]
-            : manualIncludes.length > 0
-              ? manualIncludes
-              : (prev?.globInclude ?? []);
-
-      const baseExcludes =
-        extraInclude.length > 0
-          ? []
-          : effective === "exclude"
-            ? [...globs, ...manualExcludes]
-            : manualExcludes.length > 0
-              ? manualExcludes
-              : (prev?.globExclude ?? []);
+      const effective: "all" | "include" | "exclude" =
+        nextPicks.length === 0
+          ? "all"
+          : nextScope === "exclude"
+            ? "exclude"
+            : "include";
+      const globs = picksToSearchGlobs(
+        nextPicks,
+        effective,
+        extraInclude,
+        parseGlobs(includeGlobs),
+        parseGlobs(excludeGlobs),
+      );
 
       const stack: SearchStack = {
         parts: nextParts,
-        globInclude: baseIncludes,
-        globExclude: baseExcludes,
+        globInclude: globs.globInclude,
+        globExclude: globs.globExclude,
         path: "",
         caseSensitive: nextModifiers.caseSensitive,
         wordMatch: nextModifiers.wordMatch,
@@ -186,37 +198,52 @@ function AppShell() {
         hidden: true,
       };
 
-      if (
-        extraInclude.length === 0 &&
-        effective === "all" &&
-        manualIncludes.length === 0 &&
-        manualExcludes.length === 0 &&
-        prev
-      ) {
-        stack.globInclude = prev.globInclude;
-        stack.globExclude = prev.globExclude;
-      }
-
       stackRef.current = stack;
       setParts(nextParts);
       setDraft("");
       setSelectedIndex(0);
-      runSearch(toRequest(stack, extraInclude));
+      const navEntry: SearchNavEntry = {
+        parts: nextParts.map((part) => part.value),
+        timeRange: nextTime,
+        caseSensitive: nextModifiers.caseSensitive,
+        wordMatch: nextModifiers.wordMatch,
+        regex: nextModifiers.regex,
+      };
+      if (!skipNavRef.current) {
+        setNav((cur) => pushSearchNav(cur.stack, cur.index, navEntry));
+      }
+      skipNavRef.current = false;
+      setSearchHistory((prev) => pushSearchHistory(prev, navEntry));
+      runSearch(
+        toRequest(
+          stack,
+          extraInclude,
+          nextTime !== null ? mtimeAfterMs(nextTime) : undefined,
+        ),
+      );
     },
-    [excludeGlobs, includeGlobs, modifiers, picks, runSearch, scope],
+    [
+      excludeGlobs,
+      includeGlobs,
+      modifiers,
+      picks,
+      runSearch,
+      scope,
+      timeRange,
+    ],
   );
 
   const submit = useCallback(
     (nextScope: "all" | "include" | "exclude" = scope) => {
       const raw = draft.trim();
+      const nextParts = raw !== "" ? [...parts, newPart(raw)] : parts;
+      const fallback = stackRef.current?.parts ?? [];
       searchWithParts(
-        raw !== "" ? [...parts, newPart(raw)] : parts,
+        nextParts.length > 0 ? nextParts : fallback,
         nextScope,
-        [],
-        modifiers,
       );
     },
-    [draft, modifiers, parts, scope, searchWithParts],
+    [draft, parts, scope, searchWithParts],
   );
 
   const searchSelected = useCallback(
@@ -231,6 +258,7 @@ function AppShell() {
     stackRef.current = null;
     pendingSelect.current = null;
     setShareOpen(false);
+    setContextOpen(false);
     setParts([]);
     setDraft("");
     setSelectedIndex(0);
@@ -258,11 +286,16 @@ function AppShell() {
     if (parsed.path !== undefined && parsed.line !== undefined) {
       pendingSelect.current = { path: parsed.path, line: parsed.line };
     }
+    if (parsed.timeRange !== undefined) {
+      setTimeRange(parsed.timeRange);
+      saveTimeRange(parsed.timeRange);
+    }
     searchWithParts(
       parsed.parts.map((value) => newPart(value)),
       "all",
       [],
       nextMods,
+      parsed.timeRange ?? timeRange,
     );
   }, [searchWithParts, token.hostForbidden, token.meta, token.promptOpen]);
 
@@ -304,7 +337,10 @@ function AppShell() {
     },
     running: search.status === "running",
     modalOpen:
-      helpOpen || shareOpen || (token.promptOpen && !token.hostForbidden),
+      helpOpen ||
+      shareOpen ||
+      contextOpen ||
+      (token.promptOpen && !token.hostForbidden),
     queryRef,
     listRef,
     previewRef,
@@ -329,11 +365,16 @@ function AppShell() {
                 width: `${TREE_RAIL_WIDTH}px`,
               }
         }
-        onTogglePick={(entry) => {
-          const next = togglePick(picks, {
-            path: entry.path,
-            dir: entry.dir,
-          });
+        onTogglePick={(entry, listedChildren, coveringChildren) => {
+          const next = togglePick(
+            picks,
+            {
+              path: entry.path,
+              dir: entry.dir,
+            },
+            listedChildren,
+            coveringChildren,
+          );
           setPicks(next);
           if (next.length === 0) {
             setScope("all");
@@ -352,6 +393,49 @@ function AppShell() {
         onClear={() => {
           setPicks([]);
           setScope("all");
+          if (stackRef.current !== null) {
+            stackRef.current = {
+              ...stackRef.current,
+              globInclude: [],
+              globExclude: [],
+            };
+          }
+        }}
+        sessionReady={token.sessionReady}
+        canLogout={token.canLogout}
+        searchCount={Math.max(
+          search.searchCount,
+          token.meta?.searchCount ?? 0,
+        )}
+        timeRange={timeRange}
+        onTimeRange={(next) => {
+          setPicks([]);
+          setScope("all");
+          if (stackRef.current !== null) {
+            stackRef.current = {
+              ...stackRef.current,
+              globInclude: [],
+              globExclude: [],
+            };
+          }
+          setTimeRange(next);
+          saveTimeRange(next);
+          const raw = draft.trim();
+          const nextParts = raw !== "" ? [...parts, newPart(raw)] : parts;
+          if (nextParts.length > 0) {
+            searchWithParts(nextParts, "all", [], modifiers, next, []);
+          }
+        }}
+        onLogout={() => {
+          void token.logout().then(() => {
+            resetSearch();
+            stackRef.current = null;
+            setParts([]);
+            setDraft("");
+            setSelectedIndex(0);
+            setPicks([]);
+            setScope("all");
+          });
         }}
         {...(token.handleAuthFailure !== undefined
           ? { onAuthFailure: token.handleAuthFailure }
@@ -373,7 +457,6 @@ function AppShell() {
           onPartsChange={setParts}
           draft={draft}
           onDraftChange={setDraft}
-          running={search.status === "running"}
           onFlushSearch={searchWithParts}
           canClear={
             parts.length > 0 ||
@@ -382,7 +465,6 @@ function AppShell() {
             search.status !== "idle"
           }
           onClear={clearAll}
-          onCancel={cancelSearch}
           queryRef={queryRef}
           modifiers={modifiers}
           onModifiersChange={(next) => {
@@ -401,6 +483,85 @@ function AppShell() {
           onIncludeGlobsChange={setIncludeGlobs}
           excludeGlobs={excludeGlobs}
           onExcludeGlobsChange={setExcludeGlobs}
+          timeRange={timeRange}
+          history={searchHistory}
+          canGoBack={nav.index > 0}
+          canGoForward={nav.index >= 0 && nav.index < nav.stack.length - 1}
+          onGoBack={() => {
+            if (nav.index <= 0) {
+              return;
+            }
+            const nextIndex = nav.index - 1;
+            const entry = nav.stack[nextIndex];
+            if (entry === undefined) {
+              return;
+            }
+            setNav((cur) => ({ ...cur, index: nextIndex }));
+            skipNavRef.current = true;
+            const mods = {
+              caseSensitive: entry.caseSensitive,
+              wordMatch: entry.wordMatch,
+              regex: entry.regex,
+            };
+            setModifiers(mods);
+            setTimeRange(entry.timeRange);
+            saveTimeRange(entry.timeRange);
+            searchWithParts(
+              entry.parts.map((value) => newPart(value)),
+              scope,
+              [],
+              mods,
+              entry.timeRange,
+            );
+          }}
+          onGoForward={() => {
+            if (nav.index < 0 || nav.index >= nav.stack.length - 1) {
+              return;
+            }
+            const nextIndex = nav.index + 1;
+            const entry = nav.stack[nextIndex];
+            if (entry === undefined) {
+              return;
+            }
+            setNav((cur) => ({ ...cur, index: nextIndex }));
+            skipNavRef.current = true;
+            const mods = {
+              caseSensitive: entry.caseSensitive,
+              wordMatch: entry.wordMatch,
+              regex: entry.regex,
+            };
+            setModifiers(mods);
+            setTimeRange(entry.timeRange);
+            saveTimeRange(entry.timeRange);
+            searchWithParts(
+              entry.parts.map((value) => newPart(value)),
+              scope,
+              [],
+              mods,
+              entry.timeRange,
+            );
+          }}
+          onRestoreHistory={(item: SearchHistoryItem) => {
+            const nextParts = item.parts.map((value) => newPart(value));
+            setModifiers({
+              caseSensitive: item.caseSensitive,
+              wordMatch: item.wordMatch,
+              regex: item.regex,
+            });
+            setTimeRange(item.timeRange);
+            saveTimeRange(item.timeRange);
+            searchWithParts(
+              nextParts,
+              scope,
+              [],
+              {
+                caseSensitive: item.caseSensitive,
+                wordMatch: item.wordMatch,
+                regex: item.regex,
+              },
+              item.timeRange,
+            );
+          }}
         />
         <div className="pane-head">
           <span>{t("paneHits")}</span>
@@ -435,6 +596,7 @@ function AppShell() {
             error={search.error}
             hostForbidden={token.hostForbidden}
             meta={token.meta}
+            onCancel={cancelSearch}
           />
         </div>
         {search.hits.length === 0 ? (
@@ -468,11 +630,6 @@ function AppShell() {
         tabIndex={-1}
         aria-hidden={selectedHit === null}
       >
-        {selectedHit === null ? (
-          <div className="pane-head">
-            <span>{t("panePreview")}</span>
-          </div>
-        ) : null}
         <FilePreview
           hit={selectedHit}
           terms={hlTerms}
@@ -480,6 +637,9 @@ function AppShell() {
           {...(webUrl !== null || rgCommand !== null
             ? { onShare: () => setShareOpen(true) }
             : {})}
+          onOpenContext={() => {
+            setContextOpen(true);
+          }}
           onSearchSelected={searchSelected}
           onCopyNotice={(txt) => {
             setToastMsg(txt);
@@ -487,7 +647,7 @@ function AppShell() {
         />
       </aside>
       {token.promptOpen && !token.hostForbidden ? (
-        <TokenPrompt onSubmit={token.saveToken} />
+        <AuthDialog onLogin={token.login} />
       ) : null}
       <HotkeyHelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
       <ShareModal
@@ -499,6 +659,15 @@ function AppShell() {
         }}
         onCopyNotice={(txt) => {
           setToastMsg(txt);
+        }}
+      />
+      <ContextModal
+        open={contextOpen}
+        hit={selectedHit}
+        terms={hlTerms}
+        opts={hlOpts}
+        onClose={() => {
+          setContextOpen(false);
         }}
       />
       <Toast message={toastMsg} onClose={() => setToastMsg(null)} />

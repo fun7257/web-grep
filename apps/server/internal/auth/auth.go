@@ -1,7 +1,6 @@
 package auth
 
 import (
-	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"net/url"
@@ -15,6 +14,13 @@ var alwaysHosts = map[string]struct{}{
 	"127.0.0.1": {},
 	"localhost": {},
 	"::1":       {},
+}
+
+var publicPaths = map[string]struct{}{
+	"/api/health":      {},
+	"/api/auth/status": {},
+	"/api/auth/login":  {},
+	"/api/auth/logout": {},
 }
 
 func AllowedHostnames(cfg config.Config) map[string]struct{} {
@@ -90,7 +96,7 @@ func AllowedOrigin(origin string, hosts map[string]struct{}) bool {
 	return hostnameAllowed(config.NormalizeHostname(u.Hostname()), hosts)
 }
 
-func extractToken(r *http.Request) string {
+func ExtractToken(r *http.Request) string {
 	if t := strings.TrimSpace(r.Header.Get("X-Web-Grep-Token")); t != "" {
 		return t
 	}
@@ -105,17 +111,15 @@ func extractToken(r *http.Request) string {
 	return strings.TrimSpace(authz[len(p):])
 }
 
-func tokenEquals(expected, provided string) bool {
-	a := []byte(expected)
-	b := []byte(provided)
-	if len(a) != len(b) {
-		subtle.ConstantTimeCompare(a, a)
-		return false
+func isPublicPath(path string) bool {
+	if _, ok := publicPaths[path]; ok {
+		return true
 	}
-	return subtle.ConstantTimeCompare(a, b) == 1
+	// SPA HTML/JS/CSS are same-origin as /api. They must load before login.
+	return path != "/api" && !strings.HasPrefix(path, "/api/")
 }
 
-func Middleware(cfg config.Config) func(http.Handler) http.Handler {
+func Middleware(cfg config.Config, sessions *Sessions) func(http.Handler) http.Handler {
 	hosts := AllowedHostnames(cfg)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -135,13 +139,15 @@ func Middleware(cfg config.Config) func(http.Handler) http.Handler {
 					return
 				}
 			}
-			if r.URL.Path != "/api/health" && cfg.Token != "" {
-				provided := extractToken(r)
-				if provided == "" || !tokenEquals(cfg.Token, provided) {
-					logx.Warn("auth fail", map[string]any{"code": "UNAUTHORIZED"})
-					writeJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "missing or invalid token"})
-					return
-				}
+			if isPublicPath(r.URL.Path) || cfg.TokenHash == "" {
+				next.ServeHTTP(w, r)
+				return
+			}
+			provided := ExtractToken(r)
+			if sessions == nil || !sessions.Lookup(provided) {
+				logx.Warn("auth fail", map[string]any{"code": "UNAUTHORIZED"})
+				writeJSON(w, http.StatusUnauthorized, map[string]string{"code": "UNAUTHORIZED", "message": "missing or invalid session"})
+				return
 			}
 			next.ServeHTTP(w, r)
 		})

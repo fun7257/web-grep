@@ -32,6 +32,46 @@ func TestBuildArgvOmitsDotDirAndAddsHidden(t *testing.T) {
 	}
 }
 
+func TestBuildArgvLimitToListUsesRegexpFlagAndNoDir(t *testing.T) {
+	argv, err := BuildArgv(Input{
+		RootReal:    "/tmp/root",
+		RelativeDir: "logs",
+		Query:       "needle",
+		LimitToList: true,
+		FileList:    []string{"logs/a.log"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(argv, "--files-from") {
+		t.Fatalf("rg 15 has no --files-from: %v", argv)
+	}
+	if !slices.Contains(argv, "-e") {
+		t.Fatalf("need -e so remaining args are paths: %v", argv)
+	}
+	if slices.Contains(argv, "logs") {
+		t.Fatalf("must not pass RelativeDir when files are pre-filtered: %v", argv)
+	}
+	if argv[len(argv)-1] != "--" || argv[len(argv)-2] != "needle" {
+		t.Fatalf("expected -e needle --, got %v", argv[len(argv)-4:])
+	}
+}
+
+func TestSplitFileListRespectsBudget(t *testing.T) {
+	files := []string{"a.log", "bb.log", "ccc.log"}
+	got := splitFileList(files, 8)
+	if len(got) < 2 {
+		t.Fatalf("expected multiple chunks, got %v", got)
+	}
+	var flat []string
+	for _, c := range got {
+		flat = append(flat, c...)
+	}
+	if !slices.Equal(flat, files) {
+		t.Fatalf("lost files: %v", flat)
+	}
+}
+
 func TestFormatCmdQuotesQuery(t *testing.T) {
 	got := formatCmd("/opt/rg", []string{"--json", "--", "a b", "src"})
 	if got != "/opt/rg --json -- 'a b' src" {

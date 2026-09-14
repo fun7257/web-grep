@@ -1,9 +1,11 @@
 import type { FormEvent, KeyboardEvent, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useLocale } from "../hooks/useLocale.ts";
+import type { SearchHistoryItem } from "../searchHistory.ts";
 import type { QueryPart, SearchModifiers } from "../searchStack.ts";
 import { newPart } from "../searchStack.ts";
-import { IconCaret, IconSearch } from "./icons.tsx";
+import { timeRangeMsgKey, type TimeRange } from "../timeRange.ts";
+import { IconCaret, IconNavBack, IconNavForward, IconSearch } from "./icons.tsx";
 
 function QueryChips({
   parts,
@@ -44,11 +46,9 @@ export function SearchBar({
   onPartsChange,
   draft,
   onDraftChange,
-  running,
   onFlushSearch,
   canClear,
   onClear,
-  onCancel,
   queryRef,
   modifiers,
   onModifiersChange,
@@ -56,16 +56,21 @@ export function SearchBar({
   onIncludeGlobsChange,
   excludeGlobs = "",
   onExcludeGlobsChange,
+  timeRange = null,
+  history = [],
+  onRestoreHistory,
+  canGoBack = false,
+  canGoForward = false,
+  onGoBack,
+  onGoForward,
 }: {
   parts: QueryPart[];
   onPartsChange: (parts: QueryPart[]) => void;
   draft: string;
   onDraftChange: (value: string) => void;
-  running: boolean;
   onFlushSearch: (nextParts: QueryPart[]) => void;
   canClear: boolean;
   onClear: () => void;
-  onCancel: () => void;
   queryRef: RefObject<HTMLInputElement | null>;
   modifiers?: SearchModifiers;
   onModifiersChange?: (modifiers: SearchModifiers) => void;
@@ -73,32 +78,23 @@ export function SearchBar({
   onIncludeGlobsChange?: (value: string) => void;
   excludeGlobs?: string;
   onExcludeGlobsChange?: (value: string) => void;
+  timeRange?: TimeRange | null;
+  history?: SearchHistoryItem[];
+  onRestoreHistory?: (item: SearchHistoryItem) => void;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+  onGoBack?: () => void;
+  onGoForward?: () => void;
 }) {
   const { t } = useLocale();
-  const andLock = useRef(false);
   const rootRef = useRef<HTMLDivElement>(null);
-  const editorRef = useRef<HTMLTextAreaElement>(null);
   const [editorOpen, setEditorOpen] = useState(false);
   const extraCount = Math.max(0, parts.length - 1);
   const leadPart = parts[0];
 
-  const addTerm = (value: string): void => {
-    const trimmed = value.trim();
-    if (trimmed === "" || andLock.current) {
-      return;
-    }
-    andLock.current = true;
-    onPartsChange([...parts, newPart(trimmed)]);
-    onDraftChange("");
-    window.setTimeout(() => {
-      andLock.current = false;
-    }, 0);
-  };
-
   const sendSearch = (): void => {
     const raw = draft.trim();
     onDraftChange("");
-    setEditorOpen(false);
     onFlushSearch(raw !== "" ? [...parts, newPart(raw)] : parts);
   };
 
@@ -112,15 +108,16 @@ export function SearchBar({
   };
 
   useEffect(() => {
+    if (parts.length >= 1 && draft.trim() !== "") {
+      setEditorOpen(true);
+    }
+  }, [draft, parts.length]);
+
+  useEffect(() => {
     if (!editorOpen) {
       return;
     }
-    const node = editorRef.current;
-    if (node !== null) {
-      node.focus();
-      const at = node.value.length;
-      node.setSelectionRange(at, at);
-    }
+    queryRef.current?.focus();
     const onDown = (event: MouseEvent): void => {
       const target = event.target;
       if (
@@ -187,10 +184,6 @@ export function SearchBar({
     }
     event.preventDefault();
     event.stopPropagation();
-    if (event.shiftKey) {
-      addTerm(draft);
-      return;
-    }
     sendSearch();
   };
 
@@ -206,9 +199,33 @@ export function SearchBar({
         noValidate
         role="search"
       >
+        <div className="search-nav" role="group" aria-label={t("searchHistory")}>
+          <button
+            type="button"
+            className="search-nav-btn"
+            disabled={!canGoBack}
+            aria-label={t("searchBack")}
+            title={t("searchBack")}
+            onClick={onGoBack}
+          >
+            <IconNavBack />
+          </button>
+          <button
+            type="button"
+            className="search-nav-btn"
+            disabled={!canGoForward}
+            aria-label={t("searchForward")}
+            title={t("searchForward")}
+            onClick={onGoForward}
+          >
+            <IconNavForward />
+          </button>
+        </div>
         <div className="search-field-wrap">
           <div
-            className="search-field"
+            className={
+              leadPart !== undefined ? "search-field has-chips" : "search-field"
+            }
             onClick={() => {
               queryRef.current?.focus();
             }}
@@ -216,9 +233,15 @@ export function SearchBar({
             <span className="search-icon">
               <IconSearch />
             </span>
-            <div className="search-chip-row">
-              {leadPart !== undefined ? (
-                <span className="q-token">
+            {leadPart !== undefined ? (
+              <div
+                className={
+                  extraCount > 0
+                    ? "search-chips-wrap search-chip-row has-more"
+                    : "search-chips-wrap search-chip-row"
+                }
+              >
+                <span className="q-token" data-chip-token="">
                   <span className="q-chip hl-0">
                     <span className="q-chip-text">{leadPart.value}</span>
                     <button
@@ -234,24 +257,26 @@ export function SearchBar({
                     </button>
                   </span>
                 </span>
-              ) : null}
-              {extraCount > 0 ? (
-                <button
-                  type="button"
-                  className="search-more"
-                  aria-label={t("queryMore", { n: extraCount })}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setEditorOpen(true);
-                  }}
-                >
-                  {t("queryMore", { n: extraCount })}
-                </button>
-              ) : null}
-            </div>
+                {extraCount > 0 ? (
+                  <button
+                    type="button"
+                    className="search-more"
+                    aria-label={t("queryMore", { n: extraCount })}
+                    title={t("queryExpand")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setEditorOpen(true);
+                    }}
+                  >
+                    {t("queryMore", { n: extraCount })}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
             <input
               ref={queryRef}
-              type="search"
+              type="text"
+              role="searchbox"
               name="query"
               autoFocus
               autoComplete="off"
@@ -266,6 +291,18 @@ export function SearchBar({
               }}
               onKeyDown={onQueryKeyDown}
             />
+            <span
+              className={
+                timeRange === null
+                  ? "search-time-pill is-off"
+                  : "search-time-pill"
+              }
+              title={t("timeRangeHint")}
+            >
+              {timeRange === null
+                ? t("timeRangeAll")
+                : t(timeRangeMsgKey(timeRange))}
+            </span>
             <button
               type="button"
               className={editorOpen ? "search-caret is-open" : "search-caret"}
@@ -288,30 +325,44 @@ export function SearchBar({
               aria-label={t("queryExpand")}
             >
               {parts.length > 0 ? (
-                <div className="search-editor-chips">
-                  <QueryChips
-                    parts={parts}
-                    onRemove={removePart}
-                    opAnd={t("opAnd")}
-                  />
+                <div className="search-editor-block">
+                  <div className="search-history-label">{t("queryConditions")}</div>
+                  <div className="search-editor-chips">
+                    <QueryChips
+                      parts={parts}
+                      onRemove={removePart}
+                      opAnd={t("opAnd")}
+                    />
+                  </div>
                 </div>
               ) : null}
-              <textarea
-                ref={editorRef}
-                className="search-editor-input"
-                rows={3}
-                autoComplete="off"
-                autoCorrect="off"
-                autoCapitalize="off"
-                spellCheck={false}
-                placeholder={t("queryPlaceholder")}
-                value={draft}
-                onChange={(event) => {
-                  onDraftChange(event.target.value);
-                }}
-                onKeyDown={onQueryKeyDown}
-              />
-              <p className="search-editor-hint">{t("queryAdd")}</p>
+              {history.length > 0 ? (
+                <div className="search-history">
+                  <div className="search-history-label">{t("searchHistory")}</div>
+                  {history.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="search-history-item"
+                      onClick={() => {
+                        setEditorOpen(false);
+                        onRestoreHistory?.(item);
+                      }}
+                    >
+                      <span className="search-history-q">
+                        {item.parts.join(" · ")}
+                      </span>
+                      <span className="search-history-meta">
+                        {item.timeRange === null
+                          ? t("timeRangeAll")
+                          : t(timeRangeMsgKey(item.timeRange))}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="search-editor-hint">{t("searchHistoryEmpty")}</p>
+              )}
             </div>
           ) : null}
         </div>
@@ -326,14 +377,6 @@ export function SearchBar({
           </button>
           <button type="button" className="search-go" onClick={sendSearch}>
             {t("search")}
-          </button>
-          <button
-            type="button"
-            className="search-cancel"
-            disabled={!running}
-            onClick={onCancel}
-          >
-            {t("cancel")}
           </button>
         </div>
       </form>

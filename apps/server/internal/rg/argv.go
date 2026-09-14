@@ -22,6 +22,8 @@ type Input struct {
 	NoIgnore       bool
 	SearchZip      bool
 	Threads        int
+	FileList       []string
+	LimitToList    bool
 }
 
 func BuildArgv(in Input) ([]string, error) {
@@ -70,6 +72,13 @@ func BuildArgv(in Input) ([]string, error) {
 	}
 	for _, g := range sandbox.DenylistRgGlobs(in.AllowSecrets, len(in.GlobInclude) > 0) {
 		argv = append(argv, "--glob", g)
+	}
+	// -e makes every remaining positional a PATH, so a pre-filtered file
+	// list never searches the rest of the tree. rg ignores --glob on those
+	// explicit paths (caller must filter FileList). rg 15 has no --files-from.
+	if in.LimitToList {
+		argv = append(argv, "-e", in.Query, "--")
+		return argv, nil
 	}
 	if in.RelativeDir == "." || in.RelativeDir == "" {
 		argv = append(argv, "--", in.Query)

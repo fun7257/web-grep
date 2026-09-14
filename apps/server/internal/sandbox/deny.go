@@ -87,7 +87,7 @@ func SanitizeUserGlob(glob string) (string, error) {
 	if strings.HasPrefix(trimmed, "!") {
 		return "", ErrInvalidGlob
 	}
-	if strings.Contains(trimmed, "--") {
+	if strings.HasPrefix(trimmed, "--") {
 		return "", ErrInvalidGlob
 	}
 	if filepath.IsAbs(trimmed) {

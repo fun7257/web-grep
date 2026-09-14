@@ -1,22 +1,43 @@
-# Bind 0.0.0.0 requires both a token and WEB_GREP_PUBLIC_HOST.
-# Open http://localhost:8787 and put the token in the prompt.
+# Test / production: one container serves the SPA and /api.
+# App config is /app/config.yaml inside the image (root: /data).
+# WEB_GREP_* environment variables are optional one-shot overrides.
 #
-#   docker compose up --build
-#   WEB_GREP_DATA=/var/log docker compose up --build
+#   WEB_GREP_DATA=/var/log WEB_GREP_TOKEN=secret docker compose up --build -d
+#
+# Or mount your own yaml (must use root: /data):
+#   - ./config.yaml:/app/config.yaml
+
+name: web-grep
 
 services:
   web-grep:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: web-grep:test
+    user: "${WEB_GREP_UID:-0}:${WEB_GREP_GID:-0}"
     ports:
-      - "8787:8787"
+      - "${WEB_GREP_PORT:-8787}:8787"
     environment:
-      WEB_GREP_ROOT: /data
-      WEB_GREP_HOST: 0.0.0.0
-      WEB_GREP_PORT: "8787"
-      WEB_GREP_TOKEN: changeme
-      WEB_GREP_PUBLIC_HOST: localhost
-      WEB_GREP_RG: /usr/bin/rg
-      WEB_GREP_WEB_DIST: /app/web
+      WEB_GREP_TOKEN: ${WEB_GREP_TOKEN:?set WEB_GREP_TOKEN (or mount a config.yaml with token)}
+      WEB_GREP_PUBLIC_HOST: ${WEB_GREP_PUBLIC_HOST:-}
     volumes:
-      - ${WEB_GREP_DATA:-./}:/data:ro
+      - type: bind
+        source: ${WEB_GREP_DATA:?set WEB_GREP_DATA to the host directory to search}
+        target: /data
+        read_only: true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "-qO-",
+          "http://127.0.0.1:8787/api/health",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+      start_period: 5s
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true

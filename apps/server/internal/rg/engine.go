@@ -20,31 +20,83 @@ type Engine struct {
 
 func (e Engine) Kind() string { return "rg" }
 
+const fileListArgBudget = 96 * 1024
+
 func (e Engine) Search(ctx context.Context, in Input, emit func(Match) error, progress func(files int)) error {
+	if in.LimitToList {
+		if len(in.FileList) == 0 {
+			return nil
+		}
+		seen := 0
+		for _, chunk := range splitFileList(in.FileList, fileListArgBudget) {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			argv, err := BuildArgv(in)
+			if err != nil {
+				return err
+			}
+			argv = append(argv, chunk...)
+			n, err := e.run(ctx, in.RootReal, argv, emit, progress, seen)
+			if err != nil {
+				return err
+			}
+			seen = n
+		}
+		return nil
+	}
 	argv, err := BuildArgv(in)
 	if err != nil {
 		return err
 	}
+	_, err = e.run(ctx, in.RootReal, argv, emit, progress, 0)
+	return err
+}
+
+func splitFileList(files []string, budget int) [][]string {
+	if budget <= 0 {
+		budget = fileListArgBudget
+	}
+	var out [][]string
+	var chunk []string
+	used := 0
+	for _, f := range files {
+		need := len(f) + 1
+		if len(chunk) > 0 && used+need > budget {
+			out = append(out, chunk)
+			chunk = nil
+			used = 0
+		}
+		chunk = append(chunk, f)
+		used += need
+	}
+	if len(chunk) > 0 {
+		out = append(out, chunk)
+	}
+	return out
+}
+
+func (e Engine) run(ctx context.Context, dir string, argv []string, emit func(Match) error, progress func(files int), filesAlready int) (int, error) {
 	// CommandContext + StdoutPipe races: Wait/cancel close the pipe while Scan
 	// still reads, which surfaces as "read |0: file already closed".
 	cmd := exec.Command(e.Bin, argv...)
-	cmd.Dir = in.RootReal
+	cmd.Dir = dir
 	cmd.Env = Env()
 	setProcAttr(cmd)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return err
+		return filesAlready, err
 	}
 	var stderr strings.Builder
 	cmd.Stderr = &limitWriter{w: &stderr, n: 8192}
 	if logCmd() {
 		logx.Info("rg", map[string]any{
-			"cwd": in.RootReal,
+			"cwd": dir,
 			"cmd": formatCmd(e.Bin, argv),
 		})
 	}
 	if err := cmd.Start(); err != nil {
-		return err
+		return filesAlready, err
 	}
 
 	stopWatch := make(chan struct{})
@@ -59,7 +111,7 @@ func (e Engine) Search(ctx context.Context, in Input, emit func(Match) error, pr
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	var emitErr error
-	files := 0
+	files := filesAlready
 	for sc.Scan() {
 		if ctx.Err() != nil {
 			break
@@ -87,26 +139,26 @@ func (e Engine) Search(ctx context.Context, in Input, emit func(Match) error, pr
 	close(stopWatch)
 
 	if emitErr != nil {
-		return emitErr
+		return files, emitErr
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
+		return files, ctx.Err()
 	}
 	if waitErr != nil {
 		if ee, ok := waitErr.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			return nil
+			return files, nil
 		}
 		msg := strings.TrimSpace(stderr.String())
 		if msg != "" {
 			logx.Warn("rg stderr", map[string]any{"stderr": msg})
-			return fmt.Errorf("%s", msg)
+			return files, fmt.Errorf("%s", msg)
 		}
-		return waitErr
+		return files, waitErr
 	}
 	if isClosedPipe(scanErr) {
-		return nil
+		return files, nil
 	}
-	return scanErr
+	return files, scanErr
 }
 
 func logCmd() bool {

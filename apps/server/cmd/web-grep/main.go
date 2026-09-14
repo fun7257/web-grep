@@ -1,17 +1,23 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
+	"time"
 
+	"web-grep/internal/auth"
 	"web-grep/internal/config"
 	"web-grep/internal/httpapi"
 	"web-grep/internal/logx"
 	"web-grep/internal/rg"
 	"web-grep/internal/search"
+	"web-grep/internal/stats"
 )
 
 func main() {
@@ -22,16 +28,16 @@ func main() {
 }
 
 func run() error {
-	cfg, err := config.Load()
+	configPath := flag.String("config", "", "path to config.yaml")
+	flag.Parse()
+	cfg, err := config.Load(*configPath)
 	if err != nil {
 		return err
 	}
 	logx.SetLevel(cfg.LogLevel)
-	if cfg.Token == "" {
-		logx.Warn("WEB_GREP_TOKEN is unset; auth is disabled (Host/Origin still apply)", nil)
-	}
+	sessions := auth.NewSessions()
 	if cfg.AllowSecrets {
-		logx.Warn("WEB_GREP_ALLOW_SECRETS=true; denylist disabled", nil)
+		logx.Warn("allow_secrets=true; denylist disabled", nil)
 	}
 
 	bin := rg.Detect(cfg.RgPath)
@@ -47,16 +53,21 @@ func run() error {
 		}
 	}
 
-	svc := search.New(cfg, engine, kind)
+	countPath := "search-count"
+	if cfg.ConfigPath != "" {
+		countPath = filepath.Join(filepath.Dir(cfg.ConfigPath), "search-count")
+	}
+	svc := search.New(cfg, engine, kind, stats.Open(countPath))
 	webDist := ""
 	if !cfg.Dev {
 		webDist = resolveWebDist(cfg.WebDist)
 	}
 	srv := &httpapi.Server{
-		Cfg:     cfg,
-		Search:  svc,
-		Engine:  kind,
-		WebDist: webDist,
+		Cfg:      cfg,
+		Search:   svc,
+		Engine:   kind,
+		WebDist:  webDist,
+		Sessions: sessions,
 	}
 	if s, ok := version.(string); ok {
 		srv.Version = s
@@ -72,12 +83,29 @@ func run() error {
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpapi.ListenAndServe(srv) }()
+	go func() {
+		if err := waitForListen(cfg.Host, cfg.Port, 5*time.Second); err != nil {
+			logx.Warn("server did not become ready before persisting token", map[string]any{"err": err.Error()})
+			return
+		}
+		rewrote, err := cfg.SealToken()
+		if err != nil {
+			logx.Warn("could not persist hashed token; login still uses the in-memory hash", map[string]any{
+				"path": cfg.ConfigPath,
+				"err":  err.Error(),
+			})
+			return
+		}
+		if rewrote {
+			logx.Info("hashed token in config.yaml", map[string]any{"path": cfg.ConfigPath})
+		}
+	}()
 
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	go func() {
 		for range hup {
-			next, err := config.Load()
+			next, err := config.Load(cfg.ConfigPath)
 			if err != nil {
 				logx.Error("reload failed", map[string]any{"err": err.Error()})
 				continue
@@ -111,8 +139,9 @@ func resolveWebDist(override string) string {
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
 		candidates = append(candidates,
-			filepath.Join(dir, "apps/web/dist"),
+			filepath.Join(dir, "web"),
 			filepath.Join(dir, "web/dist"),
+			filepath.Join(dir, "apps/web/dist"),
 			filepath.Join(dir, "../apps/web/dist"),
 		)
 	}
@@ -131,4 +160,27 @@ func resolveWebDist(override string) string {
 		}
 	}
 	return ""
+}
+
+func waitForListen(host string, port int, timeout time.Duration) error {
+	dialHost := host
+	if dialHost == "0.0.0.0" || dialHost == "::" || dialHost == "" {
+		dialHost = "127.0.0.1"
+	}
+	addr := net.JoinHostPort(dialHost, strconv.Itoa(port))
+	deadline := time.Now().Add(timeout)
+	var last error
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if err == nil {
+			_ = conn.Close()
+			return nil
+		}
+		last = err
+		time.Sleep(50 * time.Millisecond)
+	}
+	if last == nil {
+		return fmt.Errorf("listen timeout on %s", addr)
+	}
+	return last
 }

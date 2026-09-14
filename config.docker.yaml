@@ -1,0 +1,38 @@
+# Docker 用配置。镜像内路径是 /app/config.yaml。
+# 启动：
+#   cp config.docker.yaml config.deploy.yaml
+#   # 填写 token、public_host
+#   docker run ... -v "$PWD/config.deploy.yaml:/app/config.yaml" -v /宿主机目录:/data:ro web-grep:v0.1.4
+#
+# 容器内 root 必须保持 /data（对应上面挂进去的目录）。
+# 不要用本机开发那份 config.yaml（里面的 root 是 Mac 路径）。
+# 配置文件不要用 :ro 挂载：明文 token 启动后会写成 sha256:<hex>。
+
+# 容器内搜索根。必须是 /data。
+root: /data
+
+# 容器内必须绑 0.0.0.0，否则外面访问不到。
+host: 0.0.0.0
+port: 8787
+
+# 浏览器地址栏里的主机名/IP，逗号列表。禁止 0.0.0.0。
+public_host:
+  - localhost
+  - 127.0.0.1
+  # - 192.168.1.10
+
+# 登录密码。明文即可，启动后会被改写成 sha256:<hex>。
+# token: change-me
+
+# 镜像里的 rg 与前端产物，一般不用改。
+rg: /usr/bin/rg
+web_dist: /app/web
+
+dev: false
+log_level: info
+max_results: 20000 # 0 = 不限制
+timeout_ms: 0 # 0 = 不超时
+search_zip: true
+follow_symlinks: true
+no_ignore: true # 忽略 gitignore，日志才能搜全
+allow_secrets: false # 不要在生产打开

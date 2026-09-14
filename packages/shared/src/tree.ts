@@ -3,6 +3,7 @@ import { LIMITS } from "./limits.ts";
 
 export const TreeQuerySchema = z.object({
   path: z.string().max(LIMITS.pathMaxChars).default(""),
+  mtimeAfter: z.number().int().nonnegative().optional(),
 });
 export type TreeQuery = z.output<typeof TreeQuerySchema>;
 

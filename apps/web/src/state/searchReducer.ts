@@ -15,6 +15,7 @@ export type SearchState = {
   done: SseDone | null;
   error: JsonError | null;
   progress: SseProgress | null;
+  searchCount: number;
 };
 
 export type SearchAction =
@@ -35,6 +36,7 @@ export const initialSearchState: SearchState = {
   done: null,
   error: null,
   progress: null,
+  searchCount: 0,
 };
 
 export function searchReducer(
@@ -54,7 +56,11 @@ export function searchReducer(
     case "search/stream":
       return { ...state, hits: [] };
     case "search/meta":
-      return { ...state, meta: action.meta };
+      return {
+        ...state,
+        meta: action.meta,
+        searchCount: action.meta.searchCount ?? state.searchCount,
+      };
     case "search/progress":
       return { ...state, progress: action.progress };
     case "search/hit":
@@ -70,6 +76,6 @@ export function searchReducer(
     case "search/cancelled":
       return { ...state, status: "cancelled" };
     case "search/reset":
-      return initialSearchState;
+      return { ...initialSearchState, searchCount: state.searchCount };
   }
 }

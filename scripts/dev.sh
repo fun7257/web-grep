@@ -40,6 +40,23 @@ pnpm --filter @web-grep/shared build
 export WEB_GREP_DEV=1
 pnpm --filter @web-grep/shared --filter @web-grep/web --parallel run dev &
 web_pid=$!
-go run -C "$ROOT/apps/server" ./cmd/web-grep &
+go run -C "$ROOT/apps/server" ./cmd/web-grep -config "$ROOT/config.yaml" &
 srv_pid=$!
+
+for _ in $(seq 1 100); do
+  if lsof -t -nP -iTCP:8787 -sTCP:LISTEN >/dev/null 2>&1; then
+    break
+  fi
+  if ! kill -0 "$srv_pid" 2>/dev/null; then
+    wait "$srv_pid" || true
+    echo "web-grep server failed to listen on :8787" >&2
+    exit 1
+  fi
+  sleep 0.1
+done
+if ! lsof -t -nP -iTCP:8787 -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "web-grep server did not listen on :8787 within 10s" >&2
+  exit 1
+fi
+
 wait

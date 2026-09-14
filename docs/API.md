@@ -20,8 +20,8 @@
 | 默认值 | 请求里省略的字段按 Zod `.default()`。前端若行为与默认不同，必须显式传（当前 UI：`regex: false`、`hidden: true`）。 |
 | 路径 | 客户端只出现 POSIX **相对路径**（`src/a.ts`）。禁止绝对路径、`..`、NUL。 |
 | 错误 | 机器可读 `code` + 给人看的 `message`。不要把 Zod issue 数组或 Go error 原文直接给浏览器。 |
-| 鉴权 | `GET /api/health` 免 token，但仍校验 Host/Origin。其余 `/api/*` 在配置了 token 时需要 `Authorization: Bearer` 或 `X-Web-Grep-Token`。 |
-| 401 vs 403 | `401 UNAUTHORIZED`：弹 token。`403 FORBIDDEN_HOST`：不是 token 问题，禁止当登录失败。 |
+| 鉴权 | 单密码。`GET /api/health`、`GET /api/auth/status`、`POST /api/auth/login`、`POST /api/auth/logout` 以及非 `/api` 的 SPA 静态资源免会话，但仍校验 Host/Origin。其余 `/api/*` 在设置了 `token` 时需要登录后的 `Authorization: Bearer` 或 `X-Web-Grep-Token`（会话令牌，不是密码）。会话服务端 7 天过期；浏览器勾选「记住 7 天」后把令牌放 `localStorage`，否则 `sessionStorage`（关标签即丢）。 |
+| 401 vs 403 | `401 UNAUTHORIZED`：弹登录。`INVALID_AUTH`：密码错误。`403 FORBIDDEN_HOST`：不是登录问题。 |
 
 并行开发建议：
 
@@ -51,7 +51,8 @@ HTTP JSON（SSE 尚未开始时）：
 | `BUSY` | 429 | 超过 2 路并发搜索 |
 | `ENGINE` | 503 | 没有可用的 `rg` |
 | `ENGINE_UNSUPPORTED` | 400 | 当前引擎不支持该模式（如无 rg 时用正则） |
-| `UNAUTHORIZED` | 401 | token 缺失或错误 |
+| `UNAUTHORIZED` | 401 | 未登录或会话无效 |
+| `INVALID_AUTH` | 400/401 | 密码不合法或错误 |
 | `FORBIDDEN_HOST` | 403 | Host/Origin 不在允许名单 |
 | `INTERNAL` | 500 | 未分类失败 |
 
@@ -69,11 +70,27 @@ HTTP JSON（SSE 尚未开始时）：
 
 `engine`：`rg` | `literal` | `none`。
 
-### `GET /api/meta`（需 token，若已配置）
+### `GET /api/auth/status`（公开）
 
-见 `MetaResponseSchema`。`rgVersion` 可为 `null`。`rootLabel` 是根目录 basename，不是绝对路径。`previewBytes=0` 表示不限制文件体积。
+```json
+{ "authRequired": true }
+```
 
-### `POST /api/search`（需 token）
+`authRequired` 为 true 且没有会话时显示登录。密码在 `config.yaml` 的 `token`（可用 `WEB_GREP_TOKEN` 临时覆盖）：写在 yaml 里的明文启动时会 SHA-256 后写回 `sha256:<hex>`。
+
+### `POST /api/auth/login`（公开）
+
+Body `{ "password" }` → `{ "token", "expiresAt" }`（`expiresAt` 为 unix 毫秒，默认 7 天后）。密码错误 `401 INVALID_AUTH`。
+
+### `POST /api/auth/logout`（公开）
+
+撤销当前会话令牌。`{ "ok": true }`。
+
+### `GET /api/meta`（设置了密码时需会话）
+
+见 `MetaResponseSchema`。`rgVersion` 可为 `null`。`rootLabel` 是根目录 basename，不是绝对路径。`previewBytes=0` 表示不限制文件体积。含 `authRequired`、`searchCount`（本实例累计执行的搜索次数，落在配置文件旁的 `search-count`）。
+
+### `POST /api/search`（设置了密码时需会话）
 
 **Request** `SearchRequestSchema`（JSON body）：
 
@@ -87,7 +104,8 @@ HTTP JSON（SSE 尚未开始时）：
 | `caseSensitive` | `false` | |
 | `wordMatch` | `false` | |
 | `hidden` | `true` | `true` → rg `--hidden` |
-| `maxResults` | 服务端配置，默认不截断 | `0` 表示不截断 |
+| `maxResults` | 服务端配置 | 正整数；省略则用服务端 `max_results` |
+| `mtimeAfter` | 省略=不限 | unix 毫秒。服务端先按文件 mtime 列出文件，再只对这些路径跑 rg |
 
 **Preflight（非 SSE）**：校验失败直接 HTTP JSON。空查询、非法路径、BUSY、ENGINE 都在开流之前返回。
 
@@ -105,7 +123,11 @@ HTTP JSON（SSE 尚未开始时）：
 
 取消：关掉 fetch（AbortController）。超时：`done.timedOut=true`，不是 `error`。
 
-### `GET /api/tree?path=`（需 token）
+### `GET /api/count?path=`（设置了密码时需会话）
+
+`{ "count": 12 }`。统计该路径下的文件数，可选 `mtimeAfter`（unix 毫秒），规则与目录树过滤相同。
+
+### `GET /api/tree?path=`（设置了密码时需会话）
 
 `path` 省略或空=根。响应 `TreeListingSchema`：
 
@@ -117,9 +139,9 @@ HTTP JSON（SSE 尚未开始时）：
 }
 ```
 
-一次性只列一层。`.git` / `node_modules` / `.vite` / 密钥不出现。`truncated=true` 表示该层超过 2000 条被截断。
+一次性只列一层。`.git` / `node_modules` / `.vite` / 密钥不出现。`truncated=true` 表示该层超过 2000 条被截断。可选 `mtimeAfter`（unix 毫秒）：只列出该时间之后改过的文件，以及下面仍有这类文件的目录。
 
-### `GET /api/file`（需 token）
+### `GET /api/file`（设置了密码时需会话）
 
 查询串（`FileSliceQuerySchema`）：
 
@@ -163,7 +185,7 @@ HTTP JSON（SSE 尚未开始时）：
 ## 5. 后端必须遵守
 
 1. JSON 字段名与 schema 完全一致（camelCase）。
-2. 搜索 `cwd = WEB_GREP_ROOT`，命中路径转相对路径后再发出。
+2. 搜索 `cwd = root`（`config.yaml`），命中路径转相对路径后再发出。`mtimeAfter` 时不要把整个 root 交给 rg，只搜筛过的文件列表。
 3. 先 preflight 再 SSE；SSE 开始后不要再发普通 JSON 错误体。
 4. 文件接口按行扫描切片，不要 `ReadAll` 整文件。
 5. 不把绝对路径、token、查询全文（非 debug）打进 info 日志。

@@ -24,27 +24,32 @@ import (
 )
 
 type Server struct {
-	Cfg     config.Config
-	Search  *search.Service
-	Engine  string
-	Version string
-	WebDist string
+	Cfg      config.Config
+	Search   *search.Service
+	Engine   string
+	Version  string
+	WebDist  string
+	Sessions *auth.Sessions
 }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", s.health)
+	mux.HandleFunc("GET /api/auth/status", s.authStatus)
+	mux.HandleFunc("POST /api/auth/login", s.authLogin)
+	mux.HandleFunc("POST /api/auth/logout", s.authLogout)
 	mux.HandleFunc("GET /api/meta", s.meta)
 	mux.HandleFunc("POST /api/search", s.search)
 	mux.HandleFunc("GET /api/file", s.file)
 	mux.HandleFunc("GET /api/tree", s.tree)
+	mux.HandleFunc("GET /api/count", s.count)
 	if s.WebDist != "" {
 		mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "INTERNAL", "not found")
 		})
 		mux.Handle("GET /", spa(s.WebDist))
 	}
-	return auth.Middleware(s.Cfg)(mux)
+	return auth.Middleware(s.Cfg, s.Sessions)(mux)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +76,8 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 			"queryMaxChars":  config.QueryMaxChars,
 		},
 		"defaultLocale": "zh-CN",
-		"authRequired":  s.Cfg.Token != "",
+		"authRequired":  s.Cfg.TokenHash != "",
+		"searchCount":   s.Search.Stats.Get(),
 	})
 }
 
@@ -85,6 +91,7 @@ type searchBody struct {
 	WordMatch     *bool    `json:"wordMatch"`
 	Hidden        *bool    `json:"hidden"`
 	MaxResults    *int     `json:"maxResults"`
+	MtimeAfter    *int64   `json:"mtimeAfter"`
 }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +185,18 @@ func parseSearch(b searchBody) (search.Request, error) {
 		}
 		req.MaxResults = *b.MaxResults
 	}
+	if b.MtimeAfter != nil {
+		if *b.MtimeAfter < 0 {
+			return search.Request{}, errors.New("invalid query")
+		}
+		if *b.MtimeAfter > 0 {
+			after := time.UnixMilli(*b.MtimeAfter)
+			if after.After(time.Now().Add(time.Hour)) {
+				after = time.Now()
+			}
+			req.MtimeAfter = after
+		}
+	}
 	return req, nil
 }
 
@@ -242,13 +261,56 @@ func (s *Server) tree(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")
 		return
 	}
-	listing, err := tree.List(s.Cfg.RootReal, rel, s.Cfg.AllowSecrets)
+	var after time.Time
+	if raw := r.URL.Query().Get("mtimeAfter"); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || n < 0 {
+			writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")
+			return
+		}
+		if n > 0 {
+			after = time.UnixMilli(n)
+			if after.After(time.Now().Add(time.Hour)) {
+				after = time.Now()
+			}
+		}
+	}
+	listing, err := tree.List(s.Cfg.RootReal, rel, s.Cfg.AllowSecrets, after)
 	if err != nil {
 		logx.Warn("sandbox reject", map[string]any{"code": "INVALID_PATH"})
 		writeErr(w, http.StatusNotFound, "INVALID_PATH", "invalid path")
 		return
 	}
 	writeJSON(w, http.StatusOK, listing)
+}
+
+func (s *Server) count(w http.ResponseWriter, r *http.Request) {
+	rel := r.URL.Query().Get("path")
+	if len(rel) > config.PathMaxChars {
+		writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")
+		return
+	}
+	var after time.Time
+	if raw := r.URL.Query().Get("mtimeAfter"); raw != "" {
+		n, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || n < 0 {
+			writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")
+			return
+		}
+		if n > 0 {
+			after = time.UnixMilli(n)
+			if after.After(time.Now().Add(time.Hour)) {
+				after = time.Now()
+			}
+		}
+	}
+	n, err := tree.CountFiles(s.Cfg.RootReal, rel, s.Cfg.AllowSecrets, after)
+	if err != nil {
+		logx.Warn("sandbox reject", map[string]any{"code": "INVALID_PATH"})
+		writeErr(w, http.StatusNotFound, "INVALID_PATH", "invalid path")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"count": n})
 }
 
 type sseWriter struct {
@@ -343,11 +405,18 @@ func spa(dir string) http.Handler {
 	root := os.DirFS(dir)
 	fileServer := http.FileServer(http.FS(root))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
 		name := strings.TrimPrefix(r.URL.Path, "/")
 		if name == "" {
 			name = "index.html"
 		}
+		if name == "index.html" {
+			w.Header().Set("Cache-Control", "no-store")
+		} else if strings.HasPrefix(name, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		if _, err := fs.Stat(root, name); err != nil {
+			w.Header().Set("Cache-Control", "no-store")
 			r = r.Clone(r.Context())
 			r.URL.Path = "/"
 			http.ServeFile(w, r, filepath.Join(dir, "index.html"))

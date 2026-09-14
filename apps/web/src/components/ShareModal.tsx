@@ -124,7 +124,7 @@ function ShareRow({
         />
         <button
           type="button"
-          className={copied ? "preview-icon-btn is-copied" : "preview-icon-btn"}
+          className={copied ? "share-copy is-copied" : "share-copy"}
           title={copyLabel}
           aria-label={copyLabel}
           onClick={onCopy}

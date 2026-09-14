@@ -5,6 +5,8 @@
 .vscode
 .DS_Store
 .env
+.env.*
+config.yaml
 **/.env
 **/node_modules
 **/dist
@@ -12,11 +14,9 @@
 **/.vite
 **/*.log
 **/*.tsbuildinfo
+apps/web/src/test
+packages/shared/test
 DESIGN.md
 docs
 scripts
 *.md
-!package.json
-.dockerignore
-Dockerfile
-docker-compose.yml

@@ -145,6 +145,7 @@ export function toRgShareCommand(opts: {
 export function toRequest(
   stack: SearchStack,
   extraInclude: string[] = [],
+  mtimeAfter?: number,
 ): SearchRequestInput {
   const compiled = compileParts(stack.parts, stack.regex);
   let globInclude = stack.globInclude;
@@ -162,5 +163,6 @@ export function toRequest(
     caseSensitive: stack.caseSensitive,
     wordMatch: stack.wordMatch,
     hidden: stack.hidden,
+    ...(mtimeAfter !== undefined ? { mtimeAfter } : {}),
   };
 }

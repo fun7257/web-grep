@@ -1,10 +1,4 @@
-export type FileKind =
-  | "markdown"
-  | "json"
-  | "csv"
-  | "html"
-  | "code"
-  | "text";
+export type FileKind = "markdown" | "json" | "code" | "text";
 
 const CODE_EXT = new Set([
   "ts",
@@ -38,6 +32,10 @@ const CODE_EXT = new Set([
   "sql",
   "graphql",
   "proto",
+  "html",
+  "htm",
+  "csv",
+  "tsv",
 ]);
 
 export function extOf(path: string): string {
@@ -57,12 +55,6 @@ export function detectKind(path: string): FileKind {
   if (ext === "json" || ext === "jsonc") {
     return "json";
   }
-  if (ext === "csv" || ext === "tsv") {
-    return "csv";
-  }
-  if (ext === "html" || ext === "htm") {
-    return "html";
-  }
   if (CODE_EXT.has(ext)) {
     return "code";
   }
@@ -76,9 +68,7 @@ function looksLikeJson(text: string): boolean {
   }
   const start = trimmed[0];
   const end = trimmed[trimmed.length - 1];
-  if (
-    !((start === "{" && end === "}") || (start === "[" && end === "]"))
-  ) {
+  if (!((start === "{" && end === "}") || (start === "[" && end === "]"))) {
     return false;
   }
   try {
@@ -89,23 +79,11 @@ function looksLikeJson(text: string): boolean {
   }
 }
 
-function looksLikeHtml(text: string): boolean {
-  const trimmed = text.trim();
-  return /^<\/?[a-zA-Z][\s\S]*>/.test(trimmed);
-}
-
 export function detectLineKind(path: string, text: string): FileKind {
   if (looksLikeJson(text)) {
     return "json";
   }
-  const fromPath = detectKind(path);
-  if (fromPath === "html" || looksLikeHtml(text)) {
-    return "html";
-  }
-  if (fromPath === "markdown" || fromPath === "csv") {
-    return fromPath;
-  }
-  return fromPath;
+  return detectKind(path);
 }
 
 export function kindLabel(kind: FileKind, path: string): string {
@@ -115,12 +93,6 @@ export function kindLabel(kind: FileKind, path: string): string {
   if (kind === "markdown") {
     return "Markdown";
   }
-  if (kind === "csv") {
-    return "CSV";
-  }
-  if (kind === "html") {
-    return "HTML";
-  }
   const ext = extOf(path);
   if (ext !== "") {
     return ext.toUpperCase();
@@ -129,5 +101,5 @@ export function kindLabel(kind: FileKind, path: string): string {
 }
 
 export function canFormat(kind: FileKind): boolean {
-  return kind === "json" || kind === "markdown" || kind === "csv" || kind === "html";
+  return kind === "json" || kind === "markdown";
 }

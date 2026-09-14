@@ -1,15 +1,26 @@
 export const TOKEN_STORAGE_KEY = "web-grep.token";
 
+export type TokenPersist = "session" | "local";
+
 export function readToken(): string {
-  return sessionStorage.getItem(TOKEN_STORAGE_KEY) ?? "";
+  return (
+    localStorage.getItem(TOKEN_STORAGE_KEY) ??
+    sessionStorage.getItem(TOKEN_STORAGE_KEY) ??
+    ""
+  );
 }
 
-export function writeToken(token: string): void {
+export function writeToken(
+  token: string,
+  persist: TokenPersist = "session",
+): void {
+  sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+  localStorage.removeItem(TOKEN_STORAGE_KEY);
   if (token === "") {
-    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
     return;
   }
-  sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+  const store = persist === "local" ? localStorage : sessionStorage;
+  store.setItem(TOKEN_STORAGE_KEY, token);
 }
 
 export function apiHeaders(): Record<string, string> {

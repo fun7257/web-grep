@@ -66,7 +66,7 @@ const GroupedHitRow = memo(function GroupedHitRow({
   );
 });
 
-export function ResultList({
+export const ResultList = memo(function ResultList({
   hits,
   selectedIndex,
   onSelect,
@@ -237,4 +237,4 @@ export function ResultList({
       </div>
     </div>
   );
-}
+});

@@ -15,6 +15,7 @@ function isAbortError(err: unknown): boolean {
 }
 
 export type UseSearch = SearchState & {
+  searchCount: number;
   submit: (
     input: SearchRequestInput,
     opts?: { acceptHit?: (hit: SseHit) => boolean },

@@ -5,6 +5,140 @@ const stroke = {
   strokeLinejoin: "round",
 } as const;
 
+export function IconSun() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="2.6" {...stroke} />
+      <path
+        d="M8 2.2v1.3M8 12.5v1.3M2.2 8h1.3M12.5 8h1.3M3.9 3.9l.95.95M11.15 11.15l.95.95M3.9 12.1l.95-.95M11.15 4.85l.95-.95"
+        {...stroke}
+      />
+    </svg>
+  );
+}
+
+export function IconMoon() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M9.6 2.6A5.4 5.4 0 1 0 13.2 11 4.4 4.4 0 0 1 9.6 2.6z"
+        {...stroke}
+      />
+    </svg>
+  );
+}
+
+export function IdleMark({ kind }: { kind: "hits" | "preview" | "nomatch" }) {
+  if (kind === "nomatch") {
+    return (
+      <svg className="idle-mark" viewBox="0 0 88 88" aria-hidden="true">
+        <circle cx="24" cy="26" r="2.2" fill="currentColor" opacity="0.35" />
+        <path
+          d="M32 26h34"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          opacity="0.35"
+        />
+        <circle cx="24" cy="44" r="2.2" fill="currentColor" opacity="0.22" />
+        <path
+          d="M36 44h10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          opacity="0.28"
+        />
+        <path
+          d="M52 44h10"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          opacity="0.28"
+        />
+        <circle cx="24" cy="62" r="2.2" fill="currentColor" opacity="0.35" />
+        <path
+          d="M32 62h24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          opacity="0.35"
+        />
+      </svg>
+    );
+  }
+  if (kind === "hits") {
+    return (
+      <svg className="idle-mark" viewBox="0 0 88 88" aria-hidden="true">
+        <circle cx="24" cy="26" r="2.2" fill="currentColor" opacity="0.4" />
+        <path
+          d="M32 26h34"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          opacity="0.4"
+        />
+        <circle className="idle-mark-hit" cx="24" cy="44" r="2.2" />
+        <rect
+          className="idle-mark-hit"
+          x="32"
+          y="41"
+          width="34"
+          height="6"
+          rx="2"
+        />
+        <circle cx="24" cy="62" r="2.2" fill="currentColor" opacity="0.4" />
+        <path
+          d="M32 62h24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.6"
+          strokeLinecap="round"
+          opacity="0.4"
+        />
+      </svg>
+    );
+  }
+  return (
+    <svg className="idle-mark" viewBox="0 0 88 88" aria-hidden="true">
+      <path
+        d="M28 16h22l14 14v42a6 6 0 0 1-6 6H28a6 6 0 0 1-6-6V22a6 6 0 0 1 6-6z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M50 16v14h14"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M32 42h24M32 52h18M32 62h24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        opacity="0.4"
+      />
+      <rect
+        className="idle-mark-hit"
+        x="32"
+        y="48"
+        width="16"
+        height="5"
+        rx="2.5"
+      />
+    </svg>
+  );
+}
+
 export function IconSearch() {
   return (
     <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -67,6 +201,22 @@ export function IconChevron({ open }: { open: boolean }) {
   );
 }
 
+export function IconNavBack() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M10.4 3.2 5.6 8l4.8 4.8" {...stroke} />
+    </svg>
+  );
+}
+
+export function IconNavForward() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M5.6 3.2 10.4 8l-4.8 4.8" {...stroke} />
+    </svg>
+  );
+}
+
 export function IconCaret({ open }: { open: boolean }) {
   return (
     <svg
@@ -125,11 +275,28 @@ export function IconCheck() {
   );
 }
 
+export function IconDash() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M4 8h8" {...stroke} />
+    </svg>
+  );
+}
+
 export function IconCopy() {
   return (
     <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
       <rect x="5.2" y="5.2" width="7.3" height="8.3" rx="1.4" {...stroke} />
       <path d="M3.6 10.6V3.7A1.4 1.4 0 0 1 5 2.3h5.4" {...stroke} />
+    </svg>
+  );
+}
+
+export function IconExpand() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 9.5V13h3.5M13 6.5V3H9.5" {...stroke} />
+      <path d="M9.7 6.3 13 3M6.3 9.7 3 13" {...stroke} />
     </svg>
   );
 }
@@ -159,6 +326,17 @@ export function IconMinusCircle() {
     <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="8" cy="8" r="5.2" {...stroke} />
       <path d="M5.4 8h5.2" {...stroke} />
+    </svg>
+  );
+}
+
+export function IconLogout() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path
+        d="M6.2 3.2H4.4A1.4 1.4 0 0 0 3 4.6v6.8A1.4 1.4 0 0 0 4.4 12.8h1.8M7.2 8H13M10.8 5.7 13.2 8 10.8 10.3"
+        {...stroke}
+      />
     </svg>
   );
 }

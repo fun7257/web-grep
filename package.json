@@ -10,7 +10,7 @@
     "predev": "pnpm --filter @web-grep/shared build",
     "dev": "bash scripts/dev.sh",
     "dev:shared": "pnpm --filter @web-grep/shared dev",
-    "dev:server": "WEB_GREP_DEV=1 go run -C apps/server ./cmd/web-grep",
+    "dev:server": "WEB_GREP_DEV=1 go run -C apps/server ./cmd/web-grep -config config.yaml",
     "dev:web": "pnpm --filter @web-grep/web dev",
     "build": "tsc -b --force && pnpm --filter @web-grep/web build && mkdir -p dist && go build -C apps/server -o ../../dist/web-grep ./cmd/web-grep",
     "start": "./dist/web-grep",

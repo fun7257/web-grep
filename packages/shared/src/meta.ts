@@ -16,5 +16,6 @@ export const MetaResponseSchema = z.object({
   }),
   defaultLocale: z.literal("zh-CN"),
   authRequired: z.boolean(),
+  searchCount: z.number().int().nonnegative().optional().default(0),
 });
 export type MetaResponse = z.output<typeof MetaResponseSchema>;

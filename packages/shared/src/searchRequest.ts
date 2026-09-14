@@ -17,6 +17,7 @@ export const SearchRequestSchema = z.object({
   wordMatch: z.boolean().default(false),
   hidden: z.boolean().default(true),
   maxResults: z.number().int().positive().max(LIMITS.maxResultsHard).optional(),
+  mtimeAfter: z.number().int().nonnegative().optional(),
 });
 export type SearchRequestInput = z.input<typeof SearchRequestSchema>;
 export type SearchRequest = z.output<typeof SearchRequestSchema>;

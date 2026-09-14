@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestListShowsDotConfigButNotSecretsOrJunk(t *testing.T) {
@@ -28,7 +29,7 @@ func TestListShowsDotConfigButNotSecretsOrJunk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listing, err := List(root, "", false)
+	listing, err := List(root, "", false, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +60,143 @@ func TestListShowsDotConfigButNotSecretsOrJunk(t *testing.T) {
 	}
 }
 
+func TestListSortsFilesByMtimeDescending(t *testing.T) {
+	root := t.TempDir()
+	older := filepath.Join(root, "aaa.log")
+	newer := filepath.Join(root, "zzz.log")
+	if err := os.WriteFile(older, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newer, []byte("new"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "subdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-48 * time.Hour)
+	newTime := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(older, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newer, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing, err := List(root, "", false, time.Time{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var files []string
+	if len(listing.Entries) == 0 || !listing.Entries[0].Dir || listing.Entries[0].Name != "subdir" {
+		t.Fatalf("dirs should stay first: %v", listing.Entries)
+	}
+	for _, e := range listing.Entries {
+		if !e.Dir {
+			files = append(files, e.Name)
+		}
+	}
+	if len(files) < 2 || files[0] != "zzz.log" || files[1] != "aaa.log" {
+		t.Fatalf("files should be newest first, got %v", files)
+	}
+}
+
+func TestCountFilesRespectsMtime(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldFile := filepath.Join(root, "old.log")
+	newFile := filepath.Join(root, "sub", "new.log")
+	if err := os.WriteFile(oldFile, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(newFile, []byte("y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-48 * time.Hour)
+	newTime := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(newFile, newTime, newTime); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := CountFiles(root, "", false, time.Time{})
+	if err != nil || all != 2 {
+		t.Fatalf("all=%d err=%v", all, err)
+	}
+	recent, err := CountFiles(root, "", false, time.Now().Add(-2*time.Hour))
+	if err != nil || recent != 1 {
+		t.Fatalf("recent=%d err=%v", recent, err)
+	}
+	sub, err := CountFiles(root, "sub", false, time.Time{})
+	if err != nil || sub != 1 {
+		t.Fatalf("sub=%d err=%v", sub, err)
+	}
+}
+
+func TestListHidesOldFilesAndEmptyDirs(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "olddir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "newdir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	oldFile := filepath.Join(root, "old.log")
+	newFile := filepath.Join(root, "new.log")
+	nestedOld := filepath.Join(root, "olddir", "a.log")
+	nestedNew := filepath.Join(root, "newdir", "b.log")
+	for _, p := range []string{oldFile, newFile, nestedOld, nestedNew} {
+		if err := os.WriteFile(p, []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldTime := time.Now().Add(-48 * time.Hour)
+	newTime := time.Now().Add(-30 * time.Minute)
+	for _, p := range []string{oldFile, nestedOld} {
+		if err := os.Chtimes(p, oldTime, oldTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, p := range []string{newFile, nestedNew} {
+		if err := os.Chtimes(p, newTime, newTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing, err := List(root, "", false, time.Now().Add(-2*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, e := range listing.Entries {
+		got[e.Name] = e.Dir
+	}
+	if _, ok := got["new.log"]; !ok {
+		t.Fatalf("new.log missing: %v", listing.Entries)
+	}
+	if _, ok := got["old.log"]; ok {
+		t.Fatal("old.log should be hidden")
+	}
+	if _, ok := got["newdir"]; !ok {
+		t.Fatal("newdir should stay, it has a recent file")
+	}
+	if _, ok := got["olddir"]; ok {
+		t.Fatal("olddir should be hidden, only old files inside")
+	}
+}
+
 func TestListAgentRootIfPresent(t *testing.T) {
 	root := "/Users/fun/agent"
 	st, err := os.Stat(root)
@@ -69,7 +207,7 @@ func TestListAgentRootIfPresent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listing, err := List(real, "", false)
+	listing, err := List(real, "", false, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}

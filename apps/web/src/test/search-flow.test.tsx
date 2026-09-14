@@ -8,6 +8,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { TOKEN_STORAGE_KEY } from "../api/headers.ts";
 import { App } from "../App.tsx";
 
 const META = {
@@ -142,15 +143,75 @@ function fileWindowForUrl(url: string) {
 function mockFetch(
   search: (init?: RequestInit) => Promise<Response> | Response,
   file?: (url: string, init?: RequestInit) => Promise<Response> | Response,
+  auth?: {
+    authRequired?: boolean;
+    treeEntries?: { name: string; path: string; dir: boolean }[];
+  },
 ): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
+    if (url.includes("/api/auth/status")) {
+      return Promise.resolve(
+        jsonResponse(200, {
+          authRequired: auth?.authRequired ?? false,
+        }),
+      );
+    }
+    if (url.includes("/api/auth/login")) {
+      const raw = init?.body;
+      let password = "";
+      if (typeof raw === "string") {
+        try {
+          const parsed = JSON.parse(raw) as { password?: string };
+          password = parsed.password ?? "";
+        } catch {
+          password = "";
+        }
+      }
+      if (password === "") {
+        return Promise.resolve(
+          jsonResponse(400, {
+            code: "INVALID_AUTH",
+            message: "password is required",
+          }),
+        );
+      }
+      return Promise.resolve(jsonResponse(200, { token: "sess-abc" }));
+    }
     if (url.includes("/api/meta")) {
       return Promise.resolve(jsonResponse(200, META));
     }
+    if (url.includes("/api/auth/logout")) {
+      return Promise.resolve(jsonResponse(200, { ok: true }));
+    }
+    if (url.includes("/api/count")) {
+      return Promise.resolve(jsonResponse(200, { count: 1 }));
+    }
     if (url.includes("/api/tree")) {
+      if (auth?.authRequired === true) {
+        const headers = init?.headers as Record<string, string> | undefined;
+        if (headers?.Authorization !== "Bearer sess-abc") {
+          return Promise.resolve(
+            jsonResponse(401, {
+              code: "UNAUTHORIZED",
+              message: "missing or invalid session",
+            }),
+          );
+        }
+        return Promise.resolve(
+          jsonResponse(200, {
+            path: "",
+            entries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+            truncated: false,
+          }),
+        );
+      }
       return Promise.resolve(
-        jsonResponse(200, { path: "", entries: [], truncated: false }),
+        jsonResponse(200, {
+          path: "",
+          entries: auth?.treeEntries ?? [],
+          truncated: false,
+        }),
       );
     }
     if (url.includes("/api/search")) {
@@ -230,6 +291,264 @@ describe("search flow", () => {
     vi.restoreAllMocks();
   });
 
+  it("reloads the tree with mtimeAfter when a time range is selected", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([sseEvent("done", donePayload())]),
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(0);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "1h" }));
+    await waitFor(() => {
+      const treeUrls = fetchMock.mock.calls
+        .map((call) => requestUrl(call[0] as RequestInfo))
+        .filter((url) => url.includes("/api/tree") && url.includes("mtimeAfter="));
+      expect(treeUrls.length).toBeGreaterThan(0);
+    });
+  });
+
+  it("clears file picks when the time range changes", async () => {
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("ok.txt"));
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "30d" }));
+    await waitFor(() => {
+      expect(screen.getByText("0 selected")).toBeTruthy();
+    });
+    expect(
+      (screen.getByRole("button", { name: "Search selected" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("search selected files sends globInclude", async () => {
+    let body = "";
+    mockFetch(
+      (init) => {
+        if (typeof init?.body === "string") {
+          body = init.body;
+        }
+        return sseResponse([sseEvent("done", donePayload())]);
+      },
+      undefined,
+      {
+        treeEntries: [
+          { name: "ok.txt", path: "ok.txt", dir: false },
+          { name: "skip.txt", path: "skip.txt", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("ok.txt"));
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    typeQuery("needle");
+    fireEvent.click(screen.getByRole("button", { name: "Search selected" }));
+    await waitFor(() => {
+      expect(body).toMatch(/globInclude/);
+    });
+    const parsed = JSON.parse(body) as { globInclude?: string[] };
+    expect(parsed.globInclude).toEqual(["ok.txt"]);
+  });
+
+  it("main search also constrains to picked files", async () => {
+    let body = "";
+    mockFetch(
+      (init) => {
+        if (typeof init?.body === "string") {
+          body = init.body;
+        }
+        return sseResponse([sseEvent("done", donePayload())]);
+      },
+      undefined,
+      {
+        treeEntries: [
+          { name: "ok.txt", path: "ok.txt", dir: false },
+          { name: "skip.txt", path: "skip.txt", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("ok.txt"));
+    typeQuery("needle");
+    clickSearch();
+    await waitFor(() => {
+      expect(body).toMatch(/globInclude/);
+    });
+    const parsed = JSON.parse(body) as { globInclude?: string[] };
+    expect(parsed.globInclude).toEqual(["ok.txt"]);
+  });
+
+  it("exclude selected sends globExclude", async () => {
+    let body = "";
+    mockFetch(
+      (init) => {
+        if (typeof init?.body === "string") {
+          body = init.body;
+        }
+        return sseResponse([sseEvent("done", donePayload())]);
+      },
+      undefined,
+      {
+        treeEntries: [{ name: "skip.txt", path: "skip.txt", dir: false }],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("skip.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("skip.txt"));
+    typeQuery("needle");
+    fireEvent.click(screen.getByRole("button", { name: "Exclude selected" }));
+    await waitFor(() => {
+      expect(body).toMatch(/globExclude/);
+    });
+    const parsed = JSON.parse(body) as {
+      globInclude?: string[];
+      globExclude?: string[];
+    };
+    expect(parsed.globInclude ?? []).toEqual([]);
+    expect(parsed.globExclude).toEqual(["skip.txt"]);
+  });
+
+  it("clearing picks searches the whole tree again", async () => {
+    const bodies: string[] = [];
+    mockFetch(
+      (init) => {
+        if (typeof init?.body === "string") {
+          bodies.push(init.body);
+        }
+        return sseResponse([sseEvent("done", donePayload())]);
+      },
+      undefined,
+      {
+        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("ok.txt"));
+    typeQuery("needle");
+    fireEvent.click(screen.getByRole("button", { name: "Search selected" }));
+    await waitFor(() => {
+      expect(bodies.length).toBe(1);
+    });
+    fireEvent.click(
+      document.querySelector('.tree-seg button[title="Clear"]') as HTMLButtonElement,
+    );
+    clickSearch();
+    await waitFor(() => {
+      expect(bodies.length).toBe(2);
+    });
+    const parsed = JSON.parse(bodies[1] ?? "{}") as {
+      globInclude?: string[];
+      globExclude?: string[];
+    };
+    expect(parsed.globInclude ?? []).toEqual([]);
+    expect(parsed.globExclude ?? []).toEqual([]);
+  });
+
+  it("search selected reuses the last query when the box is empty", async () => {
+    const bodies: string[] = [];
+    mockFetch(
+      (init) => {
+        if (typeof init?.body === "string") {
+          bodies.push(init.body);
+        }
+        return sseResponse([sseEvent("done", donePayload())]);
+      },
+      undefined,
+      {
+        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    typeQuery("needle");
+    clickSearch();
+    await waitFor(() => {
+      expect(bodies.length).toBe(1);
+    });
+    fireEvent.click(screen.getByText("ok.txt"));
+    fireEvent.click(screen.getByRole("button", { name: "Search selected" }));
+    await waitFor(() => {
+      expect(bodies.length).toBe(2);
+    });
+    const parsed = JSON.parse(bodies[1] ?? "{}") as {
+      query?: string;
+      globInclude?: string[];
+    };
+    expect(parsed.query).toBe("needle");
+    expect(parsed.globInclude).toEqual(["ok.txt"]);
+  });
+
+  it("sends mtimeAfter when a time range is selected", async () => {
+    let body = "";
+    mockFetch((init) => {
+      if (typeof init?.body === "string") {
+        body = init.body;
+      }
+      return sseResponse([sseEvent("done", donePayload())]);
+    });
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "1h" }));
+    typeQuery("needle");
+    clickSearch();
+    await waitFor(() => {
+      expect(body).toMatch(/mtimeAfter/);
+    });
+    const parsed = JSON.parse(body) as { mtimeAfter?: number };
+    expect(parsed.mtimeAfter).toBeGreaterThan(Date.now() - 2 * 3_600_000);
+    expect(parsed.mtimeAfter).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("increments the search-count badge once per executed search", async () => {
+    let n = 0;
+    mockFetch(() => {
+      n += 1;
+      return sseResponse([
+        sseEvent("meta", {
+          searchId: "550e8400-e29b-41d4-a716-446655440000",
+          engine: "rg",
+          searchCount: n,
+        }),
+        sseEvent("done", donePayload()),
+      ]);
+    });
+    render(<App />);
+    expect(screen.getByTitle("0 searches run")).toBeTruthy();
+    typeQuery("one");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByTitle("1 searches run")).toBeTruthy();
+    });
+    typeQuery("two");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByTitle("2 searches run")).toBeTruthy();
+    });
+  });
+
   it("shows a loading status on submit", async () => {
     mockFetch((init) => neverSettle(init));
     render(<App />);
@@ -280,6 +599,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("No matches")).toBeTruthy();
     });
+    expect(document.querySelector(".empty-idle .idle-mark")).toBeTruthy();
   });
 
   it("shows cancelled after abort", async () => {
@@ -337,9 +657,125 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByRole("dialog")).toBeTruthy();
     });
-    expect(screen.getByRole("dialog").textContent).toMatch(
-      /Enter access token/,
+    expect(screen.getByRole("dialog").textContent).toMatch(/Sign in/);
+  });
+
+  it("persists a submitted token, closes login, and sends bearer headers", async () => {
+    const fetchMock = mockFetch(() =>
+      jsonResponse(401, {
+        code: "UNAUTHORIZED",
+        message: "missing or invalid token",
+      }),
     );
+    render(<App />);
+    typeQuery("needle");
+    clickSearch();
+    const dialog = await screen.findByRole("dialog");
+    const pass = dialog.querySelector(
+      'input[name="password"]',
+    ) as HTMLInputElement;
+    fireEvent.change(pass, { target: { value: "secret1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe("sess-abc");
+      expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    const authed = fetchMock.mock.calls.filter((entry) => {
+      const headers = entry[1]?.headers as Record<string, string> | undefined;
+      return headers?.Authorization === "Bearer sess-abc";
+    });
+    expect(authed.length).toBeGreaterThan(0);
+    const headers = authed[0]?.[1]?.headers as Record<string, string>;
+    expect(headers["X-Web-Grep-Token"]).toBe("sess-abc");
+    expect(headers.Authorization).toBe("Bearer sess-abc");
+  });
+
+  it("loads the tree after login and logs out from the tree footer", async () => {
+    mockFetch(
+      () =>
+        jsonResponse(401, {
+          code: "UNAUTHORIZED",
+          message: "missing or invalid session",
+        }),
+      undefined,
+      { authRequired: true },
+    );
+    render(<App />);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
+      target: { value: "secret1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Log out" }));
+    await waitFor(() => {
+      expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+      expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+      expect(screen.getByRole("dialog")).toBeTruthy();
+    });
+    expect(screen.queryByText("ok.txt")).toBeNull();
+  });
+
+  it("does not persist or close on empty login submit", async () => {
+    mockFetch(() =>
+      jsonResponse(401, {
+        code: "UNAUTHORIZED",
+        message: "missing or invalid token",
+      }),
+    );
+    render(<App />);
+    typeQuery("needle");
+    clickSearch();
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.submit(dialog);
+    expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("unchecked remember keeps the token in sessionStorage", async () => {
+    mockFetch(() =>
+      jsonResponse(401, {
+        code: "UNAUTHORIZED",
+        message: "missing or invalid token",
+      }),
+    );
+    render(<App />);
+    typeQuery("needle");
+    clickSearch();
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(screen.getByLabelText("Remember for 7 days"));
+    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
+      target: { value: "secret1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBe("sess-abc");
+      expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull();
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
+  it("does not open login on FORBIDDEN_HOST", async () => {
+    mockFetch(() =>
+      jsonResponse(403, {
+        code: "FORBIDDEN_HOST",
+        message: "Host not allowed; set WEB_GREP_PUBLIC_HOST",
+      }),
+    );
+    render(<App />);
+    typeQuery("needle");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getAllByText(/Host not allowed/).length).toBeGreaterThan(0);
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("keeps previous hits when a later submit returns 401", async () => {
@@ -404,7 +840,7 @@ describe("search flow", () => {
   });
 
   it("preview shows only the selected hit line", async () => {
-    mockFetch(() =>
+    const fetchMock = mockFetch(() =>
       sseResponse([
         sseEvent("hit", HIT_A),
         sseEvent("hit", HIT_B),
@@ -429,6 +865,8 @@ describe("search flow", () => {
       "hl-0",
     );
     expect(document.querySelectorAll(".preview-line")).toHaveLength(1);
+    expect(document.querySelector(".result-virtual-row")).toBeTruthy();
+    const searchesAfterLoad = searchCallCount(fetchMock);
     fireEvent.click(getLoc("src/b.ts:3"));
     await waitFor(() => {
       expect(
@@ -436,6 +874,33 @@ describe("search flow", () => {
       ).toMatch(/hello there/);
     });
     expect(document.querySelectorAll(".preview-line")).toHaveLength(1);
+    expect(searchCallCount(fetchMock)).toBe(searchesAfterLoad);
+    expect(document.querySelector(".result-virtual-row")).toBeTruthy();
+  });
+
+  it("opens a context modal with surrounding file lines", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Context" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    await waitFor(() => {
+      expect(dialog.textContent).toMatch(/src\/a\.ts line 1/);
+    });
+    expect(dialog.querySelectorAll(".preview-line").length).toBeGreaterThan(1);
+    expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
+      /line 1/,
+    );
+    expect(dialog.querySelector(".preview-find")).toBeNull();
   });
 
   it("copy icon copies the full preview line", async () => {
@@ -535,9 +1000,13 @@ describe("search flow", () => {
     clickSearch();
     await waitFor(() => {
       expect(
-        screen.getByRole("button", { name: "Search selection" }),
+        document.querySelector(".preview-line.current .preview-text") ??
+          document.querySelector(".preview-text"),
       ).toBeTruthy();
     });
+    expect(
+      screen.queryByRole("button", { name: "Search selection" }),
+    ).toBeNull();
     const previewText =
       document.querySelector(".preview-line.current .preview-text") ??
       document.querySelector(".preview-text");
@@ -547,7 +1016,23 @@ describe("search flow", () => {
     const sel = window.getSelection();
     sel?.removeAllRanges();
     sel?.addRange(range);
-    fireEvent.click(screen.getByRole("button", { name: "Search selection" }));
+    fireEvent.mouseUp(document.querySelector(".preview") as Element);
+    await screen.findByRole("menuitem", {
+      name: "Search selection",
+    });
+    expect(document.querySelector(".sel-menu")).toBeTruthy();
+    fireEvent.mouseDown(previewText as Element);
+    fireEvent.mouseUp(previewText as Element);
+    await waitFor(() => {
+      expect(document.querySelector(".sel-menu")).toBeNull();
+    });
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    fireEvent.mouseUp(document.querySelector(".preview") as Element);
+    const item = await screen.findByRole("menuitem", {
+      name: "Search selection",
+    });
+    fireEvent.click(item);
     await waitFor(() => {
       const calls = fetchMock.mock.calls.filter(
         (entry) =>
@@ -564,7 +1049,7 @@ describe("search flow", () => {
     });
   });
 
-  it("Shift+Enter adds AND without searching; Enter sends the stacked query", async () => {
+  it("Shift+Enter searches instead of adding an AND chip", async () => {
     const fetchMock = mockFetch(() =>
       sseResponse([
         sseEvent("hit", HIT_A),
@@ -581,27 +1066,11 @@ describe("search flow", () => {
     const box = screen.getByRole("searchbox");
     typeQuery("wor");
     fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
-    expect(
-      [...document.querySelectorAll(".search-chip-row .q-chip-text")].map(
-        (el) => el.textContent,
-      ),
-    ).toEqual(["hello"]);
-    expect(screen.getByRole("button", { name: "+1" })).toBeTruthy();
-    expect(searchCallCount(fetchMock)).toBe(searchesAfterFirst);
-    fireEvent.keyDown(box, { key: "Enter" });
     await waitFor(() => {
-      const body = lastSearchBody(fetchMock);
-      expect(body.regex).toBe(true);
-      expect(body.query).toBe("hello.*wor|wor.*hello");
+      expect(searchCallCount(fetchMock)).toBeGreaterThan(searchesAfterFirst);
     });
-    await waitFor(() => {
-      expect(document.querySelector(".preview-text mark.hl-0")?.textContent).toBe(
-        "hello",
-      );
-      expect(document.querySelector(".preview-text mark.hl-1")?.textContent).toBe(
-        "wor",
-      );
-    });
+    const body = lastSearchBody(fetchMock);
+    expect(body.query).toBe("hello.*wor|wor.*hello");
   });
 
   it("Clear empties the query, results, and preview", async () => {
@@ -631,14 +1100,96 @@ describe("search flow", () => {
     expect(document.querySelector(".preview-idle")).toBeTruthy();
   });
 
+  it("opens the AND dropdown while typing a second condition, not on search click", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(document.querySelector(".search-dropdown")).toBeNull();
+    });
+    typeQuery("world");
+    await waitFor(() => {
+      expect(document.querySelector(".search-dropdown")).toBeTruthy();
+    });
+  });
+
+  it("summarizes extra AND chips as AND +N", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll(".search-chip-row [data-chip-token]"),
+      ).toHaveLength(1);
+    });
+    typeQuery("world");
+    clickSearch();
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll(".search-chip-row [data-chip-token]"),
+      ).toHaveLength(1);
+      expect(
+        screen.getByRole("button", { name: "AND +1" }),
+      ).toBeTruthy();
+    });
+  });
+
+  it("goes back to the previous search", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(
+        document.querySelectorAll(".search-chip-row [data-chip-token]"),
+      ).toHaveLength(1);
+    });
+    typeQuery("world");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "AND +1" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => {
+      const chips = [
+        ...document.querySelectorAll(".search-chip-row [data-chip-token]"),
+      ];
+      expect(chips).toHaveLength(1);
+      expect(chips[0]?.textContent).toContain("hello");
+      expect(screen.queryByRole("button", { name: "AND +1" })).toBeNull();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Forward" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "AND +1" })).toBeTruthy();
+    });
+  });
+
+  it("lists recent searches in the expand dropdown", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("needle-hist");
+    clickSearch();
+    fireEvent.click(
+      screen.getByRole("button", { name: "All conditions and history" }),
+    );
+    expect(screen.getByText("Recent searches")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: /needle-hist/ }),
+    ).toBeTruthy();
+  });
+
   it("expands a query overlay from the caret button", async () => {
     mockFetch((init) => neverSettle(init));
     render(<App />);
     expect(document.querySelector(".search-dropdown")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Expand search" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "All conditions and history" }),
+    );
     expect(document.querySelector(".search-dropdown")).toBeTruthy();
     expect(document.querySelector(".search-drop-backdrop")).toBeTruthy();
-    expect(document.querySelector(".search-editor-input")).toBeTruthy();
+    expect(document.querySelector(".search-editor-input")).toBeNull();
     fireEvent.mouseDown(
       document.querySelector(".search-drop-backdrop") as Element,
     );

@@ -6,10 +6,10 @@ Self-hosted React SPA + **Go** server that greps a configured filesystem root vi
 
 ## Requirements / 环境要求
 
-- **Go** ≥ 1.23
+- **Go** ≥ 1.24
 - **Node.js** ≥ 24.0.0 (frontend only; `.nvmrc` = `24.21.0`)
 - **pnpm** 12.4.0
-- **ripgrep** (`rg`) on `PATH`, or the copy shipped under `node_modules` via `@vscode/ripgrep` after `pnpm install`
+- **ripgrep** (`rg`) on `PATH`, or the copy shipped under `node_modules` via `@vscode/ripgrep` after `pnpm install`（Docker 镜像已自带 `rg`）
 
 ## Install / 安装
 
@@ -20,51 +20,57 @@ corepack prepare pnpm@12.4.0 --activate
 pnpm install
 ```
 
-If `rg` is not on `PATH`, either `brew install ripgrep` / `apt install ripgrep`, set `WEB_GREP_RG` to an absolute binary, or rely on the optional `@vscode/ripgrep-*` platform package after `pnpm install`.
+If `rg` is not on `PATH`, either `brew install ripgrep` / `apt install ripgrep`, set `rg:` in `config.yaml` (or `WEB_GREP_RG`) to an absolute binary, or rely on the optional `@vscode/ripgrep-*` platform package after `pnpm install`.
 
 ## Develop / 开发
 
 ```bash
-cp .env.example .env   # set WEB_GREP_ROOT
+cp config.example.yaml config.yaml   # set root:
 pnpm dev
 ```
 
-`pnpm dev` builds `@web-grep/shared`, starts Vite on `:5173`, and `go run`s the server on `127.0.0.1:8787`. Vite proxies `/api` to the Go process. The server loads the repo-root `.env` (`WEB_GREP_ROOT` is required; `~` is expanded).
+`pnpm dev` builds `@web-grep/shared`, starts Vite on `:5173`, and `go run`s the server on `127.0.0.1:8787`. Vite proxies `/api` to the Go process. The server loads `config.yaml` (`root` is required; `~` is expanded). `WEB_GREP_*` env vars override yaml keys for one shot (`WEB_GREP_DEV=1` is set by `pnpm dev`).
 
 Open http://127.0.0.1:5173
 
 前后端接口标准见 [`docs/API.md`](docs/API.md)。类型与默认值以 `packages/shared` 为准，两边按这份契约并行开发。
 
-## Production / 生产
+## Test / production (Docker) / 测试与生产
+
+前后端打进**同一个镜像**。见 [`docs/docker.md`](docs/docker.md)：`docker compose up --build -d` 或 `docker run`。
+
+Without Docker:
 
 ```bash
 pnpm build && pnpm start
 ```
 
-`pnpm build` typechecks, builds the SPA, then compiles `dist/web-grep`. `pnpm start` runs that binary, which serves `apps/web/dist` on `GET /*` **after** all `/api/*` routes.
+`pnpm build` typechecks, builds the SPA, then compiles `dist/web-grep`。`pnpm start` 在仓库根目录跑该二进制（会向上找到 `config.yaml`），`GET /*` 在全部 `/api/*` 之后提供 SPA。
 
 ## Operator runbook / 运维手册
 
-### Search root / 搜索根目录
+Primary config is `config.yaml` (see `config.example.yaml`). Path: `-config`, else `WEB_GREP_CONFIG`, else `./config.yaml` walking up from cwd, else next to the binary. `WEB_GREP_*` env vars override yaml keys.
 
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `WEB_GREP_ROOT` | **required** | Directory to search. Realpath’d at boot. `~` is expanded. |
+| yaml | env override | Default | Notes |
+| --- | --- | --- | --- |
+| `root` | `WEB_GREP_ROOT` | **required** | Directory to search. Realpath’d at boot. `~` is expanded. |
+| `host` | `WEB_GREP_HOST` | `127.0.0.1` | Bind address only. Never a HTTP Host name. |
+| `port` | `WEB_GREP_PORT` | `8787` | Listen port. |
+| `public_host` | `WEB_GREP_PUBLIC_HOST` | unset | List or comma-separated names/IPs in the address bar. Required when bind is non-loopback. Never `0.0.0.0`. |
+| `token` | `WEB_GREP_TOKEN` | unset | Login password. Yaml plaintext is hashed at boot to `sha256:<hex>`. Required when bind is non-loopback. Env override is in-memory only. |
+| `rg` | `WEB_GREP_RG` | unset | Absolute `rg` binary. |
+| `web_dist` | `WEB_GREP_WEB_DIST` | next to binary | Built SPA directory. Docker image uses `/app/web`. |
+| `dev` | `WEB_GREP_DEV` | `false` | Skip serving the SPA (`pnpm dev` sets `1`). |
+| `log_level` | `WEB_GREP_LOG_LEVEL` | `info` | `debug \| info \| warn \| error` |
 
-### Bind, Host, token / 绑定、Host、令牌
+其余搜索参数（`max_results`、`timeout_ms`、`no_ignore` 等）见 `config.example.yaml`。
 
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `WEB_GREP_HOST` | `127.0.0.1` | Bind address only. Never used as a HTTP Host name. |
-| `WEB_GREP_PORT` | `8787` | Listen port. |
-| `WEB_GREP_PUBLIC_HOST` | unset | Comma-separated DNS names / IPs in the address bar. **Required** when bind is non-loopback. Never `0.0.0.0`. |
-| `WEB_GREP_TOKEN` | unset | `Authorization: Bearer` or `X-Web-Grep-Token`. **Required** when bind is non-loopback. |
-| `WEB_GREP_RG` | unset | Absolute override of the `rg` binary. |
-| `WEB_GREP_DEV` | unset | `1` to skip serving the SPA (used by `pnpm dev`). |
-
-- Loopback bind does not require a token. `localhost` / `127.0.0.1` / `::1` are always allowed Hosts (including Vite `:5173`).
-- Binding `0.0.0.0` without `WEB_GREP_TOKEN` **or** `WEB_GREP_PUBLIC_HOST` fails at boot.
+- Loopback bind can start without `token`.
+- Binding `0.0.0.0` without `token` **or** `public_host` fails at boot.
+- After login the SPA stores a **session** token (7-day TTL on the server). Checking “Remember for 7 days” writes it to `localStorage`; otherwise `sessionStorage` (cleared when the tab closes). Requests send `Authorization: Bearer` / `X-Web-Grep-Token`. The password is never sent on search. Sessions live in process memory, so restarting the server still requires a new login.
+- 时间范围按**文件修改时间**过滤目录树和可搜文件，由浏览器传 `mtimeAfter`，不是 yaml 项。搜索历史在浏览器 `localStorage`。
+- `SIGHUP` 会按同一条 `config.yaml` 路径重新加载配置。
 
 ## Architecture
 
-React talks to Go over the same JSON/SSE contract as before (`POST /api/search` streams `rg --json`). The Go process sandboxes paths to `WEB_GREP_ROOT`, then `os/exec`s ripgrep with `cwd` set to that root.
+React talks to Go over the same JSON/SSE contract as before (`POST /api/search` streams `rg --json`). The Go process sandboxes paths to `root`, then `os/exec`s ripgrep with `cwd` set to that root.

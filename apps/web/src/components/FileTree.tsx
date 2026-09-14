@@ -1,19 +1,28 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { SearchHttpError } from "../api/searchClient.ts";
-import { fetchTree, type TreeEntry } from "../api/treeClient.ts";
+import { fetchFileCount, fetchTree, type TreeEntry } from "../api/treeClient.ts";
+import { formatSearchCount } from "../searchCount.ts";
 import { useLocale } from "../hooks/useLocale.ts";
-import type { TreePick } from "../treePicks.ts";
+import {
+  mtimeAfterMs,
+  TIME_RANGES,
+  timeRangeMsgKey,
+  type TimeRange,
+} from "../timeRange.ts";
+import { pickMark, type TreePick } from "../treePicks.ts";
 import {
   BrandMark,
   FileIcon,
   IconCheck,
   IconChevron,
+  IconDash,
+  IconLogout,
   IconMinusCircle,
   IconPanel,
   IconTarget,
   IconX,
 } from "./icons.tsx";
-import { LocaleToggle } from "./StatusBar.tsx";
+import { LocaleToggle, ThemeToggle } from "./StatusBar.tsx";
 
 const TREE_OPEN_KEY = "web-grep.treeOpen.v2";
 export const TREE_RAIL_WIDTH = 56;
@@ -26,8 +35,15 @@ type NodeProps = {
   entry: TreeEntry;
   depth: number;
   activePath: string | null;
-  pickedPaths: Set<string>;
-  onTogglePick: (entry: TreeEntry) => void;
+  picks: TreePick[];
+  mtimeAfter?: number | undefined;
+  parentListed?: TreeEntry[] | null;
+  coveringListed?: TreeEntry[] | null;
+  onTogglePick: (
+    entry: TreeEntry,
+    listedChildren?: TreeEntry[] | null,
+    coveringChildren?: TreeEntry[] | null,
+  ) => void;
   onAuthFailure?: (err: SearchHttpError) => void;
 };
 
@@ -35,7 +51,10 @@ function TreeNode({
   entry,
   depth,
   activePath,
-  pickedPaths,
+  picks,
+  mtimeAfter,
+  parentListed = null,
+  coveringListed = null,
   onTogglePick,
   onAuthFailure,
 }: NodeProps) {
@@ -43,41 +62,58 @@ function TreeNode({
   const [children, setChildren] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const loadKids = useCallback(async () => {
-    if (!entry.dir || children !== null) {
+  useEffect(() => {
+    if (!entry.dir || !expanded) {
       return;
     }
+    let cancelled = false;
+    const ac = new AbortController();
     setLoading(true);
-    try {
-      const listing = await fetchTree(entry.path, new AbortController().signal);
-      setChildren(listing.entries);
-    } catch (err) {
-      if (err instanceof SearchHttpError) {
-        onAuthFailure?.(err);
-      }
-      setChildren([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [children, entry.dir, entry.path, onAuthFailure]);
+    void fetchTree(entry.path, ac.signal, mtimeAfter)
+      .then((listing) => {
+        if (!cancelled) {
+          setChildren(listing.entries);
+        }
+      })
+      .catch((err: unknown) => {
+        if (cancelled) {
+          return;
+        }
+        if (err instanceof SearchHttpError) {
+          onAuthFailure?.(err);
+        }
+        setChildren([]);
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [entry.dir, entry.path, expanded, mtimeAfter, onAuthFailure]);
 
   const expand = (): void => {
     if (!entry.dir) {
       return;
     }
-    const next = !expanded;
-    setExpanded(next);
-    if (next) {
-      void loadKids();
-    }
+    setExpanded((current) => !current);
   };
 
-  const picked = pickedPaths.has(entry.path);
+  const mark = pickMark(
+    entry.path,
+    entry.dir,
+    picks,
+    entry.dir ? children : null,
+  );
   const current = !entry.dir && activePath === entry.path;
   const hidden = entry.name.startsWith(".");
+  const checked = mark === "on" || mark === "covered";
   const rowClass = [
     "tree-row",
-    picked ? "picked" : "",
+    checked || mark === "partial" ? "picked" : "",
     current ? "current" : "",
     hidden ? "dim" : "",
     entry.dir ? "is-dir" : "is-file",
@@ -107,13 +143,25 @@ function TreeNode({
         <button
           type="button"
           className="tree-select"
-          aria-pressed={picked}
+          aria-pressed={mark === "partial" ? "mixed" : checked}
           onClick={() => {
-            onTogglePick(entry);
+            const covering =
+              mark === "on" && entry.dir && children !== null
+                ? children
+                : coveringListed;
+            onTogglePick(
+              entry,
+              entry.dir ? children : parentListed,
+              covering,
+            );
           }}
         >
-          <span className={picked ? "tree-check on" : "tree-check"}>
-            {picked ? <IconCheck /> : null}
+          <span className={mark === "off" ? "tree-check" : "tree-check on"}>
+            {mark === "partial" ? (
+              <IconDash />
+            ) : checked ? (
+              <IconCheck />
+            ) : null}
           </span>
           <span className="tree-kind" aria-hidden="true">
             <FileIcon path={entry.path} isDir={entry.dir} open={expanded} />
@@ -137,7 +185,14 @@ function TreeNode({
                 entry={child}
                 depth={depth + 1}
                 activePath={activePath}
-                pickedPaths={pickedPaths}
+                picks={picks}
+                mtimeAfter={mtimeAfter}
+                parentListed={children}
+                coveringListed={
+                  mark === "on" && entry.dir && children !== null
+                    ? children
+                    : coveringListed
+                }
                 onTogglePick={onTogglePick}
                 {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
               />
@@ -162,6 +217,12 @@ export function FileTree({
   onSearchOut,
   onClear,
   onAuthFailure,
+  sessionReady = true,
+  canLogout = false,
+  onLogout,
+  timeRange = null,
+  onTimeRange,
+  searchCount = 0,
 }: {
   open: boolean;
   onToggle: () => void;
@@ -170,27 +231,80 @@ export function FileTree({
   picks: TreePick[];
   scope: "all" | "include" | "exclude";
   style?: React.CSSProperties | undefined;
-  onTogglePick: (entry: TreeEntry) => void;
+  onTogglePick: (
+    entry: TreeEntry,
+    listedChildren?: TreeEntry[] | null,
+    coveringChildren?: TreeEntry[] | null,
+  ) => void;
   onSearchIn: () => void;
   onSearchOut: () => void;
   onClear: () => void;
   onAuthFailure?: (err: SearchHttpError) => void;
+  sessionReady?: boolean;
+  canLogout?: boolean;
+  onLogout?: () => void;
+  timeRange?: TimeRange | null;
+  onTimeRange?: (value: TimeRange | null) => void;
+  searchCount?: number;
 }) {
   const { t } = useLocale();
   const [root, setRoot] = useState<TreeEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
-  const picked = new Set(picks.map((item) => item.path));
-  const n = picks.length;
-  const canUse = n > 0;
+  const [fileCount, setFileCount] = useState(0);
+  const n = fileCount;
+  const canUse = picks.length > 0;
   const label = rootLabel || t("treeTitle");
+  const [mtimeAfter, setMtimeAfter] = useState<number | undefined>(() =>
+    timeRange !== null ? mtimeAfterMs(timeRange) : undefined,
+  );
 
   useEffect(() => {
+    setMtimeAfter(timeRange !== null ? mtimeAfterMs(timeRange) : undefined);
+  }, [timeRange]);
+
+  useEffect(() => {
+    const files = picks.filter((item) => !item.dir);
+    const dirs = picks.filter((item) => item.dir);
+    if (dirs.length === 0) {
+      setFileCount(files.length);
+      return;
+    }
+    const ac = new AbortController();
+    void Promise.all(
+      dirs.map((item) => fetchFileCount(item.path, ac.signal, mtimeAfter)),
+    )
+      .then((counts) => {
+        setFileCount(
+          files.length + counts.reduce((sum, count) => sum + count, 0),
+        );
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
+        setFileCount(picks.length);
+      });
+    return () => {
+      ac.abort();
+    };
+  }, [mtimeAfter, picks]);
+
+  useEffect(() => {
+    if (!sessionReady) {
+      setRoot(null);
+      setError(null);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       for (let attempt = 0; attempt < 16 && !cancelled; attempt++) {
         try {
-          const listing = await fetchTree("", new AbortController().signal);
+          const listing = await fetchTree(
+            "",
+            new AbortController().signal,
+            mtimeAfter,
+          );
           if (cancelled) {
             return;
           }
@@ -218,7 +332,7 @@ export function FileTree({
     return () => {
       cancelled = true;
     };
-  }, [onAuthFailure, t, tick]);
+  }, [mtimeAfter, onAuthFailure, sessionReady, t, tick]);
 
   return (
     <aside
@@ -238,6 +352,17 @@ export function FileTree({
                 </p>
               </div>
             </div>
+            <span
+              className="search-count-badge"
+              title={t("searchCountTitle", { n: searchCount })}
+            >
+              <span className="search-count-badge-label">
+                {t("searchCountLabel")}
+              </span>
+              <span className="search-count-badge-stat">
+                {formatSearchCount(searchCount)}
+              </span>
+            </span>
             <button
               type="button"
               className="tree-toggle"
@@ -249,38 +374,43 @@ export function FileTree({
               <IconPanel open />
             </button>
           </div>
-          {canUse ? (
-            <div className="tree-actions">
-              <div className="tree-picked">
-                <span className="tree-picked-dot" />
-                {t("treePicked", { n })}
-              </div>
-              <div className="tree-seg" role="group">
-                <button
-                  type="button"
-                  aria-pressed={scope === "include"}
-                  title={t("treeSearchIn")}
-                  onClick={onSearchIn}
-                >
-                  <IconTarget />
-                  <span>{t("treeSearchIn")}</span>
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={scope === "exclude"}
-                  title={t("treeSearchOut")}
-                  onClick={onSearchOut}
-                >
-                  <IconMinusCircle />
-                  <span>{t("treeSearchOut")}</span>
-                </button>
-                <button type="button" title={t("treeClear")} onClick={onClear}>
-                  <IconX />
-                  <span>{t("treeClear")}</span>
-                </button>
-              </div>
+          <div className="tree-actions">
+            <div className="tree-picked">
+              <span className="tree-picked-dot" />
+              {t("treePicked", { n })}
             </div>
-          ) : null}
+            <div className="tree-seg" role="group">
+              <button
+                type="button"
+                aria-pressed={scope === "include"}
+                disabled={!canUse}
+                title={t("treeSearchIn")}
+                onClick={onSearchIn}
+              >
+                <IconTarget />
+                <span>{t("treeSearchIn")}</span>
+              </button>
+              <button
+                type="button"
+                aria-pressed={scope === "exclude"}
+                disabled={!canUse}
+                title={t("treeSearchOut")}
+                onClick={onSearchOut}
+              >
+                <IconMinusCircle />
+                <span>{t("treeSearchOut")}</span>
+              </button>
+              <button
+                type="button"
+                disabled={!canUse}
+                title={t("treeClear")}
+                onClick={onClear}
+              >
+                <IconX />
+                <span>{t("treeClear")}</span>
+              </button>
+            </div>
+          </div>
           <div className="tree-scroll">
             {error !== null ? (
               <div className="tree-error">
@@ -304,24 +434,62 @@ export function FileTree({
             ) : root.length === 0 ? (
               <div className="tree-empty">
                 <IconFolderEmpty />
-                <p>{t("treeEmpty")}</p>
+                <p>
+                  {timeRange !== null
+                    ? t("treeEmptyFiltered")
+                    : t("treeEmpty")}
+                </p>
               </div>
             ) : (
               root.map((entry) => (
                 <TreeNode
-                  key={entry.path}
+                  key={`${entry.path}:${mtimeAfter ?? "all"}`}
                   entry={entry}
                   depth={0}
                   activePath={activePath}
-                  pickedPaths={picked}
+                  picks={picks}
+                  mtimeAfter={mtimeAfter}
+                  parentListed={root}
                   onTogglePick={onTogglePick}
                   {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
                 />
               ))
             )}
           </div>
+          <div className="tree-time" title={t("timeRangeHint")}>
+            <span className="tree-time-label">{t("timeRange")}</span>
+            <div className="tree-time-seg" role="group" aria-label={t("timeRange")}>
+              {TIME_RANGES.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={timeRange === id}
+                  title={t("timeRangeHint")}
+                  onClick={() => {
+                    onTimeRange?.(timeRange === id ? null : id);
+                  }}
+                >
+                  {t(timeRangeMsgKey(id))}
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="tree-foot">
+            <ThemeToggle />
             <LocaleToggle />
+            {canLogout && onLogout !== undefined ? (
+              <div className="tree-account">
+                <button
+                  type="button"
+                  className="tree-logout"
+                  onClick={onLogout}
+                  title={t("logout")}
+                  aria-label={t("logout")}
+                >
+                  <IconLogout />
+                </button>
+              </div>
+            ) : null}
           </div>
         </>
       ) : (
@@ -355,6 +523,28 @@ export function FileTree({
             </button>
           ) : null}
           <div className="tree-rail-grow" />
+          {timeRange !== null ? (
+            <button
+              type="button"
+              className="tree-rail-time"
+              onClick={onToggle}
+              title={`${t("timeRange")}: ${t(timeRangeMsgKey(timeRange))}`}
+            >
+              {t(timeRangeMsgKey(timeRange))}
+            </button>
+          ) : null}
+          {canLogout && onLogout !== undefined ? (
+            <button
+              type="button"
+              className="tree-logout"
+              onClick={onLogout}
+              title={t("logout")}
+              aria-label={t("logout")}
+            >
+              <IconLogout />
+            </button>
+          ) : null}
+          <ThemeToggle />
           <LocaleToggle />
         </div>
       )}

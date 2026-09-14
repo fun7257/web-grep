@@ -143,14 +143,19 @@ export function spansForQuery(
 
 export function spansFromOffsets(
   text: string,
-  matches: Array<{ start: number; end: number }>,
+  matches: Array<{ start: number; end: number; tone?: number }>,
 ): HlSpan[] {
   const found: HlSpan[] = [];
   for (const match of matches) {
     const start = Math.min(Math.max(0, match.start), text.length);
     const end = Math.min(Math.max(start, match.end), text.length);
     if (end > start) {
-      found.push({ start, end, tone: 0 });
+      found.push({
+        start,
+        end,
+        tone:
+          "tone" in match && typeof match.tone === "number" ? match.tone : 0,
+      });
     }
   }
   return flattenSpans(text.length, found);

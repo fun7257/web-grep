@@ -13,6 +13,7 @@ import (
 	"web-grep/internal/logx"
 	"web-grep/internal/rg"
 	"web-grep/internal/sandbox"
+	"web-grep/internal/stats"
 )
 
 type Request struct {
@@ -25,6 +26,7 @@ type Request struct {
 	WordMatch     bool
 	Hidden        bool
 	MaxResults    int
+	MtimeAfter    time.Time
 }
 
 type Preflight struct {
@@ -49,16 +51,18 @@ type Service struct {
 	Cfg    config.Config
 	Engine Engine
 	Kind   string // "rg" | "none"
+	Stats  *stats.Counter
 
 	mu       sync.Mutex
 	inflight map[string]context.CancelFunc
 }
 
-func New(cfg config.Config, engine Engine, kind string) *Service {
+func New(cfg config.Config, engine Engine, kind string, counter *stats.Counter) *Service {
 	return &Service{
 		Cfg:      cfg,
 		Engine:   engine,
 		Kind:     kind,
+		Stats:    counter,
 		inflight: make(map[string]context.CancelFunc),
 	}
 }
@@ -237,7 +241,12 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	}
 	logx.Debug("search start", map[string]any{"searchId": pre.SearchID, "query": q})
 
-	if err := stream.Event("meta", map[string]any{"searchId": pre.SearchID, "engine": "rg"}); err != nil {
+	searchCount := s.Stats.Add()
+	if err := stream.Event("meta", map[string]any{
+		"searchId":    pre.SearchID,
+		"engine":      "rg",
+		"searchCount": searchCount,
+	}); err != nil {
 		return
 	}
 
@@ -246,14 +255,7 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		return
 	}
 
-	matchCount := 0
-	files := map[string]struct{}{}
-	truncated := false
-	searchCtx, stopSearch := context.WithCancel(ctx)
-	defer stopSearch()
-
-	lastProg := time.Now()
-	err := s.Engine.Search(searchCtx, rg.Input{
+	in := rg.Input{
 		RootReal:       s.Cfg.RootReal,
 		RelativeDir:    pre.RelativeDir,
 		Query:          pre.Request.Query,
@@ -268,7 +270,50 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		NoIgnore:       s.Cfg.NoIgnore,
 		SearchZip:      s.Cfg.SearchZip,
 		Threads:        s.Cfg.Threads,
-	}, func(m rg.Match) error {
+	}
+	needList := !pre.Request.MtimeAfter.IsZero() ||
+		len(pre.GlobInclude) > 0 ||
+		len(pre.GlobExclude) > 0
+	if needList {
+		listed, listErr := ListNewerFiles(
+			s.Cfg.RootReal,
+			pre.RelativeDir,
+			pre.Request.MtimeAfter,
+			pre.Request.Hidden,
+			s.Cfg.FollowSymlinks,
+			s.Cfg.AllowSecrets,
+		)
+		if listErr != nil {
+			logx.Error("mtime walk failed", map[string]any{"searchId": pre.SearchID, "err": listErr.Error()})
+			sendError(listErr.Error())
+			return
+		}
+		if len(listed) == 0 {
+			sendDone(false, false, false, 0, 0)
+			return
+		}
+		// rg ignores --glob on explicit paths; tree picks must be applied here.
+		listed = sandbox.FilterByGlobs(listed, pre.GlobInclude, pre.GlobExclude)
+		if len(listed) == 0 {
+			sendDone(false, false, false, 0, 0)
+			return
+		}
+		in.LimitToList = true
+		in.FileList = listed
+		_ = stream.Event("progress", map[string]any{
+			"files":   len(listed),
+			"matches": 0,
+		})
+	}
+
+	matchCount := 0
+	files := map[string]struct{}{}
+	truncated := false
+	searchCtx, stopSearch := context.WithCancel(ctx)
+	defer stopSearch()
+
+	lastProg := time.Now()
+	err := s.Engine.Search(searchCtx, in, func(m rg.Match) error {
 		if truncated || searchCtx.Err() != nil || stream.Aborted() {
 			return errStop
 		}

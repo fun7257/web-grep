@@ -1,4 +1,13 @@
 export {
+  type AuthStatus,
+  AuthStatusSchema,
+  type LoginRequest,
+  type LoginRequestInput,
+  LoginRequestSchema,
+  type LoginResponse,
+  LoginResponseSchema,
+} from "./auth.ts";
+export {
   type ErrorCode,
   ErrorCodeSchema,
   type JsonError,

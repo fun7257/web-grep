@@ -1,11 +1,9 @@
 package config
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 )
 
@@ -26,13 +24,37 @@ const (
 	HeartbeatMs          = 5_000
 )
 
+const (
+	EnvRoot           = "WEB_GREP_ROOT"
+	EnvHost           = "WEB_GREP_HOST"
+	EnvPort           = "WEB_GREP_PORT"
+	EnvPublicHost     = "WEB_GREP_PUBLIC_HOST"
+	EnvToken          = "WEB_GREP_TOKEN"
+	EnvRg             = "WEB_GREP_RG"
+	EnvWebDist        = "WEB_GREP_WEB_DIST"
+	EnvDev            = "WEB_GREP_DEV"
+	EnvLogLevel       = "WEB_GREP_LOG_LEVEL"
+	EnvMaxResults     = "WEB_GREP_MAX_RESULTS"
+	EnvMaxResultsHard = "WEB_GREP_MAX_RESULTS_HARD"
+	EnvTimeoutMs      = "WEB_GREP_TIMEOUT_MS"
+	EnvPreviewLines   = "WEB_GREP_PREVIEW_LINES"
+	EnvThreads        = "WEB_GREP_THREADS"
+	EnvMaxConcurrent  = "WEB_GREP_MAX_CONCURRENT"
+	EnvSearchZip      = "WEB_GREP_SEARCH_ZIP"
+	EnvFollowSymlinks = "WEB_GREP_FOLLOW_SYMLINKS"
+	EnvNoIgnore       = "WEB_GREP_NO_IGNORE"
+	EnvAllowSecrets   = "WEB_GREP_ALLOW_SECRETS"
+)
+
 type Config struct {
 	RootReal       string
 	RootLabel      string
 	Host           string
 	Port           int
 	PublicHosts    []string
-	Token          string
+	TokenHash      string
+	ConfigPath     string
+	sealToken      bool
 	AllowSecrets   bool
 	FollowSymlinks bool
 	NoIgnore       bool
@@ -50,103 +72,104 @@ type Config struct {
 	WebDist        string
 }
 
-func Load() (Config, error) {
-	loadDotEnv()
-	rootRaw := strings.TrimSpace(os.Getenv("WEB_GREP_ROOT"))
+func Load(explicit string) (Config, error) {
+	path, err := findConfig(explicit)
+	if err != nil {
+		return Config{}, err
+	}
+	raw, err := readYAMLFile(path)
+	if err != nil {
+		return Config{}, err
+	}
+	tokenFromEnv := false
+	if _, ok := lookupTrim(EnvToken); ok {
+		tokenFromEnv = true
+	}
+	if err := applyEnv(&raw); err != nil {
+		return Config{}, err
+	}
+
+	rootRaw := strings.TrimSpace(raw.Root)
 	if rootRaw == "" {
-		return Config{}, fmt.Errorf("WEB_GREP_ROOT is required")
+		return Config{}, fmt.Errorf("root is required (config.yaml root, or %s)", EnvRoot)
 	}
 	rootReal, err := resolveRoot(rootRaw)
 	if err != nil {
 		return Config{}, err
 	}
-	host := optional("WEB_GREP_HOST", "127.0.0.1")
-	maxHard, err := parseInt("WEB_GREP_MAX_RESULTS_HARD", MaxResultsHard, 0, 1_000_000_000)
-	if err != nil {
-		return Config{}, err
+	host := strings.TrimSpace(raw.Host)
+	if host == "" {
+		host = "127.0.0.1"
 	}
-	maxRes, err := parseInt("WEB_GREP_MAX_RESULTS", MaxResultsDefault, 0, 1_000_000_000)
-	if err != nil {
-		return Config{}, err
+	port := intOr(raw.Port, 8787)
+	if port < 1 || port > 65535 {
+		return Config{}, fmt.Errorf("invalid port: %d", port)
+	}
+	maxHard := intOr(raw.MaxResultsHard, MaxResultsHard)
+	if maxHard < 0 || maxHard > 1_000_000_000 {
+		return Config{}, fmt.Errorf("invalid max_results_hard: %d", maxHard)
+	}
+	maxRes := intOr(raw.MaxResults, MaxResultsDefault)
+	if maxRes < 0 || maxRes > 1_000_000_000 {
+		return Config{}, fmt.Errorf("invalid max_results: %d", maxRes)
 	}
 	if maxHard > 0 && (maxRes <= 0 || maxRes > maxHard) {
 		maxRes = maxHard
 	}
-	port, err := parseInt("WEB_GREP_PORT", 8787, 1, 65535)
-	if err != nil {
-		return Config{}, err
+	timeout := intOr(raw.TimeoutMs, TimeoutMsDefault)
+	if timeout < 0 || timeout > 86_400_000 {
+		return Config{}, fmt.Errorf("invalid timeout_ms: %d", timeout)
 	}
-	timeout, err := parseInt("WEB_GREP_TIMEOUT_MS", TimeoutMsDefault, 0, 86_400_000)
-	if err != nil {
-		return Config{}, err
+	previewLines := intOr(raw.PreviewLines, PreviewLines)
+	if previewLines < 1 || previewLines > 10_000 {
+		return Config{}, fmt.Errorf("invalid preview_lines: %d", previewLines)
 	}
-	previewBytes := 0
-	previewLines, err := parseInt("WEB_GREP_PREVIEW_LINES", PreviewLines, 1, 10_000)
-	if err != nil {
-		return Config{}, err
+	threads := intOr(raw.Threads, 0)
+	if threads < 0 || threads > 1024 {
+		return Config{}, fmt.Errorf("invalid threads: %d", threads)
 	}
-	threads, err := parseInt("WEB_GREP_THREADS", 0, 0, 1024)
-	if err != nil {
-		return Config{}, err
+	maxConc := intOr(raw.MaxConcurrent, MaxConcurrentDefault)
+	if maxConc < 1 || maxConc > 64 {
+		return Config{}, fmt.Errorf("invalid max_concurrent: %d", maxConc)
 	}
-	allowSecrets, err := parseBool("WEB_GREP_ALLOW_SECRETS", false)
-	if err != nil {
-		return Config{}, err
+	level := strings.TrimSpace(raw.LogLevel)
+	if level == "" {
+		level = "info"
 	}
-	follow, err := parseBool("WEB_GREP_FOLLOW_SYMLINKS", true)
-	if err != nil {
-		return Config{}, err
-	}
-	noIgnore, err := parseBool("WEB_GREP_NO_IGNORE", true)
-	if err != nil {
-		return Config{}, err
-	}
-	searchZip, err := parseBool("WEB_GREP_SEARCH_ZIP", true)
-	if err != nil {
-		return Config{}, err
-	}
-	maxConc, err := parseInt("WEB_GREP_MAX_CONCURRENT", MaxConcurrentDefault, 1, 64)
-	if err != nil {
-		return Config{}, err
-	}
-	public, err := ParsePublicHosts(os.Getenv("WEB_GREP_PUBLIC_HOST"))
-	if err != nil {
-		return Config{}, err
-	}
-	rgPath := strings.TrimSpace(os.Getenv("WEB_GREP_RG"))
-	if rgPath != "" && !filepath.IsAbs(rgPath) {
-		return Config{}, fmt.Errorf("WEB_GREP_RG must be an absolute path")
-	}
-	level := optional("WEB_GREP_LOG_LEVEL", "info")
 	switch level {
 	case "debug", "info", "warn", "error":
 	default:
-		return Config{}, fmt.Errorf("invalid WEB_GREP_LOG_LEVEL")
+		return Config{}, fmt.Errorf("invalid log_level: %s", level)
 	}
-	dev := os.Getenv("WEB_GREP_DEV") == "1" || os.Getenv("WEB_GREP_DEV") == "true" ||
-		os.Getenv("NODE_ENV") == "development"
+	rgPath := strings.TrimSpace(raw.Rg)
+	if rgPath != "" && !filepath.IsAbs(rgPath) {
+		return Config{}, fmt.Errorf("rg must be an absolute path")
+	}
+	tokenHash, wasPlain := parseToken(raw.Token)
 	cfg := Config{
 		RootReal:       rootReal,
 		RootLabel:      filepath.Base(rootReal),
 		Host:           host,
 		Port:           port,
-		PublicHosts:    public,
-		Token:          strings.TrimSpace(os.Getenv("WEB_GREP_TOKEN")),
-		AllowSecrets:   allowSecrets,
-		FollowSymlinks: follow,
-		NoIgnore:       noIgnore,
+		PublicHosts:    append([]string(nil), raw.PublicHost...),
+		TokenHash:      tokenHash,
+		ConfigPath:     path,
+		sealToken:      wasPlain && path != "" && !tokenFromEnv,
+		AllowSecrets:   boolOr(raw.AllowSecrets, false),
+		FollowSymlinks: boolOr(raw.FollowSymlinks, true),
+		NoIgnore:       boolOr(raw.NoIgnore, true),
 		MaxResults:     maxRes,
 		MaxResultsHard: maxHard,
 		TimeoutMs:      timeout,
-		PreviewBytes:   previewBytes,
+		PreviewBytes:   0,
 		PreviewLines:   previewLines,
 		Threads:        threads,
 		MaxConcurrent:  maxConc,
-		SearchZip:      searchZip,
+		SearchZip:      boolOr(raw.SearchZip, true),
 		RgPath:         rgPath,
 		LogLevel:       level,
-		Dev:            dev,
-		WebDist:        strings.TrimSpace(os.Getenv("WEB_GREP_WEB_DIST")),
+		Dev:            boolOr(raw.Dev, false),
+		WebDist:        strings.TrimSpace(raw.WebDist),
 	}
 	if err := AssertBindPolicy(cfg); err != nil {
 		return Config{}, err
@@ -167,11 +190,11 @@ func AssertBindPolicy(cfg Config) error {
 	if IsLoopbackBind(cfg.Host) {
 		return nil
 	}
-	if cfg.Token == "" {
-		return fmt.Errorf("refusing to bind %s without WEB_GREP_TOKEN", cfg.Host)
+	if cfg.TokenHash == "" {
+		return fmt.Errorf("refusing to bind %s without token (config.yaml token, or %s)", cfg.Host, EnvToken)
 	}
 	if len(cfg.PublicHosts) == 0 {
-		return fmt.Errorf("0.0.0.0 is a bind address, not a Host. Set WEB_GREP_PUBLIC_HOST to the name/IP in the address bar")
+		return fmt.Errorf("0.0.0.0 is a bind address, not a Host. Set public_host to the name/IP in the address bar")
 	}
 	return nil
 }
@@ -195,7 +218,7 @@ func ParsePublicHosts(raw string) ([]string, error) {
 			continue
 		}
 		if host == "0.0.0.0" || host == "::" || host == "[::]" {
-			return nil, fmt.Errorf("WEB_GREP_PUBLIC_HOST must not include 0.0.0.0 (bind address, not a Host)")
+			return nil, fmt.Errorf("public_host must not include 0.0.0.0 (bind address, not a Host)")
 		}
 		hosts = append(hosts, host)
 	}
@@ -206,15 +229,15 @@ func resolveRoot(raw string) (string, error) {
 	expanded := expandHome(raw)
 	abs, err := filepath.Abs(expanded)
 	if err != nil {
-		return "", fmt.Errorf("WEB_GREP_ROOT is not a readable directory: %s", raw)
+		return "", fmt.Errorf("root is not a readable directory: %s", raw)
 	}
 	st, err := os.Stat(abs)
 	if err != nil || !st.IsDir() {
-		return "", fmt.Errorf("WEB_GREP_ROOT is not a readable directory: %s", raw)
+		return "", fmt.Errorf("root is not a readable directory: %s", raw)
 	}
 	real, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		return "", fmt.Errorf("WEB_GREP_ROOT is not a readable directory: %s", raw)
+		return "", fmt.Errorf("root is not a readable directory: %s", raw)
 	}
 	return real, nil
 }
@@ -236,88 +259,4 @@ func expandHome(raw string) string {
 		return home + trimmed[1:]
 	}
 	return trimmed
-}
-
-func optional(key, fallback string) string {
-	v := strings.TrimSpace(os.Getenv(key))
-	if v == "" {
-		return fallback
-	}
-	return v
-}
-
-func parseInt(key string, fallback, min, max int) (int, error) {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return fallback, nil
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < min || n > max {
-		return 0, fmt.Errorf("invalid %s: %s", key, raw)
-	}
-	return n, nil
-}
-
-func parseBool(key string, fallback bool) (bool, error) {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return fallback, nil
-	}
-	switch strings.ToLower(raw) {
-	case "1", "true":
-		return true, nil
-	case "0", "false":
-		return false, nil
-	default:
-		return false, fmt.Errorf("invalid boolean value: %s", raw)
-	}
-}
-
-func loadDotEnv() {
-	start, err := os.Getwd()
-	if err != nil {
-		return
-	}
-	dir := start
-	for {
-		path := filepath.Join(dir, ".env")
-		if st, err := os.Stat(path); err == nil && !st.IsDir() {
-			applyDotEnv(path)
-			return
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return
-		}
-		dir = parent
-	}
-}
-
-func applyDotEnv(path string) {
-	f, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer f.Close()
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			continue
-		}
-		key = strings.TrimSpace(key)
-		val = strings.TrimSpace(val)
-		if len(val) >= 2 {
-			if (val[0] == '"' && val[len(val)-1] == '"') || (val[0] == '\'' && val[len(val)-1] == '\'') {
-				val = val[1 : len(val)-1]
-			}
-		}
-		if os.Getenv(key) == "" {
-			_ = os.Setenv(key, val)
-		}
-	}
 }
