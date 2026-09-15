@@ -67,7 +67,7 @@ Primary config is `config.yaml` (see `config.example.yaml`). Path: `-config`, el
 
 - Loopback bind can start without `token`.
 - Binding `0.0.0.0` without `token` **or** `public_host` fails at boot.
-- After login the SPA stores a **session** token (7-day TTL on the server). Checking “Remember for 7 days” writes it to `localStorage`; otherwise `sessionStorage` (cleared when the tab closes). Requests send `Authorization: Bearer` / `X-Web-Grep-Token`. The password is never sent on search. Sessions live in process memory, so restarting the server still requires a new login.
+- After login the SPA stores a **session** token with no expiry. Checking “Remember password” writes it to `localStorage` until logout or the user clears site data; otherwise `sessionStorage` (cleared when the tab closes). Requests send `Authorization: Bearer` / `X-Web-Grep-Token`. The password is never sent on search. Sessions live in process memory, so restarting the server still requires a new login.
 - 时间范围按**文件修改时间**过滤目录树和可搜文件，由浏览器传 `mtimeAfter`，不是 yaml 项。搜索历史在浏览器 `localStorage`。
 - `SIGHUP` 会按同一条 `config.yaml` 路径重新加载配置。
 

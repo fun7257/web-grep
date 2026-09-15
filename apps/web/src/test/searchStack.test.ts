@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   compileParts,
+  formatQueryInput,
   joinAbs,
   newPart,
+  parseQueryInput,
   stackedQuery,
   toRgShareCommand,
 } from "../searchStack.ts";
@@ -21,6 +23,38 @@ describe("stackedQuery", () => {
     expect(got.query).not.toContain("(?=");
     expect(got.query).toContain("account.*308b85351438c15a");
     expect(got.query).toContain("308b85351438c15a.*account");
+  });
+});
+
+describe("parseQueryInput", () => {
+  it("keeps spaces inside a single term", () => {
+    expect(parseQueryInput("hello world")).toEqual(["hello world"]);
+    expect(parseQueryInput("  err msg  ")).toEqual(["err msg"]);
+  });
+
+  it("splits only on the AND keyword", () => {
+    expect(parseQueryInput("hello AND world")).toEqual(["hello", "world"]);
+    expect(parseQueryInput("hello world AND timeout")).toEqual([
+      "hello world",
+      "timeout",
+    ]);
+    expect(parseQueryInput('"failed AND retry" AND timeout')).toEqual([
+      "failed AND retry",
+      "timeout",
+    ]);
+  });
+
+  it("keeps a regex pattern intact", () => {
+    expect(parseQueryInput("foo bar", true)).toEqual(["foo bar"]);
+  });
+});
+
+describe("formatQueryInput", () => {
+  it("joins extra terms with AND and leaves spaces in a single term", () => {
+    expect(formatQueryInput(["hello world"])).toBe("hello world");
+    expect(formatQueryInput(["hello world", "timeout"])).toBe(
+      "hello world AND timeout",
+    );
   });
 });
 

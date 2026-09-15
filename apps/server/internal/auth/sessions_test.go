@@ -1,13 +1,10 @@
 package auth
 
-import (
-	"testing"
-	"time"
-)
+import "testing"
 
-func TestIssueExpiresInSevenDays(t *testing.T) {
+func TestIssuePersistsUntilRevoked(t *testing.T) {
 	s := NewSessions()
-	token, exp, err := s.Issue()
+	token, err := s.Issue()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -17,24 +14,8 @@ func TestIssueExpiresInSevenDays(t *testing.T) {
 	if !s.Lookup(token) {
 		t.Fatal("fresh session missing")
 	}
-	until := time.Until(exp)
-	if until < 6*24*time.Hour || until > 8*24*time.Hour {
-		t.Fatalf("ttl want ~7d, got %s", until)
-	}
-}
-
-func TestLookupRejectsExpired(t *testing.T) {
-	s := NewSessions()
-	token, _, err := s.Issue()
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.mu.Lock()
-	sess := s.m[token]
-	sess.Exp = time.Now().Add(-time.Second)
-	s.m[token] = sess
-	s.mu.Unlock()
+	s.Revoke(token)
 	if s.Lookup(token) {
-		t.Fatal("expired session still valid")
+		t.Fatal("revoked session still valid")
 	}
 }

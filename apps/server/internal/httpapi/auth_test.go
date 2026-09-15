@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"web-grep/internal/auth"
 	"web-grep/internal/config"
@@ -49,18 +48,13 @@ func TestAuthLoginAndGuard(t *testing.T) {
 		t.Fatal(login.Body.String())
 	}
 	var sess struct {
-		Token     string `json:"token"`
-		ExpiresAt int64  `json:"expiresAt"`
+		Token string `json:"token"`
 	}
 	if err := json.Unmarshal(login.Body.Bytes(), &sess); err != nil {
 		t.Fatal(err)
 	}
 	if sess.Token == "" {
 		t.Fatal("empty session")
-	}
-	until := time.Until(time.UnixMilli(sess.ExpiresAt))
-	if until < 6*24*time.Hour || until > 8*24*time.Hour {
-		t.Fatalf("expiresAt want ~7d, got %s", until)
 	}
 
 	ok := do(t, h, "GET", "http://127.0.0.1:8787/api/tree", "", map[string]string{

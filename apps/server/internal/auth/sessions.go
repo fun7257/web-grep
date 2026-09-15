@@ -3,34 +3,26 @@ package auth
 import (
 	"crypto/rand"
 	"sync"
-	"time"
 )
-
-const SessionTTL = 7 * 24 * time.Hour
-
-type session struct {
-	Exp time.Time
-}
 
 type Sessions struct {
 	mu sync.Mutex
-	m  map[string]session
+	m  map[string]struct{}
 }
 
 func NewSessions() *Sessions {
-	return &Sessions{m: make(map[string]session)}
+	return &Sessions{m: make(map[string]struct{})}
 }
 
-func (s *Sessions) Issue() (string, time.Time, error) {
+func (s *Sessions) Issue() (string, error) {
 	token, err := randomToken()
 	if err != nil {
-		return "", time.Time{}, err
+		return "", err
 	}
-	exp := time.Now().Add(SessionTTL)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.m[token] = session{Exp: exp}
-	return token, exp, nil
+	s.m[token] = struct{}{}
+	return token, nil
 }
 
 func (s *Sessions) Lookup(token string) bool {
@@ -39,15 +31,8 @@ func (s *Sessions) Lookup(token string) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	sess, ok := s.m[token]
-	if !ok {
-		return false
-	}
-	if time.Now().After(sess.Exp) {
-		delete(s.m, token)
-		return false
-	}
-	return true
+	_, ok := s.m[token]
+	return ok
 }
 
 func (s *Sessions) Revoke(token string) {

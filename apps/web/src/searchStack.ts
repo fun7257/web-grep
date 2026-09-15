@@ -37,6 +37,67 @@ export function parseDraft(raw: string): QueryPart | null {
   return newPart(trimmed);
 }
 
+/** Split a search box into AND terms. Spaces stay in the term; only AND splits. */
+export function parseQueryInput(raw: string, regex = false): string[] {
+  const trimmed = raw.trim();
+  if (trimmed === "") {
+    return [];
+  }
+  if (regex) {
+    return [trimmed];
+  }
+  const terms: string[] = [];
+  let buf = "";
+  let quote: '"' | "'" | null = null;
+  const push = (): void => {
+    const value = buf.trim();
+    if (value !== "") {
+      terms.push(value);
+    }
+    buf = "";
+  };
+  for (let i = 0; i < trimmed.length; i++) {
+    const ch = trimmed[i] ?? "";
+    if (quote !== null) {
+      if (ch === quote) {
+        quote = null;
+      } else {
+        buf += ch;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      const and = trimmed.slice(i).match(/^\s+AND(?:\s+|$)/i);
+      if (and !== null) {
+        push();
+        i += and[0].length - 1;
+        continue;
+      }
+    }
+    buf += ch;
+  }
+  push();
+  return terms;
+}
+
+export function formatQueryInput(terms: string[]): string {
+  if (terms.length <= 1) {
+    return terms[0] ?? "";
+  }
+  return terms
+    .map((term) => {
+      if (/(^|\s)AND(\s|$)/i.test(term)) {
+        return `"${term.replaceAll('"', "")}"`;
+      }
+      return term;
+    })
+    .join(" AND ");
+}
+
 export function commitDraft(parts: QueryPart[], draft: string): QueryPart[] {
   const part = parseDraft(draft);
   if (part === null) {

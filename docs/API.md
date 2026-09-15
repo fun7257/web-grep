@@ -20,7 +20,7 @@
 | 默认值 | 请求里省略的字段按 Zod `.default()`。前端若行为与默认不同，必须显式传（当前 UI：`regex: false`、`hidden: true`）。 |
 | 路径 | 客户端只出现 POSIX **相对路径**（`src/a.ts`）。禁止绝对路径、`..`、NUL。 |
 | 错误 | 机器可读 `code` + 给人看的 `message`。不要把 Zod issue 数组或 Go error 原文直接给浏览器。 |
-| 鉴权 | 单密码。`GET /api/health`、`GET /api/auth/status`、`POST /api/auth/login`、`POST /api/auth/logout` 以及非 `/api` 的 SPA 静态资源免会话，但仍校验 Host/Origin。其余 `/api/*` 在设置了 `token` 时需要登录后的 `Authorization: Bearer` 或 `X-Web-Grep-Token`（会话令牌，不是密码）。会话服务端 7 天过期；浏览器勾选「记住 7 天」后把令牌放 `localStorage`，否则 `sessionStorage`（关标签即丢）。 |
+| 鉴权 | 单密码。`GET /api/health`、`GET /api/auth/status`、`POST /api/auth/login`、`POST /api/auth/logout` 以及非 `/api` 的 SPA 静态资源免会话，但仍校验 Host/Origin。其余 `/api/*` 在设置了 `token` 时需要登录后的 `Authorization: Bearer` 或 `X-Web-Grep-Token`（会话令牌，不是密码）。会话不过期，直到退出或服务重启。勾选「记住密码」把令牌放 `localStorage`，否则 `sessionStorage`（关标签即丢）。 |
 | 401 vs 403 | `401 UNAUTHORIZED`：弹登录。`INVALID_AUTH`：密码错误。`403 FORBIDDEN_HOST`：不是登录问题。 |
 
 并行开发建议：
@@ -80,7 +80,7 @@ HTTP JSON（SSE 尚未开始时）：
 
 ### `POST /api/auth/login`（公开）
 
-Body `{ "password" }` → `{ "token", "expiresAt" }`（`expiresAt` 为 unix 毫秒，默认 7 天后）。密码错误 `401 INVALID_AUTH`。
+Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 ### `POST /api/auth/logout`（公开）
 

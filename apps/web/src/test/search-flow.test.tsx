@@ -238,7 +238,7 @@ function typeQuery(value: string): void {
 }
 
 function clickSearch(): void {
-  fireEvent.click(screen.getByRole("button", { name: "Search" }));
+  fireEvent.click(document.querySelector(".search-go") as HTMLButtonElement);
 }
 
 function locMatcher(label: string) {
@@ -750,7 +750,7 @@ describe("search flow", () => {
     typeQuery("needle");
     clickSearch();
     const dialog = await screen.findByRole("dialog");
-    fireEvent.click(screen.getByLabelText("Remember for 7 days"));
+    fireEvent.click(screen.getByLabelText("Remember password"));
     fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
       target: { value: "secret1" },
     });
@@ -1049,7 +1049,32 @@ describe("search flow", () => {
     });
   });
 
-  it("Shift+Enter searches instead of adding an AND chip", async () => {
+  it("does not add a condition when the last field is empty", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
+    expect(screen.queryByRole("textbox", { name: "Add condition" })).toBeNull();
+    expect(
+      (screen.getByRole("button", { name: "Add condition" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+  });
+
+  it("Shift+Enter adds a condition even when the AND caret is focused", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    const caret = screen.getByRole("button", { name: "AND conditions" });
+    caret.focus();
+    fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
+    expect(
+      await screen.findByRole("textbox", { name: "Add condition" }),
+    ).toBeTruthy();
+    expect(document.querySelector(".search-and-pop")).toBeTruthy();
+    expect(document.querySelectorAll(".search-and-item")).toHaveLength(1);
+  });
+
+  it("Shift+Enter adds a new AND condition", async () => {
     const fetchMock = mockFetch(() =>
       sseResponse([
         sseEvent("hit", HIT_A),
@@ -1064,13 +1089,17 @@ describe("search flow", () => {
     });
     const searchesAfterFirst = searchCallCount(fetchMock);
     const box = screen.getByRole("searchbox");
-    typeQuery("wor");
-    fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
+    fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
+    const extra = await screen.findByRole("textbox", { name: "Add condition" });
+    expect(document.querySelector(".search-and-pop")).toBeTruthy();
+    expect(searchCallCount(fetchMock)).toBe(searchesAfterFirst);
+    fireEvent.change(extra, { target: { value: "world" } });
+    clickSearch();
     await waitFor(() => {
-      expect(searchCallCount(fetchMock)).toBeGreaterThan(searchesAfterFirst);
+      expect(lastSearchBody(fetchMock).query).toBe(
+        "hello.*world|world.*hello",
+      );
     });
-    const body = lastSearchBody(fetchMock);
-    expect(body.query).toBe("hello.*wor|wor.*hello");
   });
 
   it("Clear empties the query, results, and preview", async () => {
@@ -1100,40 +1129,46 @@ describe("search flow", () => {
     expect(document.querySelector(".preview-idle")).toBeTruthy();
   });
 
-  it("opens the AND dropdown while typing a second condition, not on search click", async () => {
-    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+  it("treats spaces as part of the query", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([sseEvent("done", donePayload())]),
+    );
     render(<App />);
-    typeQuery("hello");
+    typeQuery("hello world");
     clickSearch();
     await waitFor(() => {
-      expect(document.querySelector(".search-dropdown")).toBeNull();
+      expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+        "hello world",
+      );
     });
-    typeQuery("world");
-    await waitFor(() => {
-      expect(document.querySelector(".search-dropdown")).toBeTruthy();
-    });
+    expect(lastSearchBody(fetchMock).query).toBe("hello world");
+    expect(lastSearchBody(fetchMock).regex).toBe(false);
   });
 
-  it("summarizes extra AND chips as AND +N", async () => {
-    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+  it("adds another search field for an AND condition", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([sseEvent("done", donePayload())]),
+    );
     render(<App />);
-    typeQuery("hello");
+    typeQuery("hello world");
+    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
+    const extra = await screen.findByRole("textbox", { name: "Add condition" });
+    fireEvent.change(extra, { target: { value: "timeout" } });
     clickSearch();
     await waitFor(() => {
-      expect(
-        document.querySelectorAll(".search-chip-row [data-chip-token]"),
-      ).toHaveLength(1);
+      expect(lastSearchBody(fetchMock).query).toBe(
+        "hello world.*timeout|timeout.*hello world",
+      );
     });
-    typeQuery("world");
-    clickSearch();
-    await waitFor(() => {
-      expect(
-        document.querySelectorAll(".search-chip-row [data-chip-token]"),
-      ).toHaveLength(1);
-      expect(
-        screen.getByRole("button", { name: "AND +1" }),
-      ).toBeTruthy();
-    });
+    expect(document.querySelector(".search-and-pop")).toBeNull();
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+      "hello world",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "AND conditions" }));
+    expect(
+      (screen.getByRole("textbox", { name: "Add condition" }) as HTMLInputElement)
+        .value,
+    ).toBe("timeout");
   });
 
   it("goes back to the previous search", async () => {
@@ -1142,58 +1177,85 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(
-        document.querySelectorAll(".search-chip-row [data-chip-token]"),
-      ).toHaveLength(1);
+      expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+        "hello",
+      );
     });
     typeQuery("world");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "AND +1" })).toBeTruthy();
+      expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+        "world",
+      );
     });
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     await waitFor(() => {
-      const chips = [
-        ...document.querySelectorAll(".search-chip-row [data-chip-token]"),
-      ];
-      expect(chips).toHaveLength(1);
-      expect(chips[0]?.textContent).toContain("hello");
-      expect(screen.queryByRole("button", { name: "AND +1" })).toBeNull();
+      expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+        "hello",
+      );
+      expect(document.querySelectorAll(".q-chip")).toHaveLength(0);
     });
     fireEvent.click(screen.getByRole("button", { name: "Forward" }));
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: "AND +1" })).toBeTruthy();
+      expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+        "world",
+      );
     });
   });
 
-  it("lists recent searches in the expand dropdown", async () => {
+  it("opens search history from a button left of the search field", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     typeQuery("needle-hist");
     clickSearch();
-    fireEvent.click(
-      screen.getByRole("button", { name: "All conditions and history" }),
-    );
-    expect(screen.getByText("Recent searches")).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: /needle-hist/ }),
-    ).toBeTruthy();
+    await waitFor(() => {
+      expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+        "needle-hist",
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Recent searches" }));
+    expect(document.querySelector(".search-history-pop")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /needle-hist/ })).toBeTruthy();
+    expect(document.querySelector(".search-and-pop")).toBeNull();
   });
 
-  it("expands a query overlay from the caret button", async () => {
-    mockFetch((init) => neverSettle(init));
+  it("opens AND conditions from the caret without adding a field", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
-    expect(document.querySelector(".search-dropdown")).toBeNull();
-    fireEvent.click(
-      screen.getByRole("button", { name: "All conditions and history" }),
-    );
-    expect(document.querySelector(".search-dropdown")).toBeTruthy();
+    expect(document.querySelector(".search-and-pop")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "AND conditions" }));
+    expect(document.querySelector(".search-and-pop")).toBeTruthy();
     expect(document.querySelector(".search-drop-backdrop")).toBeTruthy();
-    expect(document.querySelector(".search-editor-input")).toBeNull();
+    expect(screen.queryByText("Recent searches")).toBeNull();
+    expect(
+      screen.queryByRole("textbox", { name: "Add condition" }),
+    ).toBeNull();
+    expect(document.querySelector(".search-and-more")).toBeTruthy();
+    expect(document.querySelector(".search-and-go")).toBeTruthy();
     fireEvent.mouseDown(
       document.querySelector(".search-drop-backdrop") as Element,
     );
-    expect(document.querySelector(".search-dropdown")).toBeNull();
+    expect(document.querySelector(".search-and-pop")).toBeNull();
+  });
+
+  it("ignores empty AND fields when searching", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([sseEvent("done", donePayload())]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
+    await screen.findByRole("textbox", { name: "Add condition" });
+    expect(
+      (document.querySelector(".search-and-more") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    fireEvent.click(document.querySelector(".search-and-more") as HTMLButtonElement);
+    expect(document.querySelectorAll(".search-and-item")).toHaveLength(1);
+    clickSearch();
+    await waitFor(() => {
+      expect(lastSearchBody(fetchMock).query).toBe("hello");
+    });
+    expect(lastSearchBody(fetchMock).regex).toBe(false);
   });
 
   it("submits caseSensitive and regex when modifiers are toggled", async () => {

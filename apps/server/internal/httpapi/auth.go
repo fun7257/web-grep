@@ -33,15 +33,12 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "INVALID_AUTH", "invalid password")
 		return
 	}
-	token, exp, err := s.Sessions.Issue()
+	token, err := s.Sessions.Issue()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "INTERNAL", "could not issue session")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"token":     token,
-		"expiresAt": exp.UnixMilli(),
-	})
+	writeJSON(w, http.StatusOK, map[string]any{"token": token})
 }
 
 func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {

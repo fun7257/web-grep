@@ -54,6 +54,13 @@ function parseGlobs(raw: string): string[] {
     .filter((s) => s.length > 0);
 }
 
+function partsFromFields(values: string[]): QueryPart[] {
+  return values
+    .map((value) => value.trim())
+    .filter((value) => value !== "")
+    .map(newPart);
+}
+
 function AppShell() {
   const { t } = useLocale();
   const token = useAuth();
@@ -62,7 +69,7 @@ function AppShell() {
   const listRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLElement>(null);
   const [parts, setParts] = useState<QueryPart[]>([]);
-  const [draft, setDraft] = useState("");
+  const [fields, setFields] = useState<string[]>([""]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [treeOpen, toggleTree] = useTreeOpen();
   const [picks, setPicks] = useState<TreePick[]>([]);
@@ -200,7 +207,9 @@ function AppShell() {
 
       stackRef.current = stack;
       setParts(nextParts);
-      setDraft("");
+      setFields(
+        nextParts.length === 0 ? [""] : nextParts.map((part) => part.value),
+      );
       setSelectedIndex(0);
       const navEntry: SearchNavEntry = {
         parts: nextParts.map((part) => part.value),
@@ -235,15 +244,11 @@ function AppShell() {
 
   const submit = useCallback(
     (nextScope: "all" | "include" | "exclude" = scope) => {
-      const raw = draft.trim();
-      const nextParts = raw !== "" ? [...parts, newPart(raw)] : parts;
-      const fallback = stackRef.current?.parts ?? [];
-      searchWithParts(
-        nextParts.length > 0 ? nextParts : fallback,
-        nextScope,
-      );
+      const parsed = partsFromFields(fields);
+      const fallback = stackRef.current?.parts ?? parts;
+      searchWithParts(parsed.length > 0 ? parsed : fallback, nextScope);
     },
-    [draft, parts, scope, searchWithParts],
+    [fields, parts, scope, searchWithParts],
   );
 
   const searchSelected = useCallback(
@@ -260,7 +265,7 @@ function AppShell() {
     setShareOpen(false);
     setContextOpen(false);
     setParts([]);
-    setDraft("");
+    setFields([""]);
     setSelectedIndex(0);
     queryRef.current?.focus();
   }, [resetSearch]);
@@ -420,8 +425,7 @@ function AppShell() {
           }
           setTimeRange(next);
           saveTimeRange(next);
-          const raw = draft.trim();
-          const nextParts = raw !== "" ? [...parts, newPart(raw)] : parts;
+          const nextParts = partsFromFields(fields);
           if (nextParts.length > 0) {
             searchWithParts(nextParts, "all", [], modifiers, next, []);
           }
@@ -431,7 +435,7 @@ function AppShell() {
             resetSearch();
             stackRef.current = null;
             setParts([]);
-            setDraft("");
+            setFields([""]);
             setSelectedIndex(0);
             setPicks([]);
             setScope("all");
@@ -453,14 +457,12 @@ function AppShell() {
         style={{ flex: `0 0 ${hitsWidth}px`, width: `${hitsWidth}px` }}
       >
         <SearchBar
-          parts={parts}
-          onPartsChange={setParts}
-          draft={draft}
-          onDraftChange={setDraft}
+          fields={fields}
+          onFieldsChange={setFields}
           onFlushSearch={searchWithParts}
           canClear={
             parts.length > 0 ||
-            draft !== "" ||
+            fields.some((value) => value !== "") ||
             search.hits.length > 0 ||
             search.status !== "idle"
           }
@@ -469,14 +471,9 @@ function AppShell() {
           modifiers={modifiers}
           onModifiersChange={(next) => {
             setModifiers(next);
-            if (parts.length > 0 || draft.trim() !== "") {
-              const raw = draft.trim();
-              searchWithParts(
-                raw !== "" ? [...parts, newPart(raw)] : parts,
-                scope,
-                [],
-                next,
-              );
+            const nextParts = partsFromFields(fields);
+            if (nextParts.length > 0) {
+              searchWithParts(nextParts, scope, [], next);
             }
           }}
           includeGlobs={includeGlobs}

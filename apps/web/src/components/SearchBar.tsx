@@ -5,47 +5,20 @@ import type { SearchHistoryItem } from "../searchHistory.ts";
 import type { QueryPart, SearchModifiers } from "../searchStack.ts";
 import { newPart } from "../searchStack.ts";
 import { timeRangeMsgKey, type TimeRange } from "../timeRange.ts";
-import { IconCaret, IconNavBack, IconNavForward, IconSearch } from "./icons.tsx";
-
-function QueryChips({
-  parts,
-  onRemove,
-  opAnd,
-}: {
-  parts: QueryPart[];
-  onRemove: (id: string) => void;
-  opAnd: string;
-}) {
-  return (
-    <>
-      {parts.map((part, index) => (
-        <span key={part.id} className="q-token">
-          {index > 0 ? <span className="q-op">{opAnd}</span> : null}
-          <span className={`q-chip hl-${index % 4}`}>
-            <span className="q-chip-text">{part.value}</span>
-            <button
-              type="button"
-              className="q-x"
-              aria-label="remove"
-              onClick={(event) => {
-                event.stopPropagation();
-                onRemove(part.id);
-              }}
-            >
-              ×
-            </button>
-          </span>
-        </span>
-      ))}
-    </>
-  );
-}
+import {
+  IconAnd,
+  IconCaret,
+  IconHistory,
+  IconNavBack,
+  IconNavForward,
+  IconPlus,
+  IconSearch,
+  IconX,
+} from "./icons.tsx";
 
 export function SearchBar({
-  parts,
-  onPartsChange,
-  draft,
-  onDraftChange,
+  fields,
+  onFieldsChange,
   onFlushSearch,
   canClear,
   onClear,
@@ -56,7 +29,7 @@ export function SearchBar({
   onIncludeGlobsChange,
   excludeGlobs = "",
   onExcludeGlobsChange,
-  timeRange = null,
+  timeRange: _timeRange = null,
   history = [],
   onRestoreHistory,
   canGoBack = false,
@@ -64,10 +37,8 @@ export function SearchBar({
   onGoBack,
   onGoForward,
 }: {
-  parts: QueryPart[];
-  onPartsChange: (parts: QueryPart[]) => void;
-  draft: string;
-  onDraftChange: (value: string) => void;
+  fields: string[];
+  onFieldsChange: (fields: string[]) => void;
   onFlushSearch: (nextParts: QueryPart[]) => void;
   canClear: boolean;
   onClear: () => void;
@@ -88,36 +59,102 @@ export function SearchBar({
 }) {
   const { t } = useLocale();
   const rootRef = useRef<HTMLDivElement>(null);
-  const [editorOpen, setEditorOpen] = useState(false);
-  const extraCount = Math.max(0, parts.length - 1);
-  const leadPart = parts[0];
+  const extraRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const pendingFocus = useRef(false);
+  const [andOpen, setAndOpen] = useState(false);
+  const [histOpen, setHistOpen] = useState(false);
+  const values = fields.length > 0 ? fields : [""];
+  const extras = values.slice(1);
+  const canAdd = (values[values.length - 1] ?? "").trim() !== "";
 
   const sendSearch = (): void => {
-    const raw = draft.trim();
-    onDraftChange("");
-    onFlushSearch(raw !== "" ? [...parts, newPart(raw)] : parts);
+    const terms = values
+      .map((value) => value.trim())
+      .filter((value) => value !== "");
+    setAndOpen(false);
+    setHistOpen(false);
+    onFlushSearch(terms.map(newPart));
   };
+
+  const setField = (index: number, value: string): void => {
+    onFieldsChange(values.map((item, i) => (i === index ? value : item)));
+  };
+
+  const addField = (): void => {
+    if (!canAdd) {
+      return;
+    }
+    pendingFocus.current = true;
+    setHistOpen(false);
+    setAndOpen(true);
+    onFieldsChange([...values, ""]);
+  };
+  const addFieldRef = useRef(addField);
+  addFieldRef.current = addField;
+
+  const toggleAnd = (): void => {
+    setHistOpen(false);
+    setAndOpen((open) => !open);
+  };
+
+  const toggleHist = (): void => {
+    setAndOpen(false);
+    setHistOpen((open) => !open);
+  };
+
+  const removeField = (index: number): void => {
+    if (values.length <= 1) {
+      return;
+    }
+    const next = values.filter((_, i) => i !== index);
+    onFieldsChange(next);
+    if (next.length <= 1) {
+      setAndOpen(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!andOpen || !pendingFocus.current) {
+      return;
+    }
+    pendingFocus.current = false;
+    const node = extraRefs.current[Math.max(0, extras.length - 1)];
+    node?.focus();
+    node?.scrollIntoView({ block: "nearest" });
+  }, [andOpen, extras.length]);
 
   const handleSubmit = (event: FormEvent): void => {
     event.preventDefault();
-    sendSearch();
-  };
-
-  const toggleEditor = (): void => {
-    setEditorOpen((open) => !open);
   };
 
   useEffect(() => {
-    if (parts.length >= 1 && draft.trim() !== "") {
-      setEditorOpen(true);
-    }
-  }, [draft, parts.length]);
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.isComposing) {
+        return;
+      }
+      if (event.key !== "Enter" || !event.shiftKey) {
+        return;
+      }
+      if (event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      if (document.querySelector(".token-overlay") !== null) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      addFieldRef.current();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+    };
+  }, []);
 
   useEffect(() => {
-    if (!editorOpen) {
+    if (!andOpen && !histOpen) {
       return;
     }
-    queryRef.current?.focus();
     const onDown = (event: MouseEvent): void => {
       const target = event.target;
       if (
@@ -125,14 +162,15 @@ export function SearchBar({
         rootRef.current !== null &&
         !rootRef.current.contains(target)
       ) {
-        setEditorOpen(false);
+        setAndOpen(false);
+        setHistOpen(false);
       }
     };
     window.addEventListener("mousedown", onDown);
     return () => {
       window.removeEventListener("mousedown", onDown);
     };
-  }, [editorOpen]);
+  }, [andOpen, histOpen]);
 
   const onQueryKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.nativeEvent.isComposing) {
@@ -165,15 +203,11 @@ export function SearchBar({
       });
       return;
     }
-    if (event.key === "Escape" && editorOpen) {
+    if (event.key === "Escape" && (andOpen || histOpen)) {
       event.preventDefault();
-      setEditorOpen(false);
+      setAndOpen(false);
+      setHistOpen(false);
       queryRef.current?.focus();
-      return;
-    }
-    if (event.key === "Backspace" && draft === "" && parts.length > 0) {
-      event.preventDefault();
-      onPartsChange(parts.slice(0, -1));
       return;
     }
     if (event.key !== "Enter") {
@@ -184,22 +218,21 @@ export function SearchBar({
     }
     event.preventDefault();
     event.stopPropagation();
+    if (event.shiftKey) {
+      return;
+    }
     sendSearch();
-  };
-
-  const removePart = (id: string): void => {
-    onPartsChange(parts.filter((item) => item.id !== id));
   };
 
   return (
     <div className="search-container" ref={rootRef}>
       <form
-        className={editorOpen ? "search-bar is-open" : "search-bar"}
+        className={andOpen || histOpen ? "search-bar is-open" : "search-bar"}
         onSubmit={handleSubmit}
         noValidate
         role="search"
       >
-        <div className="search-nav" role="group" aria-label={t("searchHistory")}>
+        <div className="search-nav" role="group" aria-label={t("searchBack")}>
           <button
             type="button"
             className="search-nav-btn"
@@ -221,11 +254,61 @@ export function SearchBar({
             <IconNavForward />
           </button>
         </div>
+        <div className="search-history-wrap">
+          <button
+            type="button"
+            className={
+              histOpen ? "search-history-btn is-on" : "search-history-btn"
+            }
+            aria-label={t("searchHistory")}
+            title={t("searchHistory")}
+            aria-expanded={histOpen}
+            onClick={(event) => {
+              event.preventDefault();
+              toggleHist();
+            }}
+          >
+            <IconHistory />
+          </button>
+          {histOpen ? (
+            <div
+              className="search-history-pop"
+              role="dialog"
+              aria-label={t("searchHistory")}
+            >
+              <div className="search-history-label">{t("searchHistory")}</div>
+              {history.length > 0 ? (
+                <div className="search-history-list">
+                  {history.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className="search-history-item"
+                      onClick={() => {
+                        setHistOpen(false);
+                        onRestoreHistory?.(item);
+                      }}
+                    >
+                      <span className="search-history-q">
+                        {item.parts.join(" AND ")}
+                      </span>
+                      <span className="search-history-meta">
+                        {item.timeRange === null
+                          ? t("timeRangeAll")
+                          : t(timeRangeMsgKey(item.timeRange))}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="search-history-empty">{t("searchHistoryEmpty")}</p>
+              )}
+            </div>
+          ) : null}
+        </div>
         <div className="search-field-wrap">
           <div
-            className={
-              leadPart !== undefined ? "search-field has-chips" : "search-field"
-            }
+            className="search-field"
             onClick={() => {
               queryRef.current?.focus();
             }}
@@ -233,46 +316,6 @@ export function SearchBar({
             <span className="search-icon">
               <IconSearch />
             </span>
-            {leadPart !== undefined ? (
-              <div
-                className={
-                  extraCount > 0
-                    ? "search-chips-wrap search-chip-row has-more"
-                    : "search-chips-wrap search-chip-row"
-                }
-              >
-                <span className="q-token" data-chip-token="">
-                  <span className="q-chip hl-0">
-                    <span className="q-chip-text">{leadPart.value}</span>
-                    <button
-                      type="button"
-                      className="q-x"
-                      aria-label="remove"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        removePart(leadPart.id);
-                      }}
-                    >
-                      ×
-                    </button>
-                  </span>
-                </span>
-                {extraCount > 0 ? (
-                  <button
-                    type="button"
-                    className="search-more"
-                    aria-label={t("queryMore", { n: extraCount })}
-                    title={t("queryExpand")}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setEditorOpen(true);
-                    }}
-                  >
-                    {t("queryMore", { n: extraCount })}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
             <input
               ref={queryRef}
               type="text"
@@ -284,88 +327,140 @@ export function SearchBar({
               autoCapitalize="off"
               spellCheck={false}
               aria-label={t("queryPlaceholder")}
-              placeholder={parts.length === 0 ? t("queryPlaceholder") : ""}
-              value={draft}
+              placeholder={t("queryPlaceholder")}
+              value={values[0] ?? ""}
               onChange={(event) => {
-                onDraftChange(event.target.value);
+                setField(0, event.target.value);
               }}
               onKeyDown={onQueryKeyDown}
             />
-            <span
-              className={
-                timeRange === null
-                  ? "search-time-pill is-off"
-                  : "search-time-pill"
-              }
-              title={t("timeRangeHint")}
-            >
-              {timeRange === null
-                ? t("timeRangeAll")
-                : t(timeRangeMsgKey(timeRange))}
-            </span>
             <button
               type="button"
-              className={editorOpen ? "search-caret is-open" : "search-caret"}
-              aria-expanded={editorOpen}
-              aria-label={t("queryExpand")}
-              title={t("queryExpand")}
+              className={andOpen ? "search-caret is-open" : "search-caret"}
+              aria-expanded={andOpen}
+              aria-label={t("queryConditions")}
+              title={t("queryConditions")}
               onClick={(event) => {
                 event.preventDefault();
                 event.stopPropagation();
-                toggleEditor();
+                toggleAnd();
               }}
             >
-              <IconCaret open={editorOpen} />
+              <IconCaret open={andOpen} />
             </button>
           </div>
-          {editorOpen ? (
+          {andOpen ? (
             <div
-              className="search-dropdown"
+              className="search-and-pop"
               role="dialog"
-              aria-label={t("queryExpand")}
+              aria-label={t("queryAddField")}
             >
-              {parts.length > 0 ? (
-                <div className="search-editor-block">
-                  <div className="search-history-label">{t("queryConditions")}</div>
-                  <div className="search-editor-chips">
-                    <QueryChips
-                      parts={parts}
-                      onRemove={removePart}
-                      opAnd={t("opAnd")}
-                    />
-                  </div>
-                </div>
-              ) : null}
-              {history.length > 0 ? (
-                <div className="search-history">
-                  <div className="search-history-label">{t("searchHistory")}</div>
-                  {history.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className="search-history-item"
+              <div className="search-and-list">
+              {extras.map((value, extraIndex) => {
+                const index = extraIndex + 1;
+                return (
+                  <div key={`and-${index}`} className="search-and-item">
+                    <div className="search-and-join" aria-hidden="true">
+                      <span className="search-and-line" />
+                      <span className="search-and-badge">
+                        <IconAnd />
+                        {t("opAnd")}
+                      </span>
+                      <span className="search-and-line" />
+                    </div>
+                    <div
+                      className="search-field is-extra"
                       onClick={() => {
-                        setEditorOpen(false);
-                        onRestoreHistory?.(item);
+                        extraRefs.current[extraIndex]?.focus();
                       }}
                     >
-                      <span className="search-history-q">
-                        {item.parts.join(" · ")}
+                      <span className="search-icon">
+                        <IconSearch />
                       </span>
-                      <span className="search-history-meta">
-                        {item.timeRange === null
-                          ? t("timeRangeAll")
-                          : t(timeRangeMsgKey(item.timeRange))}
-                      </span>
-                    </button>
-                  ))}
+                      <input
+                        ref={(node) => {
+                          extraRefs.current[extraIndex] = node;
+                        }}
+                        type="text"
+                        aria-label={t("queryAddField")}
+                        placeholder={t("queryPlaceholder")}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        value={value}
+                        onChange={(event) => {
+                          setField(index, event.target.value);
+                        }}
+                        onKeyDown={onQueryKeyDown}
+                      />
+                      <button
+                        type="button"
+                        className="search-field-remove"
+                        aria-label={t("queryRemoveField")}
+                        onClick={() => {
+                          removeField(index);
+                        }}
+                      >
+                        <IconX />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              </div>
+              <div className="search-and-foot">
+                <div className="search-and-actions">
+                  <button
+                    type="button"
+                    className="search-and-more"
+                    disabled={!canAdd}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      addField();
+                    }}
+                  >
+                    <IconPlus />
+                    {t("queryAddField")}
+                  </button>
+                  <button
+                    type="button"
+                    className="search-and-go"
+                    onClick={(event) => {
+                      event.preventDefault();
+                      sendSearch();
+                    }}
+                  >
+                    {t("search")}
+                  </button>
                 </div>
-              ) : (
-                <p className="search-editor-hint">{t("searchHistoryEmpty")}</p>
-              )}
+                <p className="search-and-hint">
+                  <kbd className="search-kbd">Shift+Enter</kbd>
+                  {t("queryAndHint")}
+                </p>
+              </div>
             </div>
           ) : null}
         </div>
+        <button
+          type="button"
+          className={
+            extras.length > 0 ? "search-add-field is-on" : "search-add-field"
+          }
+          aria-label={t("queryAddField")}
+          title={t("queryAddField")}
+          aria-expanded={andOpen}
+          disabled={!canAdd}
+          onClick={(event) => {
+            event.preventDefault();
+            addField();
+          }}
+        >
+          <IconPlus />
+          {extras.length > 0 ? (
+            <span className="search-add-count">{extras.length}</span>
+          ) : null}
+        </button>
         <div className="search-actions">
           <button
             type="button"
@@ -460,12 +555,13 @@ export function SearchBar({
           />
         </label>
       </div>
-      {editorOpen ? (
+      {andOpen || histOpen ? (
         <div
           className="search-drop-backdrop"
           onMouseDown={(event) => {
             event.preventDefault();
-            setEditorOpen(false);
+            setAndOpen(false);
+            setHistOpen(false);
           }}
         />
       ) : null}

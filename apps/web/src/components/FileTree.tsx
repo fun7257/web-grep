@@ -16,6 +16,7 @@ import {
   IconCheck,
   IconChevron,
   IconDash,
+  IconHistory,
   IconLogout,
   IconMinusCircle,
   IconPanel,
@@ -352,17 +353,6 @@ export function FileTree({
                 </p>
               </div>
             </div>
-            <span
-              className="search-count-badge"
-              title={t("searchCountTitle", { n: searchCount })}
-            >
-              <span className="search-count-badge-label">
-                {t("searchCountLabel")}
-              </span>
-              <span className="search-count-badge-stat">
-                {formatSearchCount(searchCount)}
-              </span>
-            </span>
             <button
               type="button"
               className="tree-toggle"
@@ -457,7 +447,10 @@ export function FileTree({
             )}
           </div>
           <div className="tree-time" title={t("timeRangeHint")}>
-            <span className="tree-time-label">{t("timeRange")}</span>
+            <span className="tree-time-label">
+              <IconHistory />
+              {t("timeRange")}
+            </span>
             <div className="tree-time-seg" role="group" aria-label={t("timeRange")}>
               {TIME_RANGES.map((id) => (
                 <button
@@ -477,6 +470,17 @@ export function FileTree({
           <div className="tree-foot">
             <ThemeToggle />
             <LocaleToggle />
+            <span
+              className="search-count-badge"
+              title={t("searchCountTitle", { n: searchCount })}
+            >
+              <span className="search-count-badge-label">
+                {t("searchCountLabel")}
+              </span>
+              <span className="search-count-badge-stat">
+                {formatSearchCount(searchCount)}
+              </span>
+            </span>
             {canLogout && onLogout !== undefined ? (
               <div className="tree-account">
                 <button

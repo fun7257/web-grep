@@ -28,113 +28,64 @@ export function IconMoon() {
   );
 }
 
+const idleLine = {
+  fill: "currentColor",
+  rx: 1.25,
+  height: 2.5,
+} as const;
+
 export function IdleMark({ kind }: { kind: "hits" | "preview" | "nomatch" }) {
-  if (kind === "nomatch") {
+  if (kind === "preview") {
     return (
       <svg className="idle-mark" viewBox="0 0 88 88" aria-hidden="true">
-        <circle cx="24" cy="26" r="2.2" fill="currentColor" opacity="0.35" />
         <path
-          d="M32 26h34"
+          d="M27 17h21l13 13v39a5 5 0 0 1-5 5H27a5 5 0 0 1-5-5V22a5 5 0 0 1 5-5z"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          opacity="0.35"
-        />
-        <circle cx="24" cy="44" r="2.2" fill="currentColor" opacity="0.22" />
-        <path
-          d="M36 44h10"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          opacity="0.28"
+          strokeWidth="1.7"
+          strokeLinejoin="round"
         />
         <path
-          d="M52 44h10"
+          d="M48 17v13h13"
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          opacity="0.28"
+          strokeWidth="1.7"
+          strokeLinejoin="round"
         />
-        <circle cx="24" cy="62" r="2.2" fill="currentColor" opacity="0.35" />
-        <path
-          d="M32 62h24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          opacity="0.35"
-        />
+        <rect {...idleLine} x="30" y="40" width="22" opacity="0.28" />
+        <rect className="idle-mark-hit" x="30" y="50" width="16" height="2.5" rx="1.25" />
+        <rect {...idleLine} x="30" y="60" width="20" opacity="0.28" />
       </svg>
     );
   }
   if (kind === "hits") {
     return (
       <svg className="idle-mark" viewBox="0 0 88 88" aria-hidden="true">
-        <circle cx="24" cy="26" r="2.2" fill="currentColor" opacity="0.4" />
-        <path
-          d="M32 26h34"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          opacity="0.4"
-        />
-        <circle className="idle-mark-hit" cx="24" cy="44" r="2.2" />
+        <circle cx="24" cy="27" r="2" fill="currentColor" opacity="0.32" />
+        <rect {...idleLine} x="32" y="25.75" width="32" opacity="0.28" />
+        <circle className="idle-mark-hit" cx="24" cy="44" r="2" />
         <rect
           className="idle-mark-hit"
           x="32"
-          y="41"
-          width="34"
-          height="6"
-          rx="2"
+          y="42.75"
+          width="32"
+          height="2.5"
+          rx="1.25"
         />
-        <circle cx="24" cy="62" r="2.2" fill="currentColor" opacity="0.4" />
-        <path
-          d="M32 62h24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinecap="round"
-          opacity="0.4"
-        />
+        <circle cx="24" cy="61" r="2" fill="currentColor" opacity="0.32" />
+        <rect {...idleLine} x="32" y="59.75" width="22" opacity="0.28" />
       </svg>
     );
   }
   return (
     <svg className="idle-mark" viewBox="0 0 88 88" aria-hidden="true">
-      <path
-        d="M28 16h22l14 14v42a6 6 0 0 1-6 6H28a6 6 0 0 1-6-6V22a6 6 0 0 1 6-6z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M50 16v14h14"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M32 42h24M32 52h18M32 62h24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        opacity="0.4"
-      />
-      <rect
-        className="idle-mark-hit"
-        x="32"
-        y="48"
-        width="16"
-        height="5"
-        rx="2.5"
-      />
+      <circle cx="24" cy="27" r="2" fill="currentColor" opacity="0.28" />
+      <rect {...idleLine} x="32" y="25.75" width="32" opacity="0.24" />
+      <circle cx="24" cy="44" r="2" fill="currentColor" opacity="0.18" />
+      <rect {...idleLine} x="32" y="42.75" width="12" opacity="0.16" />
+      <rect {...idleLine} x="50" y="42.75" width="14" opacity="0.16" />
+      <circle cx="24" cy="61" r="2" fill="currentColor" opacity="0.28" />
+      <rect {...idleLine} x="32" y="59.75" width="24" opacity="0.24" />
     </svg>
   );
 }
@@ -144,6 +95,23 @@ export function IconSearch() {
     <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
       <circle cx="7" cy="7" r="4.5" {...stroke} />
       <path d="M10.5 10.5 L14 14" {...stroke} />
+    </svg>
+  );
+}
+
+export function IconPlus() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 3.25v9.5M3.25 8h9.5" {...stroke} />
+    </svg>
+  );
+}
+
+export function IconAnd() {
+  return (
+    <svg className="icon icon-and" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="5.6" cy="8" r="3.15" {...stroke} />
+      <circle cx="10.4" cy="8" r="3.15" {...stroke} />
     </svg>
   );
 }
@@ -197,6 +165,15 @@ export function IconChevron({ open }: { open: boolean }) {
       aria-hidden="true"
     >
       <path d="M6 4l5 4-5 4" {...stroke} />
+    </svg>
+  );
+}
+
+export function IconHistory() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8.2" r="5.2" {...stroke} />
+      <path d="M8 5.6v3.1l2.1 1.2" {...stroke} />
     </svg>
   );
 }
