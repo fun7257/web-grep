@@ -20,6 +20,7 @@ type Request struct {
 	Query         string
 	Path          string
 	GlobInclude   []string
+	GlobAnd       []string
 	GlobExclude   []string
 	Regex         bool
 	CaseSensitive bool
@@ -38,6 +39,7 @@ type Preflight struct {
 	Request     Request
 	RelativeDir string
 	GlobInclude []string
+	GlobAnd     []string
 	GlobExclude []string
 	MaxResults  int
 }
@@ -121,6 +123,18 @@ func (s *Service) Preflight(req Request) Preflight {
 		}
 		exclude = append(exclude, clean)
 	}
+	var and []string
+	for _, g := range req.GlobAnd {
+		clean, err := sandbox.SanitizeUserGlob(g)
+		if err != nil {
+			return Preflight{Status: 400, Code: "INVALID_GLOB", Message: "invalid glob"}
+		}
+		posix := sandbox.ToPosixRel(clean)
+		if sandbox.IsDenied(posix, s.Cfg.AllowSecrets) {
+			continue
+		}
+		and = append(and, clean)
+	}
 	id := newUUID()
 	maxC := s.Cfg.MaxConcurrent
 	if maxC <= 0 {
@@ -150,6 +164,7 @@ func (s *Service) Preflight(req Request) Preflight {
 		Request:     req,
 		RelativeDir: rel,
 		GlobInclude: include,
+		GlobAnd:     and,
 		GlobExclude: exclude,
 		MaxResults:  maxResults,
 	}
@@ -254,6 +269,10 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		sendDone(false, false, false, 0, 0)
 		return
 	}
+	if len(pre.Request.GlobAnd) > 0 && len(pre.GlobAnd) == 0 {
+		sendDone(false, false, false, 0, 0)
+		return
+	}
 
 	in := rg.Input{
 		RootReal:       s.Cfg.RootReal,
@@ -273,6 +292,7 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	}
 	needList := !pre.Request.MtimeAfter.IsZero() ||
 		len(pre.GlobInclude) > 0 ||
+		len(pre.GlobAnd) > 0 ||
 		len(pre.GlobExclude) > 0
 	if needList {
 		listed, listErr := ListNewerFiles(
@@ -294,6 +314,9 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		}
 		// rg ignores --glob on explicit paths; tree picks must be applied here.
 		listed = sandbox.FilterByGlobs(listed, pre.GlobInclude, pre.GlobExclude)
+		if len(pre.GlobAnd) > 0 {
+			listed = sandbox.FilterByGlobs(listed, pre.GlobAnd, nil)
+		}
 		if len(listed) == 0 {
 			sendDone(false, false, false, 0, 0)
 			return

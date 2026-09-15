@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { copyText } from "../copyText.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import { IconCheck, IconCopy } from "./icons.tsx";
 
@@ -40,7 +41,7 @@ export function ShareModal({
   }
 
   const copy = (kind: "rg" | "link", value: string, notice: string): void => {
-    void navigator.clipboard?.writeText(value);
+    void copyText(value);
     setCopied(kind);
     onCopyNotice?.(notice);
   };
@@ -118,6 +119,7 @@ function ShareRow({
           className="share-input"
           readOnly
           value={value}
+          title={value}
           onFocus={(event) => {
             event.currentTarget.select();
           }}

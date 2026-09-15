@@ -19,8 +19,15 @@ import { useHotkeys } from "./hooks/useHotkeys.ts";
 import { LocaleProvider, useLocale } from "./hooks/useLocale.ts";
 import { useResizablePanes } from "./hooks/useResizablePanes.ts";
 import { useSearch } from "./hooks/useSearch.ts";
+import { copyText } from "./copyText.ts";
 import { useAuth } from "./hooks/useAuth.ts";
-import { buildShareUrl, parseShareSearch } from "./searchShare.ts";
+import {
+  buildShareUrl,
+  captureShareState,
+  parseShareSearch,
+  shareUrlSearch,
+} from "./searchShare.ts";
+import { picksToGlobs, picksToSearchGlobs, type TreePick, togglePick } from "./treePicks.ts";
 import {
   compileParts,
   joinAbs,
@@ -28,6 +35,7 @@ import {
   type QueryPart,
   type SearchModifiers,
   type SearchStack,
+  stackedQuery,
   toRequest,
   toRgShareCommand,
 } from "./searchStack.ts";
@@ -43,7 +51,6 @@ import {
   saveTimeRange,
   type TimeRange,
 } from "./timeRange.ts";
-import { picksToSearchGlobs, type TreePick, togglePick } from "./treePicks.ts";
 
 const EMPTY_HL_TERMS: string[] = [];
 
@@ -127,35 +134,69 @@ function AppShell() {
     [lastStack],
   );
   const rootAbs = token.meta?.root;
+  const shareState = useMemo(
+    () =>
+      captureShareState({
+        fields,
+        fallbackParts: lastStack?.parts.map((part) => part.value),
+        caseSensitive: modifiers.caseSensitive,
+        wordMatch: modifiers.wordMatch,
+        regex: modifiers.regex,
+        includeGlobs,
+        excludeGlobs,
+        picks,
+        scope,
+        timeRange,
+        ...(selectedHit !== null
+          ? { hitPath: selectedHit.path, hitLine: selectedHit.line }
+          : {}),
+      }),
+    [
+      excludeGlobs,
+      fields,
+      includeGlobs,
+      lastStack,
+      modifiers,
+      picks,
+      scope,
+      selectedHit,
+      timeRange,
+    ],
+  );
   const webUrl =
-    selectedHit !== null && lastStack !== null && lastStack.parts.length > 0
-      ? buildShareUrl(window.location.href, {
-          parts: lastStack.parts.map((part) => part.value),
-          caseSensitive: lastStack.caseSensitive,
-          wordMatch: lastStack.wordMatch,
-          regex: lastStack.regex,
-          path: selectedHit.path,
-          line: selectedHit.line,
-          ...(timeRange !== null ? { timeRange } : {}),
-        })
+    shareState !== null && selectedHit !== null
+      ? buildShareUrl(window.location.href, shareState)
       : null;
   let rgCommand: string | null = null;
   if (
     selectedHit !== null &&
-    lastStack !== null &&
+    shareState !== null &&
     rootAbs !== undefined &&
     rootAbs !== ""
   ) {
-    const compiled = compileParts(lastStack.parts, lastStack.regex);
+    const compiled = stackedQuery(shareState.parts, modifiers.regex);
     if (compiled.query !== "") {
+      const include = parseGlobs(includeGlobs);
+      const exclude = parseGlobs(excludeGlobs);
+      let paths = [rootAbs];
+      let globInclude = include;
+      let globExclude = exclude;
+      if (picks.length > 0 && scope === "exclude") {
+        globExclude = [...picksToGlobs(picks), ...exclude];
+      } else if (picks.length > 0) {
+        paths = picks.map((item) =>
+          item.path === "" ? rootAbs : joinAbs(rootAbs, item.path),
+        );
+      }
       rgCommand = toRgShareCommand({
         query: compiled.query,
-        regex: lastStack.regex || compiled.regex,
-        caseSensitive: lastStack.caseSensitive,
-        wordMatch: lastStack.wordMatch,
-        hidden: lastStack.hidden,
-        absPath: joinAbs(rootAbs, selectedHit.path),
-        line: selectedHit.line,
+        regex: modifiers.regex || compiled.regex,
+        caseSensitive: modifiers.caseSensitive,
+        wordMatch: modifiers.wordMatch,
+        hidden: lastStack?.hidden ?? true,
+        paths,
+        globInclude,
+        globExclude,
       });
     }
   }
@@ -172,6 +213,8 @@ function AppShell() {
       nextModifiers: SearchModifiers = modifiers,
       nextTime: TimeRange | null = timeRange,
       nextPicks: TreePick[] = picks,
+      nextIncludeRaw: string = includeGlobs,
+      nextExcludeRaw: string = excludeGlobs,
     ) => {
       if (nextParts.length === 0) {
         return;
@@ -190,13 +233,14 @@ function AppShell() {
         nextPicks,
         effective,
         extraInclude,
-        parseGlobs(includeGlobs),
-        parseGlobs(excludeGlobs),
+        parseGlobs(nextIncludeRaw),
+        parseGlobs(nextExcludeRaw),
       );
 
       const stack: SearchStack = {
         parts: nextParts,
         globInclude: globs.globInclude,
+        globAnd: globs.globAnd,
         globExclude: globs.globExclude,
         path: "",
         caseSensitive: nextModifiers.caseSensitive,
@@ -253,9 +297,11 @@ function AppShell() {
 
   const searchSelected = useCallback(
     (text: string) => {
-      searchWithParts([newPart(text)], scope, [], modifiers);
+      const nextScope =
+        picks.length > 0 && scope !== "exclude" ? "include" : scope;
+      searchWithParts([newPart(text)], nextScope, [], modifiers);
     },
-    [modifiers, scope, searchWithParts],
+    [modifiers, picks.length, scope, searchWithParts],
   );
 
   const clearAll = useCallback(() => {
@@ -267,6 +313,11 @@ function AppShell() {
     setParts([]);
     setFields([""]);
     setSelectedIndex(0);
+    window.history.replaceState(
+      window.history.state,
+      "",
+      window.location.pathname,
+    );
     queryRef.current?.focus();
   }, [resetSearch]);
 
@@ -287,22 +338,58 @@ function AppShell() {
       wordMatch: parsed.wordMatch,
       regex: parsed.regex,
     };
+    const nextInclude = parsed.includeGlobs ?? "";
+    const nextExclude = parsed.excludeGlobs ?? "";
+    const nextPicks = parsed.picks ?? [];
+    const nextScope =
+      parsed.scope === "exclude"
+        ? "exclude"
+        : nextPicks.length > 0
+          ? "include"
+          : "all";
     setModifiers(nextMods);
+    setIncludeGlobs(nextInclude);
+    setExcludeGlobs(nextExclude);
+    setPicks(nextPicks);
+    setScope(nextScope);
     if (parsed.path !== undefined && parsed.line !== undefined) {
       pendingSelect.current = { path: parsed.path, line: parsed.line };
     }
     if (parsed.timeRange !== undefined) {
       setTimeRange(parsed.timeRange);
       saveTimeRange(parsed.timeRange);
+    } else {
+      setTimeRange(null);
     }
+    const extraInclude =
+      nextPicks.length === 0 && parsed.path !== undefined && parsed.path !== ""
+        ? [parsed.path]
+        : [];
     searchWithParts(
       parsed.parts.map((value) => newPart(value)),
-      "all",
-      [],
+      nextScope,
+      extraInclude,
       nextMods,
-      parsed.timeRange ?? timeRange,
+      parsed.timeRange ?? null,
+      nextPicks,
+      nextInclude,
+      nextExclude,
     );
   }, [searchWithParts, token.hostForbidden, token.meta, token.promptOpen]);
+
+  useEffect(() => {
+    if (!bootstrapped.current || shareState === null) {
+      return;
+    }
+    const next = shareUrlSearch(window.location.href, shareState);
+    if (window.location.search !== next) {
+      window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${next}`,
+      );
+    }
+  }, [shareState]);
 
   useEffect(() => {
     const target = pendingSelect.current;
@@ -325,11 +412,7 @@ function AppShell() {
     if (path === undefined) {
       return;
     }
-    const clipboard = navigator.clipboard;
-    if (clipboard === undefined) {
-      return;
-    }
-    void clipboard.writeText(path);
+    void copyText(path);
     setToastMsg(`${t("copiedPath")}: ${path}`);
   }, [selectedHit?.path, t]);
 
@@ -402,6 +485,7 @@ function AppShell() {
             stackRef.current = {
               ...stackRef.current,
               globInclude: [],
+              globAnd: [],
               globExclude: [],
             };
           }
@@ -420,6 +504,7 @@ function AppShell() {
             stackRef.current = {
               ...stackRef.current,
               globInclude: [],
+              globAnd: [],
               globExclude: [],
             };
           }

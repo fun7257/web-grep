@@ -64,6 +64,7 @@ describe("SearchRequestSchema", () => {
     expect(parsed.query).toBe("foo");
     expect(parsed.path).toBe("");
     expect(parsed.globInclude).toEqual([]);
+    expect(parsed.globAnd).toEqual([]);
     expect(parsed.globExclude).toEqual([]);
     expect(parsed.regex).toBe(false);
     expect(parsed.caseSensitive).toBe(false);
@@ -71,6 +72,24 @@ describe("SearchRequestSchema", () => {
     expect(parsed.hidden).toBe(true);
     expect(parsed.maxResults).toBeUndefined();
     expect(parsed.mtimeAfter).toBeUndefined();
+  });
+
+  it("keeps globAnd and match modifiers on parse", () => {
+    const parsed = SearchRequestSchema.parse({
+      query: "Hello",
+      globInclude: ["src/**"],
+      globAnd: ["*.ts"],
+      globExclude: ["*.test.ts"],
+      caseSensitive: true,
+      wordMatch: true,
+      regex: true,
+    });
+    expect(parsed.globInclude).toEqual(["src/**"]);
+    expect(parsed.globAnd).toEqual(["*.ts"]);
+    expect(parsed.globExclude).toEqual(["*.test.ts"]);
+    expect(parsed.caseSensitive).toBe(true);
+    expect(parsed.wordMatch).toBe(true);
+    expect(parsed.regex).toBe(true);
   });
 
   it("accepts mtimeAfter as unix milliseconds", () => {

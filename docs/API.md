@@ -98,7 +98,8 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 | --- | --- | --- |
 | `query` | 必填 | 1–8192 字符。UI 多条件 AND 时，前端编成同一行的 `a.*b\|b.*a`（字面量会先转义）；空条件丢弃。单框里的空格是查询内容，不是分隔符。 |
 | `path` | `""` | 相对目录；空=整个根 |
-| `globInclude` | `[]` | 用户 glob 或树勾选转成的路径 glob |
+| `globInclude` | `[]` | 用户 glob 或树勾选转成的路径 glob（多项之间 OR） |
+| `globAnd` | `[]` | 与 `globInclude` 求交；树勾选后再套高级选项的包含 glob |
 | `globExclude` | `[]` | |
 | `regex` | `false` | `false` → rg `-F` |
 | `caseSensitive` | `false` | |

@@ -8,6 +8,7 @@ import {
 } from "../formats/detect.ts";
 import { mappedSelection } from "../formats/jsonPieces.ts";
 import { mappedMarkdownSelection } from "../formats/markdownPieces.ts";
+import { copyText } from "../copyText.ts";
 import { DEFAULT_HL_OPTS, type HlOpts } from "../highlight.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import { FormattedLine } from "./FormattedPreview.tsx";
@@ -264,7 +265,7 @@ function FilePreviewReady({
 
   const copyPathWithLine = (): void => {
     const text = `${hit.path}:${hit.line}`;
-    void navigator.clipboard?.writeText(text);
+    void copyText(text);
     onCopyNotice?.(`${t("copiedLine")}: ${text}`);
   };
 
@@ -274,7 +275,7 @@ function FilePreviewReady({
       hit.text,
       mode === "formatted" && formattedAvailable,
     );
-    void navigator.clipboard?.writeText(body);
+    void copyText(body);
     flashCopied("preview");
     onCopyNotice?.(t("copiedPreview"));
   };

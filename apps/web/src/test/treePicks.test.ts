@@ -114,14 +114,22 @@ describe("picksToSearchGlobs", () => {
   it("uses current picks for include and nothing after clear", () => {
     expect(picksToSearchGlobs(file, "include")).toEqual({
       globInclude: ["ok.txt"],
+      globAnd: [],
       globExclude: [],
     });
     expect(picksToSearchGlobs(folder, "include")).toEqual({
       globInclude: ["logs/**"],
+      globAnd: [],
       globExclude: [],
     });
     expect(picksToSearchGlobs([], "all")).toEqual({
       globInclude: [],
+      globAnd: [],
+      globExclude: [],
+    });
+    expect(picksToSearchGlobs(file, "all")).toEqual({
+      globInclude: ["ok.txt"],
+      globAnd: [],
       globExclude: [],
     });
   });
@@ -129,6 +137,7 @@ describe("picksToSearchGlobs", () => {
   it("puts picks in globExclude when excluding", () => {
     expect(picksToSearchGlobs(file, "exclude")).toEqual({
       globInclude: [],
+      globAnd: [],
       globExclude: ["ok.txt"],
     });
   });
@@ -136,11 +145,50 @@ describe("picksToSearchGlobs", () => {
   it("does not keep a previous range when picks are empty", () => {
     expect(picksToSearchGlobs([], "include", [], ["stale.txt"])).toEqual({
       globInclude: ["stale.txt"],
+      globAnd: [],
       globExclude: [],
     });
     expect(picksToSearchGlobs([], "all")).toEqual({
       globInclude: [],
+      globAnd: [],
       globExclude: [],
+    });
+  });
+
+  it("ANDs manual include with tree picks instead of ORing", () => {
+    expect(
+      picksToSearchGlobs(file, "include", [], ["*.ts"], ["*.test.ts"]),
+    ).toEqual({
+      globInclude: ["ok.txt"],
+      globAnd: ["*.ts"],
+      globExclude: ["*.test.ts"],
+    });
+    expect(
+      picksToSearchGlobs(folder, "include", [], ["src/**"], ["skip.ts"]),
+    ).toEqual({
+      globInclude: ["logs/**"],
+      globAnd: ["src/**"],
+      globExclude: ["skip.ts"],
+    });
+  });
+
+  it("keeps manual include/exclude when extraInclude pins a share path", () => {
+    expect(
+      picksToSearchGlobs(file, "include", ["src/a.ts"], ["*.ts"], ["*.test.ts"]),
+    ).toEqual({
+      globInclude: ["src/a.ts"],
+      globAnd: ["*.ts"],
+      globExclude: ["*.test.ts"],
+    });
+  });
+
+  it("keeps manual exclude alongside exclude-scope picks", () => {
+    expect(
+      picksToSearchGlobs(file, "exclude", [], ["*.ts"], ["skip.ts"]),
+    ).toEqual({
+      globInclude: ["*.ts"],
+      globAnd: [],
+      globExclude: ["ok.txt", "skip.ts"],
     });
   });
 });

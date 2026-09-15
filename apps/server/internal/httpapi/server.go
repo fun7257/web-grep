@@ -85,6 +85,7 @@ type searchBody struct {
 	Query         string   `json:"query"`
 	Path          *string  `json:"path"`
 	GlobInclude   []string `json:"globInclude"`
+	GlobAnd       []string `json:"globAnd"`
 	GlobExclude   []string `json:"globExclude"`
 	Regex         *bool    `json:"regex"`
 	CaseSensitive *bool    `json:"caseSensitive"`
@@ -136,10 +137,15 @@ func parseSearch(b searchBody) (search.Request, error) {
 	if len(path) > config.PathMaxChars {
 		return search.Request{}, errors.New("invalid query")
 	}
-	if len(b.GlobInclude) > config.GlobMaxCount || len(b.GlobExclude) > config.GlobMaxCount {
+	if len(b.GlobInclude) > config.GlobMaxCount || len(b.GlobAnd) > config.GlobMaxCount || len(b.GlobExclude) > config.GlobMaxCount {
 		return search.Request{}, errors.New("invalid query")
 	}
 	for _, g := range b.GlobInclude {
+		if len(g) > config.GlobMaxChars {
+			return search.Request{}, errors.New("invalid query")
+		}
+	}
+	for _, g := range b.GlobAnd {
 		if len(g) > config.GlobMaxChars {
 			return search.Request{}, errors.New("invalid query")
 		}
@@ -153,6 +159,7 @@ func parseSearch(b searchBody) (search.Request, error) {
 		Query:         q,
 		Path:          path,
 		GlobInclude:   b.GlobInclude,
+		GlobAnd:       b.GlobAnd,
 		GlobExclude:   b.GlobExclude,
 		Regex:         false,
 		CaseSensitive: false,
@@ -160,6 +167,9 @@ func parseSearch(b searchBody) (search.Request, error) {
 	}
 	if req.GlobInclude == nil {
 		req.GlobInclude = []string{}
+	}
+	if req.GlobAnd == nil {
+		req.GlobAnd = []string{}
 	}
 	if req.GlobExclude == nil {
 		req.GlobExclude = []string{}

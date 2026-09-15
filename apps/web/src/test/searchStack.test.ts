@@ -6,6 +6,7 @@ import {
   newPart,
   parseQueryInput,
   stackedQuery,
+  toRequest,
   toRgShareCommand,
 } from "../searchStack.ts";
 
@@ -72,8 +73,31 @@ describe("compileParts", () => {
   });
 });
 
+describe("toRequest", () => {
+  it("forwards modifiers, globAnd, and globExclude", () => {
+    const req = toRequest({
+      parts: [newPart("hello")],
+      globInclude: ["src/**"],
+      globAnd: ["*.ts"],
+      globExclude: ["*.test.ts"],
+      path: "",
+      caseSensitive: true,
+      wordMatch: true,
+      regex: true,
+      hidden: true,
+    });
+    expect(req.query).toBe("hello");
+    expect(req.globInclude).toEqual(["src/**"]);
+    expect(req.globAnd).toEqual(["*.ts"]);
+    expect(req.globExclude).toEqual(["*.test.ts"]);
+    expect(req.caseSensitive).toBe(true);
+    expect(req.wordMatch).toBe(true);
+    expect(req.regex).toBe(true);
+  });
+});
+
 describe("toRgShareCommand", () => {
-  it("builds a literal command with an absolute file path", () => {
+  it("searches the project root, not a single hit line", () => {
     expect(
       toRgShareCommand({
         query: "hello",
@@ -81,10 +105,9 @@ describe("toRgShareCommand", () => {
         caseSensitive: false,
         wordMatch: false,
         hidden: true,
-        absPath: "/tmp/project/src/a.ts",
-        line: 1,
+        paths: ["/tmp/project"],
       }),
-    ).toBe("rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg '^1:'");
+    ).toBe("rg -n -F -i --hidden -- hello /tmp/project");
   });
 
   it("quotes the query and path when needed", () => {
@@ -95,9 +118,43 @@ describe("toRgShareCommand", () => {
         caseSensitive: true,
         wordMatch: true,
         hidden: false,
-        absPath: "/tmp/my project/file.ts",
+        paths: ["/tmp/my project/file.ts"],
       }),
     ).toBe("rg -n -s -w -- 'it'\\''s' '/tmp/my project/file.ts'");
+  });
+
+  it("adds include and exclude globs with match modifiers", () => {
+    expect(
+      toRgShareCommand({
+        query: "hello",
+        regex: true,
+        caseSensitive: true,
+        wordMatch: true,
+        hidden: true,
+        paths: ["/tmp/project"],
+        globInclude: ["*.ts", "src/**"],
+        globExclude: ["*.test.ts"],
+      }),
+    ).toBe(
+      "rg -n -s -w --hidden --glob '*.ts' --glob 'src/**' --glob '!*.test.ts' -- hello /tmp/project",
+    );
+  });
+
+  it("searches picked files as paths so globs still apply to folders", () => {
+    expect(
+      toRgShareCommand({
+        query: "hello",
+        regex: false,
+        caseSensitive: false,
+        wordMatch: false,
+        hidden: true,
+        paths: ["/tmp/project/ok.txt", "/tmp/project/src"],
+        globInclude: ["*.ts"],
+        globExclude: ["*.test.ts"],
+      }),
+    ).toBe(
+      "rg -n -F -i --hidden --glob '*.ts' --glob '!*.test.ts' -- hello /tmp/project/ok.txt /tmp/project/src",
+    );
   });
 
   it("joins a posix root with a relative hit path", () => {

@@ -955,28 +955,141 @@ describe("search flow", () => {
       "input",
     )[1] as HTMLInputElement | null;
     expect(rgInput?.value).toBe(
-      "rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg '^1:'",
+      "rg -n -F -i --hidden -- hello /tmp/project",
     );
     expect(linkInput?.value).toContain("q=hello");
-    expect(linkInput?.value).toContain("p=src");
+    expect(new URL(linkInput?.value ?? "").searchParams.get("p")).toBe(
+      "src/a.ts",
+    );
     expect(linkInput?.value).toContain("n=1");
     fireEvent.click(screen.getByRole("button", { name: "Copy rg command" }));
     expect(writeText).toHaveBeenCalledWith(
-      "rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg '^1:'",
+      "rg -n -F -i --hidden -- hello /tmp/project",
     );
     fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
     expect(writeText).toHaveBeenLastCalledWith(linkInput?.value);
   });
 
-  it("opens a shared link and selects the named hit", async () => {
-    window.history.replaceState({}, "", "/?q=hello&p=src%2Fb.ts&n=3");
+  it("share link and rg command carry the full file and advanced options", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
     mockFetch(() =>
       sseResponse([
         sseEvent("hit", HIT_A),
-        sseEvent("hit", HIT_B),
-        sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
       ]),
     );
+    render(<App />);
+    typeQuery("hello");
+    fireEvent.click(screen.getByRole("button", { name: "Aa" }));
+    fireEvent.click(screen.getByRole("button", { name: "\\b" }));
+    fireEvent.click(screen.getByRole("button", { name: ".*" }));
+    fireEvent.change(screen.getByPlaceholderText("*.ts, src/**"), {
+      target: { value: "*.ts" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
+      target: { value: "*.test.ts" },
+    });
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const dialog = screen.getByRole("dialog", { name: "Share" });
+    const rgInput = dialog.querySelectorAll(
+      "input",
+    )[0] as HTMLInputElement | null;
+    const linkInput = dialog.querySelectorAll(
+      "input",
+    )[1] as HTMLInputElement | null;
+    expect(rgInput?.value).toBe(
+      "rg -n -s -w --hidden --glob '*.ts' --glob '!*.test.ts' -- hello /tmp/project",
+    );
+    const shared = new URL(linkInput?.value ?? "");
+    expect(shared.searchParams.get("q")).toBe("hello");
+    expect(shared.searchParams.get("p")).toBe("src/a.ts");
+    expect(shared.searchParams.get("n")).toBe("1");
+    expect(shared.searchParams.get("s")).toBe("1");
+    expect(shared.searchParams.get("w")).toBe("1");
+    expect(shared.searchParams.get("r")).toBe("1");
+    expect(shared.searchParams.get("i")).toBe("*.ts");
+    expect(shared.searchParams.get("x")).toBe("*.test.ts");
+  });
+
+  it("share link reads live tree picks and advanced options from the UI", async () => {
+    mockFetch(
+      () =>
+        sseResponse([
+          sseEvent("hit", HIT_A),
+          sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+        ]),
+      undefined,
+      {
+        treeEntries: [
+          { name: "ok.txt", path: "ok.txt", dir: false },
+          { name: "skip.txt", path: "skip.txt", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("ok.txt"));
+    typeQuery("hello");
+    fireEvent.click(screen.getByRole("button", { name: "Aa" }));
+    fireEvent.click(screen.getByRole("button", { name: "\\b" }));
+    fireEvent.click(screen.getByRole("button", { name: ".*" }));
+    fireEvent.change(screen.getByPlaceholderText("*.ts, src/**"), {
+      target: { value: "*.ts" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
+      target: { value: "*.test.ts" },
+    });
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const dialog = screen.getByRole("dialog", { name: "Share" });
+    const rgInput = dialog.querySelectorAll(
+      "input",
+    )[0] as HTMLInputElement | null;
+    const linkInput = dialog.querySelectorAll(
+      "input",
+    )[1] as HTMLInputElement | null;
+    expect(rgInput?.value).toBe(
+      "rg -n -s -w --hidden --glob '*.ts' --glob '!*.test.ts' -- hello /tmp/project/ok.txt",
+    );
+    const shared = new URL(linkInput?.value ?? "");
+    expect(shared.searchParams.get("q")).toBe("hello");
+    expect(shared.searchParams.get("p")).toBe("src/a.ts");
+    expect(shared.searchParams.getAll("f")).toEqual(["ok.txt"]);
+    expect(shared.searchParams.get("s")).toBe("1");
+    expect(shared.searchParams.get("w")).toBe("1");
+    expect(shared.searchParams.get("r")).toBe("1");
+    expect(shared.searchParams.get("i")).toBe("*.ts");
+    expect(shared.searchParams.get("x")).toBe("*.test.ts");
+    expect(window.location.search).toContain("f=ok.txt");
+    expect(window.location.search).toContain("i=");
+  });
+
+  it("opens a shared link and selects the named hit", async () => {
+    window.history.replaceState({}, "", "/?q=hello&p=src%2Fb.ts&n=3");
+    let body = "";
+    mockFetch((init) => {
+      if (typeof init?.body === "string") {
+        body = init.body;
+      }
+      return sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("hit", HIT_B),
+        sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
+      ]);
+    });
     render(<App />);
     await waitFor(() => {
       expect(getLoc("src/b.ts:3")).toBeTruthy();
@@ -986,6 +1099,114 @@ describe("search flow", () => {
         document.querySelector(".preview-line.current")?.textContent,
       ).toMatch(/hello there/);
     });
+    const parsed = JSON.parse(body) as {
+      globInclude?: string[];
+      mtimeAfter?: number;
+    };
+    expect(parsed.globInclude).toEqual(["src/b.ts"]);
+    expect(parsed.mtimeAfter).toBeUndefined();
+  });
+
+  it("opens a shared link with the full file and advanced options", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?q=hello&p=src%2Fb.ts&n=3&s=1&w=1&r=1&i=*.ts&x=*.test.ts",
+    );
+    let body = "";
+    mockFetch((init) => {
+      if (typeof init?.body === "string") {
+        body = init.body;
+      }
+      return sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("hit", HIT_B),
+        sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
+      ]);
+    });
+    render(<App />);
+    await waitFor(() => {
+      expect(getLoc("src/b.ts:3")).toBeTruthy();
+    });
+    expect(screen.getByRole("button", { name: "Aa" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "\\b" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: ".*" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(
+      (screen.getByPlaceholderText("*.ts, src/**") as HTMLInputElement).value,
+    ).toBe("*.ts");
+    expect(
+      (screen.getByPlaceholderText("*.test.ts") as HTMLInputElement).value,
+    ).toBe("*.test.ts");
+    const parsed = JSON.parse(body) as {
+      query: string;
+      caseSensitive?: boolean;
+      wordMatch?: boolean;
+      regex?: boolean;
+      globInclude?: string[];
+      globAnd?: string[];
+      globExclude?: string[];
+    };
+    expect(parsed.query).toBe("hello");
+    expect(parsed.caseSensitive).toBe(true);
+    expect(parsed.wordMatch).toBe(true);
+    expect(parsed.regex).toBe(true);
+    expect(parsed.globInclude).toEqual(["src/b.ts"]);
+    expect(parsed.globAnd).toEqual(["*.ts"]);
+    expect(parsed.globExclude).toEqual(["*.test.ts"]);
+  });
+
+  it("opens a shared link with tree picks restored from the UI", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?q=hello&f=ok.txt&s=1&w=1&r=1&i=*.ts&x=*.test.ts&p=src%2Fa.ts&n=1",
+    );
+    let body = "";
+    mockFetch(
+      (init) => {
+        if (typeof init?.body === "string") {
+          body = init.body;
+        }
+        return sseResponse([
+          sseEvent("hit", HIT_A),
+          sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+        ]);
+      },
+      undefined,
+      {
+        treeEntries: [
+          { name: "ok.txt", path: "ok.txt", dir: false },
+          { name: "skip.txt", path: "skip.txt", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("1 selected")).toBeTruthy();
+    });
+    expect(
+      (screen.getByPlaceholderText("*.ts, src/**") as HTMLInputElement).value,
+    ).toBe("*.ts");
+    const parsed = JSON.parse(body) as {
+      caseSensitive?: boolean;
+      wordMatch?: boolean;
+      regex?: boolean;
+      globInclude?: string[];
+      globAnd?: string[];
+      globExclude?: string[];
+    };
+    expect(parsed.caseSensitive).toBe(true);
+    expect(parsed.wordMatch).toBe(true);
+    expect(parsed.regex).toBe(true);
+    expect(parsed.globInclude).toEqual(["ok.txt"]);
+    expect(parsed.globAnd).toEqual(["*.ts"]);
+    expect(parsed.globExclude).toEqual(["*.test.ts"]);
   });
 
   it("search selection starts a new query", async () => {
@@ -1043,10 +1264,188 @@ describe("search flow", () => {
       if (typeof raw !== "string") {
         return;
       }
-      const body = JSON.parse(raw) as { query: string; regex: boolean };
+      const body = JSON.parse(raw) as {
+        query: string;
+        regex: boolean;
+        globInclude?: string[];
+      };
       expect(body.regex).toBe(false);
       expect(body.query).toBe("hello world");
+      expect(body.globInclude ?? []).toEqual([]);
     });
+  });
+
+  it("search selection stays inside tree-picked files", async () => {
+    const fetchMock = mockFetch(
+      () =>
+        sseResponse([
+          sseEvent("hit", HIT_A),
+          sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+        ]),
+      undefined,
+      {
+        treeEntries: [
+          { name: "ok.txt", path: "ok.txt", dir: false },
+          { name: "skip.txt", path: "skip.txt", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("ok.txt"));
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(
+        document.querySelector(".preview-line.current .preview-text") ??
+          document.querySelector(".preview-text"),
+      ).toBeTruthy();
+    });
+    const previewText =
+      document.querySelector(".preview-line.current .preview-text") ??
+      document.querySelector(".preview-text");
+    const range = document.createRange();
+    range.selectNodeContents(previewText as Node);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    fireEvent.mouseUp(document.querySelector(".preview") as Element);
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Search selection" }),
+    );
+    await waitFor(() => {
+      const calls = fetchMock.mock.calls.filter(
+        (entry) =>
+          typeof entry[0] === "string" && entry[0].includes("/api/search"),
+      );
+      const raw = calls[calls.length - 1]?.[1]?.body;
+      expect(typeof raw).toBe("string");
+      if (typeof raw !== "string") {
+        return;
+      }
+      const body = JSON.parse(raw) as { globInclude?: string[] };
+      expect(body.globInclude).toEqual(["ok.txt"]);
+    });
+  });
+
+  it("search selection keeps case, word, regex, include, and exclude", async () => {
+    const fetchMock = mockFetch(
+      () =>
+        sseResponse([
+          sseEvent("hit", HIT_A),
+          sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+        ]),
+      undefined,
+      {
+        treeEntries: [
+          { name: "ok.txt", path: "ok.txt", dir: false },
+          { name: "skip.txt", path: "skip.txt", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("ok.txt"));
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(
+        document.querySelector(".preview-line.current .preview-text") ??
+          document.querySelector(".preview-text"),
+      ).toBeTruthy();
+    });
+    const first = lastSearchRequest(fetchMock);
+    expect(first.caseSensitive ?? false).toBe(false);
+    expect(first.wordMatch ?? false).toBe(false);
+    expect(first.regex).toBe(false);
+    expect(first.globAnd ?? []).toEqual([]);
+    expect(first.globExclude ?? []).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Aa" }));
+    fireEvent.click(screen.getByRole("button", { name: "\\b" }));
+    fireEvent.click(screen.getByRole("button", { name: ".*" }));
+    fireEvent.change(screen.getByPlaceholderText("*.ts, src/**"), {
+      target: { value: "*.ts" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
+      target: { value: "*.test.ts" },
+    });
+    const previewText =
+      document.querySelector(".preview-line.current .preview-text") ??
+      document.querySelector(".preview-text");
+    const range = document.createRange();
+    range.selectNodeContents(previewText as Node);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    fireEvent.mouseUp(document.querySelector(".preview") as Element);
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Search selection" }),
+    );
+    await waitFor(() => {
+      expect(searchCallCount(fetchMock)).toBeGreaterThan(1);
+    });
+    const body = lastSearchRequest(fetchMock);
+    expect(body.query).toBe("hello world");
+    expect(body.caseSensitive).toBe(true);
+    expect(body.wordMatch).toBe(true);
+    expect(body.regex).toBe(true);
+    expect(body.globInclude).toEqual(["ok.txt"]);
+    expect(body.globAnd).toEqual(["*.ts"]);
+    expect(body.globExclude).toEqual(["*.test.ts"]);
+  });
+
+  it("search selection without tree picks still sends include and exclude", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(
+        document.querySelector(".preview-line.current .preview-text") ??
+          document.querySelector(".preview-text"),
+      ).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Aa" }));
+    fireEvent.click(screen.getByRole("button", { name: "\\b" }));
+    fireEvent.click(screen.getByRole("button", { name: ".*" }));
+    fireEvent.change(screen.getByPlaceholderText("*.ts, src/**"), {
+      target: { value: "src/**" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
+      target: { value: "*.test.ts" },
+    });
+    const previewText =
+      document.querySelector(".preview-line.current .preview-text") ??
+      document.querySelector(".preview-text");
+    const range = document.createRange();
+    range.selectNodeContents(previewText as Node);
+    const sel = window.getSelection();
+    sel?.removeAllRanges();
+    sel?.addRange(range);
+    fireEvent.mouseUp(document.querySelector(".preview") as Element);
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Search selection" }),
+    );
+    await waitFor(() => {
+      expect(searchCallCount(fetchMock)).toBeGreaterThan(1);
+    });
+    const body = lastSearchRequest(fetchMock);
+    expect(body.query).toBe("hello world");
+    expect(body.caseSensitive).toBe(true);
+    expect(body.wordMatch).toBe(true);
+    expect(body.regex).toBe(true);
+    expect(body.globInclude).toEqual(["src/**"]);
+    expect(body.globAnd ?? []).toEqual([]);
+    expect(body.globExclude).toEqual(["*.test.ts"]);
   });
 
   it("does not add a condition when the last field is empty", async () => {
@@ -1340,9 +1739,30 @@ function lastSearchBody(fetchMock: ReturnType<typeof vi.fn>): {
   query: string;
   regex: boolean;
 } {
+  const body = lastSearchRequest(fetchMock);
+  return { query: body.query, regex: body.regex };
+}
+
+function lastSearchRequest(fetchMock: ReturnType<typeof vi.fn>): {
+  query: string;
+  regex: boolean;
+  caseSensitive?: boolean;
+  wordMatch?: boolean;
+  globInclude?: string[];
+  globAnd?: string[];
+  globExclude?: string[];
+} {
   const raw = searchCalls(fetchMock).at(-1)?.[1]?.body;
   if (typeof raw !== "string") {
     throw new Error("missing search body");
   }
-  return JSON.parse(raw) as { query: string; regex: boolean };
+  return JSON.parse(raw) as {
+    query: string;
+    regex: boolean;
+    caseSensitive?: boolean;
+    wordMatch?: boolean;
+    globInclude?: string[];
+    globAnd?: string[];
+    globExclude?: string[];
+  };
 }

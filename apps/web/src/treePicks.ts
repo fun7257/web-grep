@@ -159,25 +159,32 @@ export function picksToSearchGlobs(
   extraInclude: string[] = [],
   manualInclude: string[] = [],
   manualExclude: string[] = [],
-): { globInclude: string[]; globExclude: string[] } {
+): { globInclude: string[]; globAnd: string[]; globExclude: string[] } {
   if (extraInclude.length > 0) {
-    return { globInclude: extraInclude, globExclude: [] };
+    return {
+      globInclude: extraInclude,
+      globAnd: [...manualInclude],
+      globExclude: [...manualExclude],
+    };
   }
   const pickGlobs = picksToGlobs(picks);
-  if (picks.length === 0 || scope === "all") {
+  if (picks.length === 0) {
     return {
       globInclude: [...manualInclude],
+      globAnd: [],
       globExclude: [...manualExclude],
     };
   }
   if (scope === "exclude") {
     return {
       globInclude: [...manualInclude],
+      globAnd: [],
       globExclude: [...pickGlobs, ...manualExclude],
     };
   }
   return {
-    globInclude: [...pickGlobs, ...manualInclude],
+    globInclude: pickGlobs,
+    globAnd: [...manualInclude],
     globExclude: [...manualExclude],
   };
 }

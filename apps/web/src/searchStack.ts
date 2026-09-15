@@ -14,6 +14,7 @@ export type SearchModifiers = {
 export type SearchStack = {
   parts: QueryPart[];
   globInclude: string[];
+  globAnd: string[];
   globExclude: string[];
   path: string;
   caseSensitive: boolean;
@@ -181,8 +182,9 @@ export function toRgShareCommand(opts: {
   caseSensitive: boolean;
   wordMatch: boolean;
   hidden: boolean;
-  absPath: string;
-  line?: number;
+  paths: string[];
+  globInclude?: string[];
+  globExclude?: string[];
 }): string {
   const args = ["rg", "-n"];
   if (!opts.regex) {
@@ -195,12 +197,26 @@ export function toRgShareCommand(opts: {
   if (opts.hidden) {
     args.push("--hidden");
   }
-  args.push("--", shQuote(opts.query), shQuote(opts.absPath));
-  const command = args.join(" ");
-  if (opts.line === undefined || opts.line < 1) {
-    return command;
+  for (const glob of opts.globInclude ?? []) {
+    const trimmed = glob.trim();
+    if (trimmed !== "") {
+      args.push("--glob", shQuote(trimmed));
+    }
   }
-  return `${command} | rg ${shQuote(`^${opts.line}:`)}`;
+  for (const glob of opts.globExclude ?? []) {
+    const trimmed = glob.trim();
+    if (trimmed !== "") {
+      args.push("--glob", shQuote(`!${trimmed}`));
+    }
+  }
+  args.push("--", shQuote(opts.query));
+  for (const path of opts.paths) {
+    const trimmed = path.trim();
+    if (trimmed !== "") {
+      args.push(shQuote(trimmed));
+    }
+  }
+  return args.join(" ");
 }
 
 export function toRequest(
@@ -210,15 +226,16 @@ export function toRequest(
 ): SearchRequestInput {
   const compiled = compileParts(stack.parts, stack.regex);
   let globInclude = stack.globInclude;
+  const globAnd = stack.globAnd;
   let globExclude = stack.globExclude;
   if (extraInclude.length > 0) {
     globInclude = extraInclude;
-    globExclude = [];
   }
   return {
     query: compiled.query,
     path: stack.path,
     globInclude,
+    globAnd,
     globExclude,
     regex: stack.regex || compiled.regex,
     caseSensitive: stack.caseSensitive,

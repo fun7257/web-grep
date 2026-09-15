@@ -71,6 +71,11 @@ func TestFilterByGlobs(t *testing.T) {
 	if len(sameName) != 1 || sameName[0] != "ok.txt" {
 		t.Fatalf("literal pick is exact: %v", sameName)
 	}
+	picked := FilterByGlobs(files, []string{"src/**"}, nil)
+	and := FilterByGlobs(picked, []string{"*.ts"}, nil)
+	if len(and) != 1 || and[0] != "src/app.ts" {
+		t.Fatalf("include AND pick: %v", and)
+	}
 }
 
 func TestDenylistRgGlobs(t *testing.T) {

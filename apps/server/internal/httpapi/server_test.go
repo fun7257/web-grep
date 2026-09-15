@@ -309,6 +309,83 @@ func TestSearchMtimeAfterRespectsGlobInclude(t *testing.T) {
 	}
 }
 
+func TestSearchSelectedPayloadAppliesModifiersAndGlobs(t *testing.T) {
+	var got rg.Input
+	eng := captureEngine{onSearch: func(in rg.Input) {
+		got = in
+	}}
+	s, root := testServer(t, eng)
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"src/keep.ts":      "Hello\n",
+		"src/skip.js":      "Hello\n",
+		"src/keep.test.ts": "Hello\n",
+		"src/wrongcase.ts": "hello\n",
+		"other.ts":         "Hello\n",
+	}
+	for rel, body := range files {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
+		`{"query":"H.llo","regex":true,"caseSensitive":true,"wordMatch":true,"globInclude":["src/**"],"globAnd":["*.ts"],"globExclude":["*.test.ts"]}`, nil)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if !got.Regex || !got.CaseSensitive || !got.WordMatch {
+		t.Fatalf("modifiers: regex=%v case=%v word=%v", got.Regex, got.CaseSensitive, got.WordMatch)
+	}
+	if !got.LimitToList {
+		t.Fatal("expected pre-filtered file list")
+	}
+	if !slices.Contains(got.FileList, "src/keep.ts") || !slices.Contains(got.FileList, "src/wrongcase.ts") {
+		t.Fatalf("missing ts picks: %v", got.FileList)
+	}
+	for _, leak := range []string{"src/skip.js", "src/keep.test.ts", "other.ts", "ok.txt"} {
+		if slices.Contains(got.FileList, leak) {
+			t.Fatalf("%s leaked into file list: %v", leak, got.FileList)
+		}
+	}
+}
+
+func TestSearchGlobAndIntersectsInclude(t *testing.T) {
+	var got rg.Input
+	eng := captureEngine{onSearch: func(in rg.Input) {
+		got = in
+	}}
+	s, root := testServer(t, eng)
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "a.ts"), []byte("hello-needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "b.js"), []byte("hello-needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other.ts"), []byte("hello-needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
+		`{"query":"hello","globInclude":["src/**"],"globAnd":["*.ts"]}`, nil)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if !got.LimitToList {
+		t.Fatal("expected pre-filtered file list")
+	}
+	if !slices.Contains(got.FileList, "src/a.ts") {
+		t.Fatalf("missing src/a.ts: %v", got.FileList)
+	}
+	if slices.Contains(got.FileList, "src/b.js") || slices.Contains(got.FileList, "other.ts") {
+		t.Fatalf("globAnd leaked: %v", got.FileList)
+	}
+}
+
 func TestSearchGlobIncludeWithoutMtime(t *testing.T) {
 	var got rg.Input
 	eng := captureEngine{onSearch: func(in rg.Input) {
@@ -483,6 +560,51 @@ func TestLiveRipgrepOnlySearchesPrefilteredFiles(t *testing.T) {
 	}
 	if strings.Contains(out, "old.txt") {
 		t.Fatalf("old.txt must not be searched: %s", out)
+	}
+}
+
+func TestLiveRipgrepSearchSelectedAdvancedOptions(t *testing.T) {
+	bin := rg.Detect("")
+	if bin == "" {
+		t.Skip("rg not available")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{
+		"src/keep.ts":      "Hello from keep\n",
+		"src/skip.js":      "Hello from js\n",
+		"src/keep.test.ts": "Hello from test\n",
+		"src/wrongcase.ts": "hello from case\n",
+		"src/partial.ts":   "HelloWorld\n",
+		"other.ts":         "Hello from other\n",
+	}
+	for rel, body := range files {
+		path := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, _ = filepath.EvalSymlinks(root)
+	cfg := config.Config{
+		RootReal: root, RootLabel: "t", Host: "127.0.0.1", Port: 8787,
+		MaxResults: 10000, TimeoutMs: 5000, NoIgnore: true,
+	}
+	s := &Server{Cfg: cfg, Search: search.New(cfg, rg.Engine{Bin: bin}, "rg", nil), Engine: "rg"}
+	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
+		`{"query":"H.llo","regex":true,"caseSensitive":true,"wordMatch":true,"globInclude":["src/**"],"globAnd":["*.ts"],"globExclude":["*.test.ts"]}`, nil)
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	out := rec.Body.String()
+	if !strings.Contains(out, `"path":"src/keep.ts"`) {
+		t.Fatalf("expected src/keep.ts hit: %s", out)
+	}
+	for _, leak := range []string{"src/skip.js", "src/keep.test.ts", "src/wrongcase.ts", "src/partial.ts", "other.ts"} {
+		if strings.Contains(out, leak) {
+			t.Fatalf("advanced options leaked %s: %s", leak, out)
+		}
 	}
 }
 
