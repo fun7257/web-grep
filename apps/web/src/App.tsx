@@ -30,7 +30,6 @@ import {
 import { picksToGlobs, picksToSearchGlobs, type TreePick, togglePick } from "./treePicks.ts";
 import {
   compileParts,
-  joinAbs,
   newPart,
   type QueryPart,
   type SearchModifiers,
@@ -178,15 +177,13 @@ function AppShell() {
     if (compiled.query !== "") {
       const include = parseGlobs(includeGlobs);
       const exclude = parseGlobs(excludeGlobs);
-      let paths = [rootAbs];
+      let relPaths = ["."];
       let globInclude = include;
       let globExclude = exclude;
       if (picks.length > 0 && scope === "exclude") {
         globExclude = [...picksToGlobs(picks), ...exclude];
       } else if (picks.length > 0) {
-        paths = picks.map((item) =>
-          item.path === "" ? rootAbs : joinAbs(rootAbs, item.path),
-        );
+        relPaths = picks.map((item) => (item.path === "" ? "." : item.path));
       }
       rgCommand = toRgShareCommand({
         query: compiled.query,
@@ -194,9 +191,11 @@ function AppShell() {
         caseSensitive: modifiers.caseSensitive,
         wordMatch: modifiers.wordMatch,
         hidden: lastStack?.hidden ?? true,
-        paths,
+        rootAbs,
+        relPaths,
         globInclude,
         globExclude,
+        timeRange,
       });
     }
   }

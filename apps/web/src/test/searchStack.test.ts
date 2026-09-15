@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compileParts,
+  findMtimePredicate,
   formatQueryInput,
   joinAbs,
   newPart,
@@ -105,9 +106,9 @@ describe("toRgShareCommand", () => {
         caseSensitive: false,
         wordMatch: false,
         hidden: true,
-        paths: ["/tmp/project"],
+        rootAbs: "/tmp/project",
       }),
-    ).toBe("rg -n -F -i --hidden -- hello /tmp/project");
+    ).toBe("( cd /tmp/project && rg -n -F -i --hidden -- hello . )");
   });
 
   it("quotes the query and path when needed", () => {
@@ -118,9 +119,10 @@ describe("toRgShareCommand", () => {
         caseSensitive: true,
         wordMatch: true,
         hidden: false,
-        paths: ["/tmp/my project/file.ts"],
+        rootAbs: "/tmp/my project",
+        relPaths: ["file.ts"],
       }),
-    ).toBe("rg -n -s -w -- 'it'\\''s' '/tmp/my project/file.ts'");
+    ).toBe("( cd '/tmp/my project' && rg -n -s -w -- 'it'\\''s' file.ts )");
   });
 
   it("adds include and exclude globs with match modifiers", () => {
@@ -131,12 +133,12 @@ describe("toRgShareCommand", () => {
         caseSensitive: true,
         wordMatch: true,
         hidden: true,
-        paths: ["/tmp/project"],
+        rootAbs: "/tmp/project",
         globInclude: ["*.ts", "src/**"],
         globExclude: ["*.test.ts"],
       }),
     ).toBe(
-      "rg -n -s -w --hidden --glob '*.ts' --glob 'src/**' --glob '!*.test.ts' -- hello /tmp/project",
+      "( cd /tmp/project && rg -n -s -w --hidden --glob '*.ts' --glob 'src/**' --glob '!*.test.ts' -- hello . )",
     );
   });
 
@@ -148,12 +150,73 @@ describe("toRgShareCommand", () => {
         caseSensitive: false,
         wordMatch: false,
         hidden: true,
-        paths: ["/tmp/project/ok.txt", "/tmp/project/src"],
+        rootAbs: "/tmp/project",
+        relPaths: ["ok.txt", "src"],
         globInclude: ["*.ts"],
         globExclude: ["*.test.ts"],
       }),
     ).toBe(
-      "rg -n -F -i --hidden --glob '*.ts' --glob '!*.test.ts' -- hello /tmp/project/ok.txt /tmp/project/src",
+      "( cd /tmp/project && rg -n -F -i --hidden --glob '*.ts' --glob '!*.test.ts' -- hello ok.txt src )",
+    );
+  });
+
+  it("wraps find when a time range is set", () => {
+    expect(
+      toRgShareCommand({
+        query: "hello",
+        regex: false,
+        caseSensitive: false,
+        wordMatch: false,
+        hidden: true,
+        rootAbs: "/tmp/project",
+        timeRange: "7d",
+      }),
+    ).toBe(
+      '( cd /tmp/project && find . -type f ! -path "*/.git/*" -mtime -7 -print0 | xargs -0 -r rg -n -F -i --hidden -- hello )',
+    );
+  });
+
+  it("lists glob matches first so time filtering still respects include/exclude", () => {
+    const mtime = findMtimePredicate("today");
+    expect(
+      toRgShareCommand({
+        query: "hello",
+        regex: true,
+        caseSensitive: true,
+        wordMatch: true,
+        hidden: true,
+        rootAbs: "/tmp/project",
+        globInclude: ["*.ts"],
+        globExclude: ["*.test.ts"],
+        timeRange: "today",
+      }),
+    ).toBe(
+      `( cd /tmp/project && rg --null --files --hidden --glob '*.ts' --glob '!*.test.ts' . | xargs -0 -r sh -c 'find "$@" -type f ! -path "*/.git/*" ${mtime} -print0' _ | xargs -0 -r rg -n -s -w --hidden -- hello )`,
+    );
+  });
+
+  it("emits a find predicate for every time gear", () => {
+    expect(findMtimePredicate("1h")).toBe("-mmin -60");
+    expect(findMtimePredicate("24h")).toBe("-mmin -1440");
+    expect(findMtimePredicate("7d")).toBe("-mtime -7");
+    expect(findMtimePredicate("30d")).toBe("-mtime -30");
+    expect(findMtimePredicate("today")).toContain("date +%H");
+  });
+
+  it("excludes tree picks via globs from the project root", () => {
+    expect(
+      toRgShareCommand({
+        query: "hello",
+        regex: false,
+        caseSensitive: false,
+        wordMatch: false,
+        hidden: true,
+        rootAbs: "/tmp/project",
+        relPaths: ["."],
+        globExclude: ["skip.txt", "logs/**"],
+      }),
+    ).toBe(
+      "( cd /tmp/project && rg -n -F -i --hidden --glob '!skip.txt' --glob '!logs/**' -- hello . )",
     );
   });
 

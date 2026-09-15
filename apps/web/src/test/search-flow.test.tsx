@@ -10,6 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TOKEN_STORAGE_KEY } from "../api/headers.ts";
 import { App } from "../App.tsx";
+import { findMtimePredicate } from "../searchStack.ts";
 
 const META = {
   engine: "rg",
@@ -955,7 +956,7 @@ describe("search flow", () => {
       "input",
     )[1] as HTMLInputElement | null;
     expect(rgInput?.value).toBe(
-      "rg -n -F -i --hidden -- hello /tmp/project",
+      `( cd /tmp/project && find . -type f ! -path "*/.git/*" ${findMtimePredicate("today")} -print0 | xargs -0 -r rg -n -F -i --hidden -- hello )`,
     );
     expect(linkInput?.value).toContain("q=hello");
     expect(new URL(linkInput?.value ?? "").searchParams.get("p")).toBe(
@@ -964,10 +965,33 @@ describe("search flow", () => {
     expect(linkInput?.value).toContain("n=1");
     fireEvent.click(screen.getByRole("button", { name: "Copy rg command" }));
     expect(writeText).toHaveBeenCalledWith(
-      "rg -n -F -i --hidden -- hello /tmp/project",
+      `( cd /tmp/project && find . -type f ! -path "*/.git/*" ${findMtimePredicate("today")} -print0 | xargs -0 -r rg -n -F -i --hidden -- hello )`,
     );
     fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
     expect(writeText).toHaveBeenLastCalledWith(linkInput?.value);
+  });
+
+  it("share rg command uses find -mtime for the selected time range", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "7d" }));
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const rgInput = screen
+      .getByRole("dialog", { name: "Share" })
+      .querySelector("input") as HTMLInputElement | null;
+    expect(rgInput?.value).toBe(
+      '( cd /tmp/project && find . -type f ! -path "*/.git/*" -mtime -7 -print0 | xargs -0 -r rg -n -F -i --hidden -- hello )',
+    );
   });
 
   it("share link and rg command carry the full file and advanced options", async () => {
@@ -1006,7 +1030,7 @@ describe("search flow", () => {
       "input",
     )[1] as HTMLInputElement | null;
     expect(rgInput?.value).toBe(
-      "rg -n -s -w --hidden --glob '*.ts' --glob '!*.test.ts' -- hello /tmp/project",
+      `( cd /tmp/project && rg --null --files --hidden --glob '*.ts' --glob '!*.test.ts' . | xargs -0 -r sh -c 'find "$@" -type f ! -path "*/.git/*" ${findMtimePredicate("today")} -print0' _ | xargs -0 -r rg -n -s -w --hidden -- hello )`,
     );
     const shared = new URL(linkInput?.value ?? "");
     expect(shared.searchParams.get("q")).toBe("hello");
@@ -1062,7 +1086,7 @@ describe("search flow", () => {
       "input",
     )[1] as HTMLInputElement | null;
     expect(rgInput?.value).toBe(
-      "rg -n -s -w --hidden --glob '*.ts' --glob '!*.test.ts' -- hello /tmp/project/ok.txt",
+      `( cd /tmp/project && rg --null --files --hidden --glob '*.ts' --glob '!*.test.ts' ok.txt | xargs -0 -r sh -c 'find "$@" -type f ! -path "*/.git/*" ${findMtimePredicate("today")} -print0' _ | xargs -0 -r rg -n -s -w --hidden -- hello )`,
     );
     const shared = new URL(linkInput?.value ?? "");
     expect(shared.searchParams.get("q")).toBe("hello");
@@ -1075,6 +1099,92 @@ describe("search flow", () => {
     expect(shared.searchParams.get("x")).toBe("*.test.ts");
     expect(window.location.search).toContain("f=ok.txt");
     expect(window.location.search).toContain("i=");
+  });
+
+  it("share link and rg command carry AND terms", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
+    fireEvent.change(await screen.findByRole("textbox", { name: "Add condition" }), {
+      target: { value: "world" },
+    });
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const dialog = screen.getByRole("dialog", { name: "Share" });
+    const rgInput = dialog.querySelectorAll("input")[0] as HTMLInputElement;
+    const linkInput = dialog.querySelectorAll("input")[1] as HTMLInputElement;
+    const shared = new URL(linkInput.value);
+    expect(shared.searchParams.getAll("q")).toEqual(["hello", "world"]);
+    expect(rgInput.value).toContain("hello.*world");
+    expect(rgInput.value).toContain("world.*hello");
+    expect(rgInput.value).not.toContain(" -F ");
+  });
+
+  it("share link and rg command carry exclude-selected files", async () => {
+    mockFetch(
+      () =>
+        sseResponse([
+          sseEvent("hit", HIT_A),
+          sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+        ]),
+      undefined,
+      {
+        treeEntries: [{ name: "skip.txt", path: "skip.txt", dir: false }],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("skip.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("skip.txt"));
+    typeQuery("hello");
+    fireEvent.click(screen.getByRole("button", { name: "Exclude selected" }));
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const dialog = screen.getByRole("dialog", { name: "Share" });
+    const rgInput = dialog.querySelectorAll("input")[0] as HTMLInputElement;
+    const linkInput = dialog.querySelectorAll("input")[1] as HTMLInputElement;
+    const shared = new URL(linkInput.value);
+    expect(shared.searchParams.getAll("f")).toEqual(["skip.txt"]);
+    expect(shared.searchParams.get("k")).toBe("x");
+    expect(rgInput.value).toContain("--glob '!skip.txt'");
+    expect(rgInput.value).toContain(" cd /tmp/project && ");
+    expect(rgInput.value).toContain("find \"$@\" -type f");
+  });
+
+  it("share omits time from both links when the range is cleared", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Today" }));
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Share" }));
+    const dialog = screen.getByRole("dialog", { name: "Share" });
+    const rgInput = dialog.querySelectorAll("input")[0] as HTMLInputElement;
+    const linkInput = dialog.querySelectorAll("input")[1] as HTMLInputElement;
+    expect(new URL(linkInput.value).searchParams.get("t")).toBeNull();
+    expect(rgInput.value).toBe(
+      "( cd /tmp/project && rg -n -F -i --hidden -- hello . )",
+    );
   });
 
   it("opens a shared link and selects the named hit", async () => {
@@ -1207,6 +1317,46 @@ describe("search flow", () => {
     expect(parsed.globInclude).toEqual(["ok.txt"]);
     expect(parsed.globAnd).toEqual(["*.ts"]);
     expect(parsed.globExclude).toEqual(["*.test.ts"]);
+  });
+
+  it("opens a shared AND query and exclude-selected files", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/?q=hello&q=world&f=skip.txt&k=x&t=7d",
+    );
+    let body = "";
+    mockFetch(
+      (init) => {
+        if (typeof init?.body === "string") {
+          body = init.body;
+        }
+        return sseResponse([
+          sseEvent("hit", HIT_A),
+          sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+        ]);
+      },
+      undefined,
+      {
+        treeEntries: [{ name: "skip.txt", path: "skip.txt", dir: false }],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("1 selected")).toBeTruthy();
+    });
+    const parsed = JSON.parse(body) as {
+      query: string;
+      regex?: boolean;
+      globInclude?: string[];
+      globExclude?: string[];
+      mtimeAfter?: number;
+    };
+    expect(parsed.regex).toBe(true);
+    expect(parsed.query).toContain("hello.*world");
+    expect(parsed.globInclude ?? []).toEqual([]);
+    expect(parsed.globExclude).toEqual(["skip.txt"]);
+    expect(parsed.mtimeAfter).toBeGreaterThan(Date.now() - 8 * 86_400_000);
   });
 
   it("search selection starts a new query", async () => {

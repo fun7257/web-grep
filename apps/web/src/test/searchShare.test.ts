@@ -136,4 +136,44 @@ describe("buildShareUrl", () => {
       excludeGlobs: "*.test.ts",
     });
   });
+
+  it("round-trips AND terms, folder picks, exclude scope, and every time gear", () => {
+    for (const timeRange of ["1h", "today", "24h", "7d", "30d"] as const) {
+      const href = buildShareUrl("http://127.0.0.1:5173/", {
+        parts: ["hello", "world"],
+        caseSensitive: false,
+        wordMatch: false,
+        regex: false,
+        path: "logs/a.log",
+        line: 8,
+        timeRange,
+        picks: [{ path: "logs", dir: true }],
+      });
+      const parsed = parseShareSearch(new URL(href).search);
+      expect(parsed?.parts).toEqual(["hello", "world"]);
+      expect(parsed?.picks).toEqual([{ path: "logs", dir: true }]);
+      expect(parsed?.timeRange).toBe(timeRange);
+      expect(parsed?.path).toBe("logs/a.log");
+    }
+    const excluded = buildShareUrl("http://127.0.0.1:5173/", {
+      parts: ["hello"],
+      caseSensitive: false,
+      wordMatch: false,
+      regex: false,
+      picks: [{ path: "skip.txt", dir: false }],
+      scope: "exclude",
+    });
+    const parsedEx = parseShareSearch(new URL(excluded).search);
+    expect(parsedEx?.picks).toEqual([{ path: "skip.txt", dir: false }]);
+    expect(parsedEx?.scope).toBe("exclude");
+    expect(new URL(excluded).searchParams.get("k")).toBe("x");
+    const noTime = buildShareUrl("http://127.0.0.1:5173/", {
+      parts: ["hello"],
+      caseSensitive: false,
+      wordMatch: false,
+      regex: false,
+    });
+    expect(new URL(noTime).searchParams.get("t")).toBeNull();
+    expect(parseShareSearch(new URL(noTime).search)?.timeRange).toBeUndefined();
+  });
 });

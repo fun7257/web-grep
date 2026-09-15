@@ -1,4 +1,5 @@
 import type { SearchRequestInput } from "@web-grep/shared";
+import type { TimeRange } from "./timeRange.ts";
 
 export type QueryPart = {
   id: string;
@@ -176,17 +177,45 @@ export function joinAbs(root: string, rel: string): string {
   return `${base}${sep}${rest}`;
 }
 
-export function toRgShareCommand(opts: {
-  query: string;
+export function findMtimePredicate(range: TimeRange): string {
+  switch (range) {
+    case "1h":
+      return "-mmin -60";
+    case "today":
+      return "-mmin -$(( $(date +%H) * 60 + $(date +%M) + 1 ))";
+    case "24h":
+      return "-mmin -1440";
+    case "7d":
+      return "-mtime -7";
+    case "30d":
+      return "-mtime -30";
+  }
+}
+
+function rgGlobFlags(include?: string[], exclude?: string[]): string[] {
+  const args: string[] = [];
+  for (const glob of include ?? []) {
+    const trimmed = glob.trim();
+    if (trimmed !== "") {
+      args.push("--glob", shQuote(trimmed));
+    }
+  }
+  for (const glob of exclude ?? []) {
+    const trimmed = glob.trim();
+    if (trimmed !== "") {
+      args.push("--glob", shQuote(`!${trimmed}`));
+    }
+  }
+  return args;
+}
+
+function rgMatchFlags(opts: {
   regex: boolean;
   caseSensitive: boolean;
   wordMatch: boolean;
   hidden: boolean;
-  paths: string[];
-  globInclude?: string[];
-  globExclude?: string[];
-}): string {
-  const args = ["rg", "-n"];
+}): string[] {
+  const args = ["-n"];
   if (!opts.regex) {
     args.push("-F");
   }
@@ -197,26 +226,57 @@ export function toRgShareCommand(opts: {
   if (opts.hidden) {
     args.push("--hidden");
   }
-  for (const glob of opts.globInclude ?? []) {
-    const trimmed = glob.trim();
-    if (trimmed !== "") {
-      args.push("--glob", shQuote(trimmed));
-    }
+  return args;
+}
+
+export function toRgShareCommand(opts: {
+  query: string;
+  regex: boolean;
+  caseSensitive: boolean;
+  wordMatch: boolean;
+  hidden: boolean;
+  rootAbs: string;
+  relPaths?: string[];
+  globInclude?: string[];
+  globExclude?: string[];
+  timeRange?: TimeRange | null;
+}): string {
+  const relPaths = (opts.relPaths ?? ["."])
+    .map((path) => path.trim())
+    .map((path) => (path === "" ? "." : path));
+  const pathArgs = [...new Set(relPaths.length > 0 ? relPaths : ["."])].map(
+    shQuote,
+  );
+  const globFlags = rgGlobFlags(opts.globInclude, opts.globExclude);
+  const matchFlags = rgMatchFlags(opts);
+  const query = shQuote(opts.query);
+  const content = ["rg", ...matchFlags, "--", query].join(" ");
+  const gitSkip = '! -path "*/.git/*"';
+  const inRoot = (cmd: string): string =>
+    `( cd ${shQuote(opts.rootAbs)} && ${cmd} )`;
+
+  if (opts.timeRange == null) {
+    return inRoot(
+      ["rg", ...matchFlags, ...globFlags, "--", query, ...pathArgs].join(" "),
+    );
   }
-  for (const glob of opts.globExclude ?? []) {
-    const trimmed = glob.trim();
-    if (trimmed !== "") {
-      args.push("--glob", shQuote(`!${trimmed}`));
-    }
+  const mtime = findMtimePredicate(opts.timeRange);
+  if (globFlags.length === 0) {
+    return inRoot(
+      `find ${pathArgs.join(" ")} -type f ${gitSkip} ${mtime} -print0 | xargs -0 -r ${content}`,
+    );
   }
-  args.push("--", shQuote(opts.query));
-  for (const path of opts.paths) {
-    const trimmed = path.trim();
-    if (trimmed !== "") {
-      args.push(shQuote(trimmed));
-    }
-  }
-  return args.join(" ");
+  const listFiles = [
+    "rg",
+    "--null",
+    "--files",
+    ...(opts.hidden ? ["--hidden"] : []),
+    ...globFlags,
+    ...pathArgs,
+  ].join(" ");
+  return inRoot(
+    `${listFiles} | xargs -0 -r sh -c 'find "$@" -type f ${gitSkip} ${mtime} -print0' _ | xargs -0 -r ${content}`,
+  );
 }
 
 export function toRequest(
