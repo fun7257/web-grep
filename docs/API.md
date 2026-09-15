@@ -17,7 +17,7 @@
 | --- | --- |
 | 单一真相 | 类型、默认值、上限只写在 `packages/shared/src`。前端 `safeParse` 响应；后端按同名字段吐 JSON。 |
 | 兼容 | v1 内只允许**新增可选字段**。删除、改名、改语义必须升到 v2。 |
-| 默认值 | 请求里省略的字段按 Zod `.default()`。前端若行为与默认不同，必须显式传（当前 UI：`regex: false`、`hidden: true`）。 |
+| 默认值 | 请求里省略的字段按 Zod `.default()`。前端若行为与默认不同，必须显式传（当前 UI：`regex: false`、`caseSensitive: false`、`hidden: true`）。 |
 | 路径 | 客户端只出现 POSIX **相对路径**（`src/a.ts`）。禁止绝对路径、`..`、NUL。 |
 | 错误 | 机器可读 `code` + 给人看的 `message`。不要把 Zod issue 数组或 Go error 原文直接给浏览器。 |
 | 鉴权 | 单密码。`GET /api/health`、`GET /api/auth/status`、`POST /api/auth/login`、`POST /api/auth/logout` 以及非 `/api` 的 SPA 静态资源免会话，但仍校验 Host/Origin。其余 `/api/*` 在设置了 `token` 时需要登录后的 `Authorization: Bearer` 或 `X-Web-Grep-Token`（会话令牌，不是密码）。会话不过期，直到退出或服务重启。勾选「记住密码」把令牌放 `localStorage`，否则 `sessionStorage`（关标签即丢）。 |
@@ -96,9 +96,9 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `query` | 必填 | 1–8192 字符 |
+| `query` | 必填 | 1–8192 字符。UI 多条件 AND 时，前端编成同一行的 `a.*b\|b.*a`（字面量会先转义）；空条件丢弃。单框里的空格是查询内容，不是分隔符。 |
 | `path` | `""` | 相对目录；空=整个根 |
-| `globInclude` | `[]` | 用户/芯片 glob |
+| `globInclude` | `[]` | 用户 glob 或树勾选转成的路径 glob |
 | `globExclude` | `[]` | |
 | `regex` | `false` | `false` → rg `-F` |
 | `caseSensitive` | `false` | |

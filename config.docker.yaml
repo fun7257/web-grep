@@ -2,7 +2,7 @@
 # 启动：
 #   cp config.docker.yaml config.deploy.yaml
 #   # 填写 token、public_host
-#   docker run ... -v "$PWD/config.deploy.yaml:/app/config.yaml" -v /宿主机目录:/data:ro web-grep:v0.1.4
+#   docker run ... -v "$PWD/config.deploy.yaml:/app/config.yaml" -v /宿主机目录:/data:ro web-grep:v0.1.5
 #
 # 容器内 root 必须保持 /data（对应上面挂进去的目录）。
 # 不要用本机开发那份 config.yaml（里面的 root 是 Mac 路径）。

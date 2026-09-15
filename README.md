@@ -35,6 +35,16 @@ Open http://127.0.0.1:5173
 
 前后端接口标准见 [`docs/API.md`](docs/API.md)。类型与默认值以 `packages/shared` 为准，两边按这份契约并行开发。
 
+## Use / 使用
+
+- 搜索框是**一条条件**。空格算进查询本身（`err msg` 是一整段）。
+- 多条件 AND：点 **+** / 下拉，或 **Shift+Enter** 再开一框。空框不会参与匹配。同一行必须都命中（顺序不限）。
+- `Aa` 大小写、`\b` 全词、`.*` 正则。默认字面量、忽略大小写。
+- 左侧 **时间** 按**文件修改时间**限制目录树和可搜范围（不是日志行时间）。
+- 树勾选后，搜索只覆盖选中路径。
+- 登录勾选 **记住密码**：令牌进 `localStorage`，关网页还在，直到退出或清站点数据。不勾则关标签即掉。会话在服务端内存里，**重启进程要重新登录**。
+- 搜索次数在左侧栏底部；历史在搜索框左边的时钟按钮。
+
 ## Test / production (Docker) / 测试与生产
 
 前后端打进**同一个镜像**。见 [`docs/docker.md`](docs/docker.md)：`docker compose up --build -d` 或 `docker run`。
@@ -67,8 +77,8 @@ Primary config is `config.yaml` (see `config.example.yaml`). Path: `-config`, el
 
 - Loopback bind can start without `token`.
 - Binding `0.0.0.0` without `token` **or** `public_host` fails at boot.
-- After login the SPA stores a **session** token with no expiry. Checking “Remember password” writes it to `localStorage` until logout or the user clears site data; otherwise `sessionStorage` (cleared when the tab closes). Requests send `Authorization: Bearer` / `X-Web-Grep-Token`. The password is never sent on search. Sessions live in process memory, so restarting the server still requires a new login.
-- 时间范围按**文件修改时间**过滤目录树和可搜文件，由浏览器传 `mtimeAfter`，不是 yaml 项。搜索历史在浏览器 `localStorage`。
+- After login the SPA stores a **session** token with no expiry. Checking **Remember password** writes it to `localStorage` until logout or the user clears site data; otherwise `sessionStorage` (cleared when the tab closes). Requests send `Authorization: Bearer` / `X-Web-Grep-Token`. The password is never sent on search. Sessions live in process memory, so restarting the server still requires a new login.
+- Time range is **file mtime** (`mtimeAfter` from the browser), not a yaml key. Search history is in `localStorage`. Search count is a file next to `config.yaml` named `search-count`.
 - `SIGHUP` 会按同一条 `config.yaml` 路径重新加载配置。
 
 ## Architecture

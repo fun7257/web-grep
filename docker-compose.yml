@@ -5,7 +5,8 @@
 #   WEB_GREP_DATA=/var/log WEB_GREP_TOKEN=secret docker compose up --build -d
 #
 # Or mount your own yaml (must use root: /data):
-#   - ./config.yaml:/app/config.yaml
+#   - ./config.deploy.yaml:/app/config.yaml
+# Persist search-count next to that file if you care about the badge.
 
 name: web-grep
 

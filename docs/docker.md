@@ -64,7 +64,7 @@ docker run -d --name web-grep --restart unless-stopped \
   -p 8787:8787 \
   -v "$PWD/config.deploy.yaml:/app/config.yaml" \
   -v /要搜索的宿主机目录:/data:ro \
-  web-grep:v0.1.4
+  web-grep:v0.1.5
 ```
 
 ```bash
@@ -74,11 +74,14 @@ docker rm -f web-grep
 
 改端口：`-p 9000:8787`。不要加 `--init`。不要加 `-e WEB_GREP_TOKEN`，否则会盖掉 yaml。
 
-导出镜像：`docker save web-grep:v0.1.4 | gzip > web-grep-v0.1.4.tar.gz`，对端 `gunzip -c web-grep-v0.1.4.tar.gz | docker load`。
+导出镜像：`docker save web-grep:v0.1.5 | gzip > web-grep-v0.1.5.tar.gz`，对端 `gunzip -c web-grep-v0.1.5.tar.gz | docker load`。
 
 ## 注意
 
 - `public_host` / `WEB_GREP_PUBLIC_HOST` 必须是浏览器地址栏里的名字/IP，不要填 `0.0.0.0`。
 - 健康检查请求 `http://127.0.0.1:8787/api/health`（Host 为本机，始终允许）。
-- 时间范围、搜索历史在浏览器里。搜索次数由服务端记在配置文件同目录的 `search-count`（单文件挂载 config 时写在容器 `/app/search-count`，换容器会清零，需要持久化请挂目录或该文件）。
+- 登录勾选「记住密码」后令牌在浏览器 `localStorage`，关页还在；服务端会话在内存里，**重启容器要重新登录**。
+- 时间范围、搜索历史在浏览器里。搜索次数由服务端记在配置文件同目录的 `search-count`（单文件挂载 config 时写在容器 `/app/search-count`，换容器会清零，需要持久化请把该文件或整个 `/app` 配置目录一起挂出来）。
+- 多条件 AND 在页面上加框，空框不搜；空格算进单条条件。
 - 树是空的或权限错误：确认 `WEB_GREP_DATA` 存在且该 uid 可读。
+- 本仓库当前推荐镜像标签 `web-grep:v0.1.5`（需从本提交重新 `docker build`）。Compose 本地构建仍用 `web-grep:test`。
