@@ -34,7 +34,21 @@ const idleLine = {
   height: 2.5,
 } as const;
 
-export function IdleMark({ kind }: { kind: "hits" | "preview" | "nomatch" }) {
+export function IdleMark({
+  kind,
+}: {
+  kind: "hits" | "preview" | "nomatch" | "rail";
+}) {
+  if (kind === "rail") {
+    return (
+      <svg className="idle-mark" viewBox="0 0 88 88" fill="none" aria-hidden="true">
+        <rect x="18" y="22" width="52" height="8" rx="4" fill="currentColor" opacity="0.22" />
+        <rect x="18" y="40" width="40" height="8" rx="4" fill="currentColor" opacity="0.22" />
+        <rect x="18" y="58" width="46" height="8" rx="4" fill="currentColor" opacity="0.22" />
+        <circle className="idle-mark-hit" cx="68" cy="44" r="5" />
+      </svg>
+    );
+  }
   if (kind === "preview") {
     return (
       <svg className="idle-mark" viewBox="0 0 88 88" aria-hidden="true">
@@ -170,6 +184,14 @@ export function IconChevron({ open }: { open: boolean }) {
       aria-hidden="true"
     >
       <path d="M6 4l5 4-5 4" {...stroke} />
+    </svg>
+  );
+}
+
+export function IconRailExpand() {
+  return (
+    <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 6l6 6-6 6" {...stroke} />
     </svg>
   );
 }
@@ -374,27 +396,11 @@ export function IconBinary() {
 export function BrandMark() {
   return (
     <span className="brand-mark" aria-hidden="true">
-      <svg viewBox="0 0 24 24">
+      <svg viewBox="0 0 24 24" fill="none">
         <path
-          d="M4.2 8.2h5.1l1.35 1.55H19.8v8.05H4.2z"
-          fill="none"
+          d="M5 7h14M5 12h10M5 17h7"
           stroke="currentColor"
-          strokeWidth="1.7"
-          strokeLinejoin="round"
-        />
-        <circle
-          cx="13.1"
-          cy="14.15"
-          r="2.45"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
-        />
-        <path
-          d="M14.9 16 17.4 18.5"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.7"
+          strokeWidth="2"
           strokeLinecap="round"
         />
       </svg>

@@ -616,6 +616,7 @@ function AppShell() {
             error={search.error}
             hostForbidden={token.hostForbidden}
             engine={token.meta?.engine ?? null}
+            treeCollapsed={!treeOpen}
           />
         ) : (
           <ResultList
@@ -655,6 +656,7 @@ function AppShell() {
                 path: selectedHit.path,
                 highlightLine: selectedHit.line,
                 matches: selectedHit.matches,
+                allowGotoLine: true,
               });
               return;
             }

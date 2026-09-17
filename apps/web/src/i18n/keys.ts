@@ -99,6 +99,8 @@ export const MSG_KEYS = [
   "searchCountTitle",
   "treeHide",
   "treeShow",
+  "treeCollapsed",
+  "treeCollapsedHelper",
   "treeEmpty",
   "treeEmptyFolder",
   "treeEmptyFiltered",

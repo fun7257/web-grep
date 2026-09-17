@@ -100,7 +100,10 @@ export const enUS = {
   searchCountLabel: "searches",
   searchCountTitle: "{n} searches run",
   treeHide: "Hide",
-  treeShow: "Tree",
+  treeShow: "Expand sidebar",
+  treeCollapsed: "Sidebar collapsed",
+  treeCollapsedHelper:
+    "Click ▶ to expand; open/closed state is stored in localStorage",
   treeEmpty: "This search root has no listable files",
   treeEmptyFolder: "Empty folder",
   treeEmptyFiltered: "No files modified in this time range",

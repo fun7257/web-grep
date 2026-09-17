@@ -14,6 +14,7 @@ export function EmptyState({
   error,
   hostForbidden,
   engine,
+  treeCollapsed = false,
 }: {
   status: SearchStatus;
   hitCount: number;
@@ -21,12 +22,22 @@ export function EmptyState({
   error: JsonError | null;
   hostForbidden: boolean;
   engine?: string | null;
+  treeCollapsed?: boolean;
 }) {
   const { t } = useLocale();
   const engineDown = engine === "none" || isEngineError(error?.code);
 
   if (hitCount > 0) {
     return null;
+  }
+  if (treeCollapsed) {
+    return (
+      <div className="empty-state empty-idle">
+        <IdleMark kind="rail" />
+        <p className="empty-title">{t("treeCollapsed")}</p>
+        <p className="empty-helper">{t("treeCollapsedHelper")}</p>
+      </div>
+    );
   }
   if (hostForbidden || error?.code === "FORBIDDEN_HOST") {
     return (

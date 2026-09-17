@@ -22,11 +22,12 @@ import {
   IconLock,
   IconLogout,
   IconPanel,
+  IconRailExpand,
   IconX,
 } from "./icons.tsx";
 import { LocaleToggle, ThemeToggle } from "./StatusBar.tsx";
 
-const TREE_OPEN_KEY = "web-grep.treeOpen.v2";
+export const TREE_OPEN_KEY = "web-grep.treeOpen.v2";
 /** Matches `--rail-w` in styles.css (L-RAIL). */
 export const TREE_RAIL_WIDTH = 56;
 
@@ -415,9 +416,9 @@ export function FileTree({
 
   return (
     <aside
-      className={open ? "tree-pane" : "tree-pane collapsed"}
+      className={open ? "tree-pane" : "tree-pane collapsed rail"}
       style={style}
-      aria-label={t("treeTitle")}
+      aria-label={open ? t("treeTitle") : t("treeCollapsed")}
     >
       {open ? (
         <>
@@ -630,60 +631,62 @@ export function FileTree({
           </div>
         </>
       ) : (
-        <div className="tree-rail">
-          <button
-            type="button"
-            className="brand-mark-btn"
-            onClick={onToggle}
-            title={t("appTitle")}
-          >
+        <>
+          <div className="tree-head">
             <BrandMark />
-          </button>
-          <button
-            type="button"
-            className="tree-toggle"
-            onClick={onToggle}
-            aria-expanded="false"
-            aria-label={t("treeShow")}
-            title={t("treeShow")}
-          >
-            <IconPanel open={false} />
-          </button>
-          {n > 0 ? (
             <button
               type="button"
-              className="tree-rail-count"
+              className="rail-expand"
+              onClick={onToggle}
+              aria-expanded="false"
+              aria-label={t("treeShow")}
+              title={t("treeShow")}
+            >
+              <IconRailExpand />
+            </button>
+          </div>
+          <div className="rail-stack">
+            <button
+              type="button"
+              className="rail-picked-badge"
               onClick={onToggle}
               title={t("treePicked", { n })}
             >
+              <span className="dot" />
               {n > 99 ? "99+" : n}
             </button>
-          ) : null}
-          <div className="tree-rail-grow" />
-          {timeRange !== null ? (
             <button
               type="button"
-              className="tree-rail-time"
+              className={
+                timeRange !== null ? "rail-time-btn is-active" : "rail-time-btn"
+              }
               onClick={onToggle}
-              title={`${t("timeRange")}: ${t(timeRangeMsgKey(timeRange))}`}
+              title={
+                timeRange !== null
+                  ? `${t("timeRange")}: ${t(timeRangeMsgKey(timeRange))}`
+                  : t("timeRange")
+              }
             >
-              {t(timeRangeMsgKey(timeRange))}
+              <IconHistory />
             </button>
-          ) : null}
-          {canLogout && onLogout !== undefined ? (
+          </div>
+          <div className="tree-foot">
+            <ThemeToggle />
+            <LocaleToggle compact />
             <button
               type="button"
-              className="tree-logout"
-              onClick={onLogout}
+              className="rail-logout"
+              disabled={!canLogout || onLogout === undefined}
+              onClick={() => {
+                onLogout?.();
+              }}
               title={t("logout")}
               aria-label={t("logout")}
             >
               <IconLogout />
             </button>
-          ) : null}
-          <ThemeToggle />
-          <LocaleToggle />
-        </div>
+          </div>
+        </>
       )}
     </aside>
   );
