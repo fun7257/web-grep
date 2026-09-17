@@ -1,19 +1,44 @@
+import type { SearchModifiers } from "./searchStack.ts";
 import { isTimeRange, type TimeRange } from "./timeRange.ts";
 import type { TreePick } from "./treePicks.ts";
 
+export type SharePart = {
+  value: string;
+} & SearchModifiers;
+
 export type ShareState = {
   parts: string[];
+  mods?: SearchModifiers[];
   caseSensitive: boolean;
   wordMatch: boolean;
   regex: boolean;
   path?: string;
   line?: number;
   timeRange?: TimeRange;
-  includeGlobs?: string;
   excludeGlobs?: string;
   picks?: TreePick[];
-  scope?: "include" | "exclude";
 };
+
+function encodeMod(mod: SearchModifiers): string {
+  return `${mod.caseSensitive ? "s" : ""}${mod.wordMatch ? "w" : ""}${mod.regex ? "r" : ""}`;
+}
+
+function decodeMod(raw: string | null | undefined): SearchModifiers {
+  const flags = raw ?? "";
+  return {
+    caseSensitive: flags.includes("s"),
+    wordMatch: flags.includes("w"),
+    regex: flags.includes("r"),
+  };
+}
+
+function sameMods(a: SearchModifiers, b: SearchModifiers): boolean {
+  return (
+    a.caseSensitive === b.caseSensitive &&
+    a.wordMatch === b.wordMatch &&
+    a.regex === b.regex
+  );
+}
 
 function joinedParam(params: URLSearchParams, key: string): string {
   return params
@@ -30,43 +55,48 @@ function trimmedList(values: string[] | undefined): string[] {
 }
 
 export function captureShareState(input: {
-  fields: string[];
-  fallbackParts?: string[];
-  caseSensitive: boolean;
-  wordMatch: boolean;
-  regex: boolean;
-  includeGlobs: string;
+  fields: SharePart[];
+  fallbackParts?: SharePart[];
   excludeGlobs: string;
   picks: TreePick[];
-  scope: "all" | "include" | "exclude";
   timeRange: TimeRange | null;
   hitPath?: string;
   hitLine?: number;
 }): ShareState | null {
-  const parts = trimmedList(input.fields);
-  const fallback = trimmedList(input.fallbackParts);
-  const query = parts.length > 0 ? parts : fallback;
+  const live = input.fields
+    .map((part) => ({ ...part, value: part.value.trim() }))
+    .filter((part) => part.value !== "");
+  const fallback = (input.fallbackParts ?? [])
+    .map((part) => ({ ...part, value: part.value.trim() }))
+    .filter((part) => part.value !== "");
+  const query = live.length > 0 ? live : fallback;
   if (query.length === 0) {
     return null;
   }
-  const includeGlobs = input.includeGlobs.trim();
   const excludeGlobs = input.excludeGlobs.trim();
   const hitPath = input.hitPath?.trim() ?? "";
   const hitLine = input.hitLine ?? 0;
+  const head = query[0] ?? {
+    value: "",
+    caseSensitive: false,
+    wordMatch: false,
+    regex: false,
+  };
   return {
-    parts: query,
-    caseSensitive: input.caseSensitive,
-    wordMatch: input.wordMatch,
-    regex: input.regex,
+    parts: query.map((part) => part.value),
+    mods: query.map((part) => ({
+      caseSensitive: part.caseSensitive,
+      wordMatch: part.wordMatch,
+      regex: part.regex,
+    })),
+    caseSensitive: head.caseSensitive,
+    wordMatch: head.wordMatch,
+    regex: head.regex,
     ...(hitPath !== "" ? { path: hitPath } : {}),
     ...(Number.isInteger(hitLine) && hitLine > 0 ? { line: hitLine } : {}),
     ...(input.timeRange !== null ? { timeRange: input.timeRange } : {}),
-    ...(includeGlobs !== "" ? { includeGlobs } : {}),
     ...(excludeGlobs !== "" ? { excludeGlobs } : {}),
     ...(input.picks.length > 0 ? { picks: input.picks } : {}),
-    ...(input.picks.length > 0 && input.scope === "exclude"
-      ? { scope: "exclude" as const }
-      : {}),
   };
 }
 
@@ -85,7 +115,6 @@ export function parseShareSearch(search: string): ShareState | null {
   const line =
     lineRaw !== null && lineRaw !== "" ? Number(lineRaw) : Number.NaN;
   const timeRaw = params.get("t");
-  const includeGlobs = joinedParam(params, "i");
   const excludeGlobs = joinedParam(params, "x");
   const picks: TreePick[] = [
     ...trimmedList(params.getAll("f")).map((item) => ({
@@ -97,18 +126,27 @@ export function parseShareSearch(search: string): ShareState | null {
       dir: true,
     })),
   ];
-  return {
-    parts,
+  const globalMods: SearchModifiers = {
     caseSensitive: params.get("s") === "1",
     wordMatch: params.get("w") === "1",
     regex: params.get("r") === "1",
+  };
+  const flagged = params.getAll("m");
+  const mods = parts.map((_, index) =>
+    flagged.length > 0 ? decodeMod(flagged[index]) : globalMods,
+  );
+  const head = mods[0] ?? globalMods;
+  return {
+    parts,
+    mods,
+    caseSensitive: head.caseSensitive,
+    wordMatch: head.wordMatch,
+    regex: head.regex,
     ...(path !== "" ? { path } : {}),
     ...(Number.isInteger(line) && line > 0 ? { line } : {}),
     ...(isTimeRange(timeRaw) ? { timeRange: timeRaw } : {}),
-    ...(includeGlobs !== "" ? { includeGlobs } : {}),
     ...(excludeGlobs !== "" ? { excludeGlobs } : {}),
     ...(picks.length > 0 ? { picks } : {}),
-    ...(params.get("k") === "x" ? { scope: "exclude" as const } : {}),
   };
 }
 
@@ -122,14 +160,30 @@ export function buildShareUrl(href: string, state: ShareState): string {
       url.searchParams.append("q", trimmed);
     }
   }
-  if (state.caseSensitive) {
-    url.searchParams.set("s", "1");
-  }
-  if (state.wordMatch) {
-    url.searchParams.set("w", "1");
-  }
-  if (state.regex) {
-    url.searchParams.set("r", "1");
+  const mods =
+    state.mods !== undefined && state.mods.length === state.parts.length
+      ? state.mods
+      : state.parts.map(() => ({
+          caseSensitive: state.caseSensitive,
+          wordMatch: state.wordMatch,
+          regex: state.regex,
+        }));
+  const mixed = mods.some((mod) => !sameMods(mod, mods[0] ?? mod));
+  if (mixed) {
+    for (const mod of mods) {
+      url.searchParams.append("m", encodeMod(mod));
+    }
+  } else {
+    const head = mods[0];
+    if (head?.caseSensitive) {
+      url.searchParams.set("s", "1");
+    }
+    if (head?.wordMatch) {
+      url.searchParams.set("w", "1");
+    }
+    if (head?.regex) {
+      url.searchParams.set("r", "1");
+    }
   }
   if (state.path !== undefined && state.path !== "") {
     url.searchParams.set("p", state.path);
@@ -139,10 +193,6 @@ export function buildShareUrl(href: string, state: ShareState): string {
   }
   if (state.timeRange !== undefined) {
     url.searchParams.set("t", state.timeRange);
-  }
-  const includeGlobs = state.includeGlobs?.trim() ?? "";
-  if (includeGlobs !== "") {
-    url.searchParams.set("i", includeGlobs);
   }
   const excludeGlobs = state.excludeGlobs?.trim() ?? "";
   if (excludeGlobs !== "") {
@@ -154,9 +204,6 @@ export function buildShareUrl(href: string, state: ShareState): string {
     } else {
       url.searchParams.append("f", pick.path);
     }
-  }
-  if (state.scope === "exclude") {
-    url.searchParams.set("k", "x");
   }
   return url.toString();
 }

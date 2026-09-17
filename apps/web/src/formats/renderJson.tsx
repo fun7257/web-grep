@@ -45,7 +45,7 @@ function renderPiece(
   piece: JsonPiece,
   index: number,
   origSpans: HlSpan[],
-  terms: string[],
+  terms: import("../highlight.ts").HlTermInput[],
   opts: HlOpts,
 ): ReactNode {
   if (piece.kind === "inj") {
@@ -76,7 +76,7 @@ export function JsonView({
   opts = DEFAULT_HL_OPTS,
 }: {
   text: string;
-  terms?: string[];
+  terms?: import("../highlight.ts").HlTermInput[];
   opts?: HlOpts;
 }): ReactNode {
   const pieces = buildJsonPieces(text);

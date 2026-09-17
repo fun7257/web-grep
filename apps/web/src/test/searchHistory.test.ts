@@ -11,27 +11,39 @@ describe("searchHistory", () => {
   it("dedupes and keeps the latest first", () => {
     localStorage.removeItem(SEARCH_HISTORY_KEY);
     const once = pushSearchHistory([], {
-      parts: ["hello"],
+      parts: [
+        {
+          value: "hello",
+          caseSensitive: false,
+          wordMatch: false,
+          regex: false,
+        },
+      ],
       timeRange: "today",
-      caseSensitive: false,
-      wordMatch: false,
-      regex: false,
     });
     const twice = pushSearchHistory(once, {
-      parts: ["world"],
+      parts: [
+        {
+          value: "world",
+          caseSensitive: false,
+          wordMatch: false,
+          regex: false,
+        },
+      ],
       timeRange: "today",
-      caseSensitive: false,
-      wordMatch: false,
-      regex: false,
     });
     const again = pushSearchHistory(twice, {
-      parts: ["hello"],
+      parts: [
+        {
+          value: "hello",
+          caseSensitive: false,
+          wordMatch: false,
+          regex: false,
+        },
+      ],
       timeRange: "today",
-      caseSensitive: false,
-      wordMatch: false,
-      regex: false,
     });
-    expect(again.map((item) => item.parts[0])).toEqual(["hello", "world"]);
+    expect(again.map((item) => item.parts[0]?.value)).toEqual(["hello", "world"]);
     expect(loadSearchHistory()).toHaveLength(2);
   });
 });

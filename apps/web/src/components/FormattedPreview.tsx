@@ -1,3 +1,4 @@
+import { HighlightedText } from "./ResultRow.tsx";
 import { detectLineKind } from "../formats/detect.ts";
 import { JsonView } from "../formats/renderJson.tsx";
 import { MarkdownView } from "../formats/renderMarkdown.tsx";
@@ -11,7 +12,7 @@ export function FormattedLine({
 }: {
   path: string;
   text: string;
-  terms?: string[];
+  terms?: import("../highlight.ts").HlTermInput[];
   opts?: HlOpts;
 }) {
   const kind = detectLineKind(path, text);
@@ -24,5 +25,5 @@ export function FormattedLine({
       return view;
     }
   }
-  return null;
+  return <HighlightedText text={text} terms={terms} opts={opts} />;
 }

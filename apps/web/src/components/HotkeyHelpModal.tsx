@@ -15,7 +15,7 @@ export function HotkeyHelpModal({
 
   const shortcuts = [
     { key: "Enter", desc: "提交搜索 / Submit search" },
-    { key: "Shift+Enter", desc: "添加 AND 条件 / Add AND condition" },
+    { key: "Shift+Enter", desc: "添加过滤 / Add filter" },
     { key: "⌘/Ctrl + Enter", desc: "强制搜索 / Run search" },
     { key: "Alt + C", desc: "切换大小写匹配 / Toggle match case" },
     { key: "Alt + W", desc: "切换全词匹配 / Toggle whole word" },

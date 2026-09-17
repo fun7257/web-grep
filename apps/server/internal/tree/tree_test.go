@@ -29,7 +29,7 @@ func TestListShowsDotConfigButNotSecretsOrJunk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listing, err := List(root, "", false, time.Time{})
+	listing, err := List(root, "", false, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +85,7 @@ func TestListSortsFilesByMtimeDescending(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listing, err := List(root, "", false, time.Time{})
+	listing, err := List(root, "", false, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,15 +128,15 @@ func TestCountFilesRespectsMtime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	all, err := CountFiles(root, "", false, time.Time{})
+	all, err := CountFiles(root, "", false, Filter{})
 	if err != nil || all != 2 {
 		t.Fatalf("all=%d err=%v", all, err)
 	}
-	recent, err := CountFiles(root, "", false, time.Now().Add(-2*time.Hour))
+	recent, err := CountFiles(root, "", false, Filter{After: time.Now().Add(-2 * time.Hour)})
 	if err != nil || recent != 1 {
 		t.Fatalf("recent=%d err=%v", recent, err)
 	}
-	sub, err := CountFiles(root, "sub", false, time.Time{})
+	sub, err := CountFiles(root, "sub", false, Filter{})
 	if err != nil || sub != 1 {
 		t.Fatalf("sub=%d err=%v", sub, err)
 	}
@@ -175,7 +175,7 @@ func TestListHidesOldFilesAndEmptyDirs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listing, err := List(root, "", false, time.Now().Add(-2*time.Hour))
+	listing, err := List(root, "", false, Filter{After: time.Now().Add(-2 * time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestListAgentRootIfPresent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listing, err := List(real, "", false, time.Time{})
+	listing, err := List(real, "", false, Filter{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,5 +223,102 @@ func TestListAgentRootIfPresent(t *testing.T) {
 	}
 	if _, ok := names[".vite"]; ok {
 		t.Fatal(".vite should be skipped")
+	}
+}
+
+func TestListFiltersIncludeAndExcludeGlobs(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep.ts"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "skip.js"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep.test.ts"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "src", "app.ts"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing, err := List(root, "", false, Filter{
+		Include: []string{"*.ts"},
+		Exclude: []string{"*.test.ts"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, e := range listing.Entries {
+		got[e.Name] = e.Dir
+	}
+	if _, ok := got["keep.ts"]; !ok {
+		t.Fatal("keep.ts")
+	}
+	if _, ok := got["src"]; !ok {
+		t.Fatal("src dir with matching files")
+	}
+	if _, ok := got["skip.js"]; ok {
+		t.Fatal("skip.js should be excluded by include")
+	}
+	if _, ok := got["keep.test.ts"]; ok {
+		t.Fatal("keep.test.ts should be excluded")
+	}
+	n, err := CountFiles(root, "", false, Filter{
+		Include: []string{"*.ts"},
+		Exclude: []string{"*.test.ts"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("count=%d want 2 (keep.ts + src/app.ts)", n)
+	}
+}
+
+func TestListExcludeBeforeTime(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "keep.ts"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "skip.ts"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "old.ts"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	oldTime := time.Now().Add(-48 * time.Hour)
+	if err := os.Chtimes(filepath.Join(root, "old.ts"), oldTime, oldTime); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	listing, err := List(root, "", false, Filter{
+		After:   time.Now().Add(-2 * time.Hour),
+		Exclude: []string{"skip.ts"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, e := range listing.Entries {
+		got[e.Name] = e.Dir
+	}
+	if _, ok := got["keep.ts"]; !ok {
+		t.Fatal("keep.ts")
+	}
+	if _, ok := got["skip.ts"]; ok {
+		t.Fatal("exclude should drop skip.ts even when it is new")
+	}
+	if _, ok := got["old.ts"]; ok {
+		t.Fatal("time should drop old.ts after exclude")
 	}
 }

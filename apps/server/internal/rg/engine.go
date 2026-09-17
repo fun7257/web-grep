@@ -22,7 +22,21 @@ func (e Engine) Kind() string { return "rg" }
 
 const fileListArgBudget = 96 * 1024
 
+func filterArgvs(in Input) [][]string {
+	var out [][]string
+	for _, term := range in.AndTerms {
+		query := strings.TrimSpace(term.Query)
+		if query == "" {
+			continue
+		}
+		term.Query = query
+		out = append(out, BuildFilterArgv(term))
+	}
+	return out
+}
+
 func (e Engine) Search(ctx context.Context, in Input, emit func(Match) error, progress func(files int)) error {
+	filters := filterArgvs(in)
 	if in.LimitToList {
 		if len(in.FileList) == 0 {
 			return nil
@@ -37,7 +51,7 @@ func (e Engine) Search(ctx context.Context, in Input, emit func(Match) error, pr
 				return err
 			}
 			argv = append(argv, chunk...)
-			n, err := e.run(ctx, in.RootReal, argv, emit, progress, seen)
+			n, err := e.run(ctx, in.RootReal, argv, filters, emit, progress, seen)
 			if err != nil {
 				return err
 			}
@@ -49,7 +63,7 @@ func (e Engine) Search(ctx context.Context, in Input, emit func(Match) error, pr
 	if err != nil {
 		return err
 	}
-	_, err = e.run(ctx, in.RootReal, argv, emit, progress, 0)
+	_, err = e.run(ctx, in.RootReal, argv, filters, emit, progress, 0)
 	return err
 }
 
@@ -76,40 +90,61 @@ func splitFileList(files []string, budget int) [][]string {
 	return out
 }
 
-func (e Engine) run(ctx context.Context, dir string, argv []string, emit func(Match) error, progress func(files int), filesAlready int) (int, error) {
-	// CommandContext + StdoutPipe races: Wait/cancel close the pipe while Scan
-	// still reads, which surfaces as "read |0: file already closed".
-	cmd := exec.Command(e.Bin, argv...)
-	cmd.Dir = dir
-	cmd.Env = Env()
-	setProcAttr(cmd)
-	stdout, err := cmd.StdoutPipe()
+func (e Engine) run(ctx context.Context, dir string, argv []string, filters [][]string, emit func(Match) error, progress func(files int), filesAlready int) (int, error) {
+	cmds := make([]*exec.Cmd, 0, 1+len(filters))
+	head := exec.Command(e.Bin, argv...)
+	head.Dir = dir
+	head.Env = Env()
+	setProcAttr(head)
+	stdout, err := head.StdoutPipe()
 	if err != nil {
 		return filesAlready, err
 	}
-	var stderr strings.Builder
-	cmd.Stderr = &limitWriter{w: &stderr, n: 8192}
-	if logCmd() {
-		logx.Info("rg", map[string]any{
-			"cwd": dir,
-			"cmd": formatCmd(e.Bin, argv),
-		})
+	cmds = append(cmds, head)
+	prev := stdout
+	for _, filter := range filters {
+		next := exec.Command(e.Bin, filter...)
+		next.Dir = dir
+		next.Env = Env()
+		setProcAttr(next)
+		next.Stdin = prev
+		out, err := next.StdoutPipe()
+		if err != nil {
+			return filesAlready, err
+		}
+		cmds = append(cmds, next)
+		prev = out
 	}
-	if err := cmd.Start(); err != nil {
-		return filesAlready, err
+	stderrs := make([]strings.Builder, len(cmds))
+	for i, cmd := range cmds {
+		cmd.Stderr = &limitWriter{w: &stderrs[i], n: 4096}
+	}
+	if logCmd() {
+		cmd := formatCmd(e.Bin, argv)
+		for _, filter := range filters {
+			cmd += " | " + formatCmd(e.Bin, filter)
+		}
+		logx.Info("rg", map[string]any{"cwd": dir, "cmd": cmd})
+	}
+	for i, cmd := range cmds {
+		if err := cmd.Start(); err != nil {
+			terminateAll(cmds[:i])
+			return filesAlready, err
+		}
 	}
 
 	stopWatch := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
-			terminate(cmd)
+			terminateAll(cmds)
 		case <-stopWatch:
 		}
 	}()
 
-	sc := bufio.NewScanner(stdout)
-	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	sc := bufio.NewScanner(prev)
+	// rg JSON includes the whole line; 1MiB dropped long log matches.
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	var emitErr error
 	files := filesAlready
 	for sc.Scan() {
@@ -130,12 +165,17 @@ func (e Engine) run(ctx context.Context, dir string, argv []string, emit func(Ma
 		}
 		if err := emit(m); err != nil {
 			emitErr = err
-			terminate(cmd)
+			terminateAll(cmds)
 			break
 		}
 	}
 	scanErr := sc.Err()
-	waitErr := cmd.Wait()
+	var waitErr error
+	for i := len(cmds) - 1; i >= 0; i-- {
+		if err := cmds[i].Wait(); err != nil && waitErr == nil && !benignRgExit(err) {
+			waitErr = err
+		}
+	}
 	close(stopWatch)
 
 	if emitErr != nil {
@@ -145,10 +185,16 @@ func (e Engine) run(ctx context.Context, dir string, argv []string, emit func(Ma
 		return files, ctx.Err()
 	}
 	if waitErr != nil {
-		if ee, ok := waitErr.(*exec.ExitError); ok && ee.ExitCode() == 1 {
-			return files, nil
+		msg := ""
+		for i := range stderrs {
+			part := strings.TrimSpace(stderrs[i].String())
+			if part != "" {
+				if msg != "" {
+					msg += "; "
+				}
+				msg += part
+			}
 		}
-		msg := strings.TrimSpace(stderr.String())
 		if msg != "" {
 			logx.Warn("rg stderr", map[string]any{"stderr": msg})
 			return files, fmt.Errorf("%s", msg)
@@ -159,6 +205,25 @@ func (e Engine) run(ctx context.Context, dir string, argv []string, emit func(Ma
 		return files, nil
 	}
 	return files, scanErr
+}
+
+func terminateAll(cmds []*exec.Cmd) {
+	for i := len(cmds) - 1; i >= 0; i-- {
+		terminate(cmds[i])
+	}
+}
+
+func benignRgExit(err error) bool {
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		return false
+	}
+	switch ee.ExitCode() {
+	case 1, 141:
+		return true
+	default:
+		return false
+	}
 }
 
 func logCmd() bool {

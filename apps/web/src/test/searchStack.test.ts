@@ -6,6 +6,7 @@ import {
   joinAbs,
   newPart,
   parseQueryInput,
+  splitAndTerms,
   stackedQuery,
   toRequest,
   toRgShareCommand,
@@ -77,7 +78,13 @@ describe("compileParts", () => {
 describe("toRequest", () => {
   it("forwards modifiers, globAnd, and globExclude", () => {
     const req = toRequest({
-      parts: [newPart("hello")],
+      parts: [
+        newPart("hello", {
+          caseSensitive: true,
+          wordMatch: true,
+          regex: true,
+        }),
+      ],
       globInclude: ["src/**"],
       globAnd: ["*.ts"],
       globExclude: ["*.test.ts"],
@@ -95,10 +102,90 @@ describe("toRequest", () => {
     expect(req.wordMatch).toBe(true);
     expect(req.regex).toBe(true);
   });
+
+  it("sends per-term modifiers on piped AND terms", () => {
+    const req = toRequest({
+      parts: [
+        newPart("Hello", { caseSensitive: true }),
+        newPart("world.*", { regex: true }),
+      ],
+      globInclude: [],
+      globAnd: [],
+      globExclude: [],
+      path: "",
+      caseSensitive: true,
+      wordMatch: false,
+      regex: false,
+      hidden: true,
+    });
+    expect(req.query).toBe("Hello");
+    expect(req.caseSensitive).toBe(true);
+    expect(req.regex).toBe(false);
+    expect(req.andTerms).toEqual([
+      {
+        query: "world.*",
+        regex: true,
+        caseSensitive: false,
+        wordMatch: false,
+      },
+    ]);
+  });
+
+  it("sends extra AND terms instead of an ordered regex", () => {
+    const req = toRequest({
+      parts: [
+        newPart("host"),
+        newPart("030680228968"),
+        newPart("industryType"),
+        newPart("trade-users"),
+      ],
+      globInclude: [],
+      globAnd: [],
+      globExclude: [],
+      path: "",
+      caseSensitive: false,
+      wordMatch: false,
+      regex: false,
+      hidden: true,
+    });
+    expect(req.query).toBe("host");
+    expect(req.andTerms).toEqual([
+      {
+        query: "030680228968",
+        regex: false,
+        caseSensitive: false,
+        wordMatch: false,
+      },
+      {
+        query: "industryType",
+        regex: false,
+        caseSensitive: false,
+        wordMatch: false,
+      },
+      {
+        query: "trade-users",
+        regex: false,
+        caseSensitive: false,
+        wordMatch: false,
+      },
+    ]);
+    expect(req.regex).toBe(false);
+  });
+});
+
+describe("splitAndTerms", () => {
+  it("keeps the typed order for a piped rg chain", () => {
+    expect(
+      splitAndTerms(["host", "030680228968", "industryType", "trade-users"]),
+    ).toEqual({
+      query: "host",
+      andTerms: ["030680228968", "industryType", "trade-users"],
+    });
+  });
 });
 
 describe("toRgShareCommand", () => {
-  it("searches the project root, not a single hit line", () => {
+  it("searches the shared hit file by explicit path", () => {
     expect(
       toRgShareCommand({
         query: "hello",
@@ -107,8 +194,44 @@ describe("toRgShareCommand", () => {
         wordMatch: false,
         hidden: true,
         rootAbs: "/tmp/project",
+        relPaths: ["src/a.ts"],
       }),
-    ).toBe("( cd /tmp/project && rg -n -F -i --hidden -- hello . )");
+    ).toBe("rg -n -F -i --hidden -- hello /tmp/project/src/a.ts");
+  });
+
+  it("keeps original line numbers through the pipe and locks the hit line", () => {
+    expect(
+      toRgShareCommand({
+        query: "hello",
+        regex: false,
+        caseSensitive: false,
+        wordMatch: false,
+        hidden: true,
+        rootAbs: "/tmp/project",
+        relPaths: ["src/a.ts"],
+        andTerms: ["world"],
+        line: 12,
+      }),
+    ).toBe(
+      "rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg -F -i -- world | rg '^12:' -r ''",
+    );
+  });
+
+  it("pipes extra AND terms after the explicit file search", () => {
+    expect(
+      toRgShareCommand({
+        query: "030680228968",
+        regex: false,
+        caseSensitive: false,
+        wordMatch: false,
+        hidden: true,
+        rootAbs: "/tmp/project",
+        relPaths: ["test.log"],
+        andTerms: ["industryType", "host"],
+      }),
+    ).toBe(
+      "rg -n -F -i --hidden -- 030680228968 /tmp/project/test.log | rg -F -i -- industryType | rg -F -i -- host",
+    );
   });
 
   it("quotes the query and path when needed", () => {
@@ -122,102 +245,30 @@ describe("toRgShareCommand", () => {
         rootAbs: "/tmp/my project",
         relPaths: ["file.ts"],
       }),
-    ).toBe("( cd '/tmp/my project' && rg -n -s -w -- 'it'\\''s' file.ts )");
+    ).toBe("rg -n -s -w -- 'it'\\''s' '/tmp/my project/file.ts'");
   });
 
-  it("adds include and exclude globs with match modifiers", () => {
+  it("uses per-term flags on piped AND stages", () => {
     expect(
       toRgShareCommand({
-        query: "hello",
-        regex: true,
-        caseSensitive: true,
-        wordMatch: true,
-        hidden: true,
-        rootAbs: "/tmp/project",
-        globInclude: ["*.ts", "src/**"],
-        globExclude: ["*.test.ts"],
-      }),
-    ).toBe(
-      "( cd /tmp/project && rg -n -s -w --hidden --glob '*.ts' --glob 'src/**' --glob '!*.test.ts' -- hello . )",
-    );
-  });
-
-  it("searches picked files as paths so globs still apply to folders", () => {
-    expect(
-      toRgShareCommand({
-        query: "hello",
+        query: "Hello",
         regex: false,
-        caseSensitive: false,
+        caseSensitive: true,
         wordMatch: false,
         hidden: true,
         rootAbs: "/tmp/project",
-        relPaths: ["ok.txt", "src"],
-        globInclude: ["*.ts"],
-        globExclude: ["*.test.ts"],
+        relPaths: ["src/a.ts"],
+        andTerms: [{ query: "world.*", regex: true }],
       }),
     ).toBe(
-      "( cd /tmp/project && rg -n -F -i --hidden --glob '*.ts' --glob '!*.test.ts' -- hello ok.txt src )",
-    );
-  });
-
-  it("wraps find when a time range is set", () => {
-    expect(
-      toRgShareCommand({
-        query: "hello",
-        regex: false,
-        caseSensitive: false,
-        wordMatch: false,
-        hidden: true,
-        rootAbs: "/tmp/project",
-        timeRange: "7d",
-      }),
-    ).toBe(
-      '( cd /tmp/project && find . -type f ! -path "*/.git/*" -mtime -7 -print0 | xargs -0 -r rg -n -F -i --hidden -- hello )',
-    );
-  });
-
-  it("lists glob matches first so time filtering still respects include/exclude", () => {
-    const mtime = findMtimePredicate("today");
-    expect(
-      toRgShareCommand({
-        query: "hello",
-        regex: true,
-        caseSensitive: true,
-        wordMatch: true,
-        hidden: true,
-        rootAbs: "/tmp/project",
-        globInclude: ["*.ts"],
-        globExclude: ["*.test.ts"],
-        timeRange: "today",
-      }),
-    ).toBe(
-      `( cd /tmp/project && rg --null --files --hidden --glob '*.ts' --glob '!*.test.ts' . | xargs -0 -r sh -c 'find "$@" -type f ! -path "*/.git/*" ${mtime} -print0' _ | xargs -0 -r rg -n -s -w --hidden -- hello )`,
+      "rg -n -F -s --hidden -- Hello /tmp/project/src/a.ts | rg -i -- 'world.*'",
     );
   });
 
   it("emits a find predicate for every time gear", () => {
-    expect(findMtimePredicate("1h")).toBe("-mmin -60");
     expect(findMtimePredicate("24h")).toBe("-mmin -1440");
     expect(findMtimePredicate("7d")).toBe("-mtime -7");
-    expect(findMtimePredicate("30d")).toBe("-mtime -30");
     expect(findMtimePredicate("today")).toContain("date +%H");
-  });
-
-  it("excludes tree picks via globs from the project root", () => {
-    expect(
-      toRgShareCommand({
-        query: "hello",
-        regex: false,
-        caseSensitive: false,
-        wordMatch: false,
-        hidden: true,
-        rootAbs: "/tmp/project",
-        relPaths: ["."],
-        globExclude: ["skip.txt", "logs/**"],
-      }),
-    ).toBe(
-      "( cd /tmp/project && rg -n -F -i --hidden --glob '!skip.txt' --glob '!logs/**' -- hello . )",
-    );
   });
 
   it("joins a posix root with a relative hit path", () => {

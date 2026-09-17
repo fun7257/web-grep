@@ -5,9 +5,22 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"web-grep/internal/config"
 )
+
+func TestDecodeLineCutsUTF8OnRuneBoundary(t *testing.T) {
+	truncated := false
+	raw := []byte(strings.Repeat("你", 30_000) + "\n")
+	got := decodeLine(raw, &truncated)
+	if !truncated {
+		t.Fatal("expected truncation")
+	}
+	if !utf8.ValidString(got) {
+		t.Fatal("truncated line must stay valid utf8")
+	}
+}
 
 func TestReadSliceWindows(t *testing.T) {
 	root := t.TempDir()

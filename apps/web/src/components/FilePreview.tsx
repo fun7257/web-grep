@@ -6,7 +6,7 @@ import {
   kindLabel,
   type FileKind,
 } from "../formats/detect.ts";
-import { mappedSelection } from "../formats/jsonPieces.ts";
+import { JSON_INDENT, mappedSelection } from "../formats/jsonPieces.ts";
 import { mappedMarkdownSelection } from "../formats/markdownPieces.ts";
 import { copyText } from "../copyText.ts";
 import { DEFAULT_HL_OPTS, type HlOpts } from "../highlight.ts";
@@ -32,7 +32,7 @@ function previewCopyText(
   }
   if (detectLineKind(path, text) === "json") {
     try {
-      return JSON.stringify(JSON.parse(text.trim()), null, 2);
+      return JSON.stringify(JSON.parse(text.trim()), null, JSON_INDENT);
     } catch {
       return text;
     }
@@ -136,7 +136,7 @@ export function FilePreview({
   onCopyNotice,
 }: {
   hit: SseHit | null;
-  terms?: string[];
+  terms?: import("../highlight.ts").HlTermInput[];
   opts?: HlOpts;
   onShare?: () => void;
   onOpenContext?: () => void;
@@ -180,7 +180,7 @@ function FilePreviewReady({
   onCopyNotice,
 }: {
   hit: SseHit;
-  terms: string[];
+  terms: import("../highlight.ts").HlTermInput[];
   opts: HlOpts;
   onShare?: () => void;
   onOpenContext?: () => void;

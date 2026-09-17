@@ -18,6 +18,7 @@ import (
 
 type Request struct {
 	Query         string
+	AndTerms      []rg.AndTerm
 	Path          string
 	GlobInclude   []string
 	GlobAnd       []string
@@ -274,6 +275,28 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		return
 	}
 
+	listed, listErr := ListNewerFiles(
+		s.Cfg.RootReal,
+		pre.RelativeDir,
+		pre.Request.MtimeAfter,
+		pre.Request.Hidden,
+		s.Cfg.FollowSymlinks,
+		s.Cfg.AllowSecrets,
+		pre.GlobExclude,
+	)
+	if listErr != nil {
+		logx.Error("file list failed", map[string]any{"searchId": pre.SearchID, "err": listErr.Error()})
+		sendError(listErr.Error())
+		return
+	}
+	listed = sandbox.FilterByGlobs(listed, pre.GlobInclude, nil)
+	if len(pre.GlobAnd) > 0 {
+		listed = sandbox.FilterByGlobs(listed, pre.GlobAnd, nil)
+	}
+	if len(listed) == 0 {
+		sendDone(false, false, false, 0, 0)
+		return
+	}
 	in := rg.Input{
 		RootReal:       s.Cfg.RootReal,
 		RelativeDir:    pre.RelativeDir,
@@ -282,52 +305,19 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		CaseSensitive:  pre.Request.CaseSensitive,
 		WordMatch:      pre.Request.WordMatch,
 		Hidden:         pre.Request.Hidden,
-		GlobInclude:    pre.GlobInclude,
-		GlobExclude:    pre.GlobExclude,
 		AllowSecrets:   s.Cfg.AllowSecrets,
 		FollowSymlinks: s.Cfg.FollowSymlinks,
 		NoIgnore:       s.Cfg.NoIgnore,
 		SearchZip:      s.Cfg.SearchZip,
 		Threads:        s.Cfg.Threads,
+		AndTerms:       pre.Request.AndTerms,
+		LimitToList:    true,
+		FileList:       listed,
 	}
-	needList := !pre.Request.MtimeAfter.IsZero() ||
-		len(pre.GlobInclude) > 0 ||
-		len(pre.GlobAnd) > 0 ||
-		len(pre.GlobExclude) > 0
-	if needList {
-		listed, listErr := ListNewerFiles(
-			s.Cfg.RootReal,
-			pre.RelativeDir,
-			pre.Request.MtimeAfter,
-			pre.Request.Hidden,
-			s.Cfg.FollowSymlinks,
-			s.Cfg.AllowSecrets,
-		)
-		if listErr != nil {
-			logx.Error("mtime walk failed", map[string]any{"searchId": pre.SearchID, "err": listErr.Error()})
-			sendError(listErr.Error())
-			return
-		}
-		if len(listed) == 0 {
-			sendDone(false, false, false, 0, 0)
-			return
-		}
-		// rg ignores --glob on explicit paths; tree picks must be applied here.
-		listed = sandbox.FilterByGlobs(listed, pre.GlobInclude, pre.GlobExclude)
-		if len(pre.GlobAnd) > 0 {
-			listed = sandbox.FilterByGlobs(listed, pre.GlobAnd, nil)
-		}
-		if len(listed) == 0 {
-			sendDone(false, false, false, 0, 0)
-			return
-		}
-		in.LimitToList = true
-		in.FileList = listed
-		_ = stream.Event("progress", map[string]any{
-			"files":   len(listed),
-			"matches": 0,
-		})
-	}
+	_ = stream.Event("progress", map[string]any{
+		"files":   len(listed),
+		"matches": 0,
+	})
 
 	matchCount := 0
 	files := map[string]struct{}{}

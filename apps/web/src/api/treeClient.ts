@@ -8,18 +8,30 @@ import { readJsonError, SearchHttpError } from "./searchClient.ts";
 
 export type { TreeEntry, TreeListing };
 
+function applyTreeFilter(
+  params: URLSearchParams,
+  mtimeAfter?: number,
+  exclude: string[] = [],
+): void {
+  for (const glob of exclude) {
+    params.append("exclude", glob);
+  }
+  if (mtimeAfter !== undefined) {
+    params.set("mtimeAfter", String(mtimeAfter));
+  }
+}
+
 export async function fetchTree(
   path: string,
   signal: AbortSignal,
   mtimeAfter?: number | undefined,
+  exclude: string[] = [],
 ): Promise<TreeListing> {
   const params = new URLSearchParams();
   if (path !== "") {
     params.set("path", path);
   }
-  if (mtimeAfter !== undefined) {
-    params.set("mtimeAfter", String(mtimeAfter));
-  }
+  applyTreeFilter(params, mtimeAfter, exclude);
   const qs = params.toString();
   const res = await fetch(qs === "" ? "/api/tree" : `/api/tree?${qs}`, {
     headers: apiHeaders(),
@@ -42,14 +54,13 @@ export async function fetchFileCount(
   path: string,
   signal: AbortSignal,
   mtimeAfter?: number | undefined,
+  exclude: string[] = [],
 ): Promise<number> {
   const params = new URLSearchParams();
   if (path !== "") {
     params.set("path", path);
   }
-  if (mtimeAfter !== undefined) {
-    params.set("mtimeAfter", String(mtimeAfter));
-  }
+  applyTreeFilter(params, mtimeAfter, exclude);
   const qs = params.toString();
   const res = await fetch(qs === "" ? "/api/count" : `/api/count?${qs}`, {
     headers: apiHeaders(),

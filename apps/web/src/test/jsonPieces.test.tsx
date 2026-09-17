@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildJsonPieces,
   compactFromPieces,
+  JSON_INDENT,
   mapCompactToOriginal,
   mappedSelection,
 } from "../formats/jsonPieces.ts";
@@ -19,7 +20,8 @@ describe("buildJsonPieces", () => {
     expect(compactFromPieces(pieces ?? [])).toBe(original);
     expect(pieces?.some((piece) => piece.kind === "inj")).toBe(true);
     const pretty = (pieces ?? []).map((piece) => piece.text).join("");
-    expect(pretty).toBe(JSON.stringify(JSON.parse(original), null, 2));
+    expect(pretty).toBe(JSON.stringify(JSON.parse(original), null, JSON_INDENT));
+    expect(pretty).toContain("\n    \"");
   });
 
   it("maps a compact selection back onto compact source", () => {

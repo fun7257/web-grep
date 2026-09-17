@@ -7,6 +7,13 @@ import (
 	"web-grep/internal/sandbox"
 )
 
+type AndTerm struct {
+	Query         string
+	Regex         bool
+	CaseSensitive bool
+	WordMatch     bool
+}
+
 type Input struct {
 	RootReal       string
 	RelativeDir    string
@@ -24,6 +31,7 @@ type Input struct {
 	Threads        int
 	FileList       []string
 	LimitToList    bool
+	AndTerms       []AndTerm
 }
 
 func BuildArgv(in Input) ([]string, error) {
@@ -36,7 +44,6 @@ func BuildArgv(in Input) ([]string, error) {
 		"--line-number",
 		"--with-filename",
 		"--no-heading",
-		"--glob", "!.git/**",
 	}
 	if in.Threads > 0 {
 		argv = append(argv, "--threads", fmt.Sprintf("%d", in.Threads))
@@ -64,18 +71,20 @@ func BuildArgv(in Input) ([]string, error) {
 	if in.SearchZip {
 		argv = append(argv, "--search-zip")
 	}
-	for _, g := range in.GlobInclude {
-		argv = append(argv, "--glob", g)
-	}
-	for _, g := range in.GlobExclude {
-		argv = append(argv, "--glob", "!"+g)
-	}
-	for _, g := range sandbox.DenylistRgGlobs(in.AllowSecrets, len(in.GlobInclude) > 0) {
-		argv = append(argv, "--glob", g)
+	if !in.LimitToList {
+		argv = append(argv, "--glob", "!.git/**")
+		for _, g := range in.GlobInclude {
+			argv = append(argv, "--glob", g)
+		}
+		for _, g := range in.GlobExclude {
+			argv = append(argv, "--glob", "!"+g)
+		}
+		for _, g := range sandbox.DenylistRgGlobs(in.AllowSecrets, len(in.GlobInclude) > 0) {
+			argv = append(argv, "--glob", g)
+		}
 	}
 	// -e makes every remaining positional a PATH, so a pre-filtered file
-	// list never searches the rest of the tree. rg ignores --glob on those
-	// explicit paths (caller must filter FileList). rg 15 has no --files-from.
+	// list never searches the rest of the tree. rg 15 has no --files-from.
 	if in.LimitToList {
 		argv = append(argv, "-e", in.Query, "--")
 		return argv, nil
@@ -86,4 +95,20 @@ func BuildArgv(in Input) ([]string, error) {
 		argv = append(argv, "--", in.Query, in.RelativeDir)
 	}
 	return argv, nil
+}
+
+func BuildFilterArgv(term AndTerm) []string {
+	argv := []string{"--no-config"}
+	if !term.Regex {
+		argv = append(argv, "-F")
+	}
+	if term.CaseSensitive {
+		argv = append(argv, "-s")
+	} else {
+		argv = append(argv, "-i")
+	}
+	if term.WordMatch {
+		argv = append(argv, "-w")
+	}
+	return append(argv, "--", term.Query)
 }

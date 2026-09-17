@@ -64,7 +64,7 @@ docker run -d --name web-grep --restart unless-stopped \
   -p 8787:8787 \
   -v "$PWD/config.deploy.yaml:/app/config.yaml" \
   -v /要搜索的宿主机目录:/data:ro \
-  web-grep:v0.1.6
+  web-grep:v0.1.7
 ```
 
 ```bash
@@ -74,7 +74,7 @@ docker rm -f web-grep
 
 改端口：`-p 9000:8787`。不要加 `--init`。不要加 `-e WEB_GREP_TOKEN`，否则会盖掉 yaml。
 
-导出镜像：`docker save web-grep:v0.1.6 | gzip > web-grep-v0.1.6.tar.gz`，对端 `gunzip -c web-grep-v0.1.6.tar.gz | docker load`。
+导出镜像：`docker save web-grep:v0.1.7 | gzip > web-grep-v0.1.7.tar.gz`，对端 `gunzip -c web-grep-v0.1.7.tar.gz | docker load`。
 
 ## 注意
 
@@ -84,4 +84,4 @@ docker rm -f web-grep
 - 时间范围、搜索历史在浏览器里。搜索次数由服务端记在配置文件同目录的 `search-count`（单文件挂载 config 时写在容器 `/app/search-count`，换容器会清零，需要持久化请把该文件或整个 `/app` 配置目录一起挂出来）。
 - 多条件 AND 在页面上加框，空框不搜；空格算进单条条件。
 - 树是空的或权限错误：确认 `WEB_GREP_DATA` 存在且该 uid 可读。
-- 本仓库当前推荐镜像标签 `web-grep:v0.1.6`（需从本提交重新 `docker build`）。Compose 本地构建仍用 `web-grep:test`。
+- 本仓库当前推荐镜像标签 `web-grep:v0.1.7`（需从本提交重新 `docker build`）。Compose 本地构建仍用 `web-grep:test`。

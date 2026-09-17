@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { pushSearchNav, sameSearchNav } from "../searchNav.ts";
 
-const a = {
-  parts: ["hello"],
-  timeRange: "today" as const,
+const term = {
+  value: "hello",
   caseSensitive: false,
   wordMatch: false,
   regex: false,
 };
-const b = { ...a, parts: ["hello", "world"] };
+const a = {
+  parts: [term],
+  timeRange: "today" as const,
+};
+const b = {
+  ...a,
+  parts: [term, { ...term, value: "world" }],
+};
 
 describe("searchNav", () => {
   it("pushes and drops the forward stack", () => {
@@ -19,9 +25,12 @@ describe("searchNav", () => {
     const back = { stack: twice.stack, index: 0 };
     const branch = pushSearchNav(back.stack, back.index, {
       ...a,
-      parts: ["other"],
+      parts: [{ ...term, value: "other" }],
     });
-    expect(branch.stack.map((item) => item.parts[0])).toEqual(["hello", "other"]);
+    expect(branch.stack.map((item) => item.parts[0]?.value)).toEqual([
+      "hello",
+      "other",
+    ]);
     expect(branch.index).toBe(1);
   });
 

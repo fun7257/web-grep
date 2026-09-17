@@ -196,7 +196,7 @@ export function annotateMarkdownHtml(
   html: string,
   original: string,
   opts: HlOpts,
-  terms: string[],
+  terms: import("../highlight.ts").HlTermInput[],
 ): string {
   const spans = highlightSpans(original, terms, opts);
   let cursor = 0;

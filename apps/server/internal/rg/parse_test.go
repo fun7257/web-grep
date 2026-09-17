@@ -3,7 +3,9 @@ package rg
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestParseMatchLine(t *testing.T) {
@@ -28,6 +30,37 @@ func TestUtf16OffsetsCJK(t *testing.T) {
 	}
 	if utf8ByteOffsetToUTF16(s, 6) != 2 {
 		t.Fatal(utf8ByteOffsetToUTF16(s, 6))
+	}
+}
+
+func TestParseMatchLineDecodesBytesField(t *testing.T) {
+	payload := []byte(`{"type":"match","data":{"path":{"text":"a.log"},"lines":{"bytes":"aGVsbG8gd29ybGQK"},"line_number":2,"submatches":[{"start":0,"end":5}]}}`)
+	m, ok := ParseMatchLine(payload)
+	if !ok || m.Text != "hello world\n" {
+		t.Fatalf("%+v %v", m, ok)
+	}
+}
+
+func TestToRelativeHitCutsUTF8OnRuneBoundary(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "ok.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := strings.Repeat("你", 30_000) + "\n"
+	m := Match{Path: "ok.txt", Line: 1, Text: text}
+	hit, ok := ToRelativeHit(root, false, m)
+	if !ok {
+		t.Fatal("hit")
+	}
+	if !utf8.ValidString(hit.Text) {
+		t.Fatal("truncated text must stay valid utf8")
+	}
+	if strings.HasSuffix(hit.Text, "\n") {
+		t.Fatal("newline should be stripped")
 	}
 }
 

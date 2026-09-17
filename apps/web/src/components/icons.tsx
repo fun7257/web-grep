@@ -110,8 +110,13 @@ export function IconPlus() {
 export function IconAnd() {
   return (
     <svg className="icon icon-and" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="5.6" cy="8" r="3.15" {...stroke} />
-      <circle cx="10.4" cy="8" r="3.15" {...stroke} />
+      <path
+        d="M2.4 3.2h11.2L9.3 8.4v3.4L6.7 13.4V8.4z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -278,6 +283,22 @@ export function IconExpand() {
   );
 }
 
+export function IconFoldAll() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 3.4h10M5.4 8.9 8 6.3 10.6 8.9M3 12.6h10" {...stroke} />
+    </svg>
+  );
+}
+
+export function IconUnfoldAll() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 3.4h10M5.4 6.1 8 8.7 10.6 6.1M3 12.6h10" {...stroke} />
+    </svg>
+  );
+}
+
 export function IconShare() {
   return (
     <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -285,24 +306,6 @@ export function IconShare() {
       <circle cx="12.25" cy="12.5" r="1.65" {...stroke} />
       <circle cx="3.75" cy="8" r="1.65" {...stroke} />
       <path d="M5.3 7.25 10.7 4.25M5.3 8.75 10.7 11.75" {...stroke} />
-    </svg>
-  );
-}
-
-export function IconTarget() {
-  return (
-    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="5.2" {...stroke} />
-      <circle cx="8" cy="8" r="1.7" {...stroke} />
-    </svg>
-  );
-}
-
-export function IconMinusCircle() {
-  return (
-    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="5.2" {...stroke} />
-      <path d="M5.4 8h5.2" {...stroke} />
     </svg>
   );
 }

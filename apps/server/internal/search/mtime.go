@@ -10,7 +10,8 @@ import (
 	"web-grep/internal/sandbox"
 )
 
-func ListNewerFiles(rootReal, rel string, after time.Time, hidden, follow, allowSecrets bool) ([]string, error) {
+func ListNewerFiles(rootReal, rel string, after time.Time, hidden, follow, allowSecrets bool, exclude []string) ([]string, error) {
+	excluded := sandbox.NewGlobMatcher(exclude)
 	start := rootReal
 	if rel != "" && rel != "." {
 		start = filepath.Join(rootReal, filepath.FromSlash(rel))
@@ -45,6 +46,9 @@ func ListNewerFiles(rootReal, rel string, after time.Time, hidden, follow, allow
 			return nil
 		}
 		if d.IsDir() {
+			return nil
+		}
+		if excluded(posix) {
 			return nil
 		}
 		info, infoErr := d.Info()

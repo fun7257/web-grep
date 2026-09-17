@@ -3,6 +3,7 @@ import {
   pickMark,
   picksToGlobs,
   picksToSearchGlobs,
+  prunePicksByExclude,
   togglePick,
 } from "../treePicks.ts";
 
@@ -111,84 +112,57 @@ describe("picksToSearchGlobs", () => {
   const file = [{ path: "ok.txt", dir: false }];
   const folder = [{ path: "logs", dir: true }];
 
-  it("uses current picks for include and nothing after clear", () => {
-    expect(picksToSearchGlobs(file, "include")).toEqual({
+  it("maps picks to globInclude and typed patterns to globExclude", () => {
+    expect(picksToSearchGlobs(file)).toEqual({
       globInclude: ["ok.txt"],
-      globAnd: [],
       globExclude: [],
     });
-    expect(picksToSearchGlobs(folder, "include")).toEqual({
+    expect(picksToSearchGlobs(folder)).toEqual({
       globInclude: ["logs/**"],
-      globAnd: [],
       globExclude: [],
     });
-    expect(picksToSearchGlobs([], "all")).toEqual({
+    expect(picksToSearchGlobs([])).toEqual({
       globInclude: [],
-      globAnd: [],
       globExclude: [],
     });
-    expect(picksToSearchGlobs(file, "all")).toEqual({
+    expect(picksToSearchGlobs(file, [], ["*.test.ts"])).toEqual({
       globInclude: ["ok.txt"],
-      globAnd: [],
-      globExclude: [],
-    });
-  });
-
-  it("puts picks in globExclude when excluding", () => {
-    expect(picksToSearchGlobs(file, "exclude")).toEqual({
-      globInclude: [],
-      globAnd: [],
-      globExclude: ["ok.txt"],
-    });
-  });
-
-  it("does not keep a previous range when picks are empty", () => {
-    expect(picksToSearchGlobs([], "include", [], ["stale.txt"])).toEqual({
-      globInclude: ["stale.txt"],
-      globAnd: [],
-      globExclude: [],
-    });
-    expect(picksToSearchGlobs([], "all")).toEqual({
-      globInclude: [],
-      globAnd: [],
-      globExclude: [],
-    });
-  });
-
-  it("ANDs manual include with tree picks instead of ORing", () => {
-    expect(
-      picksToSearchGlobs(file, "include", [], ["*.ts"], ["*.test.ts"]),
-    ).toEqual({
-      globInclude: ["ok.txt"],
-      globAnd: ["*.ts"],
       globExclude: ["*.test.ts"],
     });
-    expect(
-      picksToSearchGlobs(folder, "include", [], ["src/**"], ["skip.ts"]),
-    ).toEqual({
-      globInclude: ["logs/**"],
-      globAnd: ["src/**"],
-      globExclude: ["skip.ts"],
-    });
   });
 
-  it("keeps manual include/exclude when extraInclude pins a share path", () => {
-    expect(
-      picksToSearchGlobs(file, "include", ["src/a.ts"], ["*.ts"], ["*.test.ts"]),
-    ).toEqual({
+  it("pins extraInclude over picks and keeps typed exclude", () => {
+    expect(picksToSearchGlobs(file, ["src/a.ts"], ["*.test.ts"])).toEqual({
       globInclude: ["src/a.ts"],
-      globAnd: ["*.ts"],
       globExclude: ["*.test.ts"],
     });
   });
+});
 
-  it("keeps manual exclude alongside exclude-scope picks", () => {
+describe("prunePicksByExclude", () => {
+  it("drops file picks that match exclude globs", () => {
+    const picks = [
+      { path: "ok.txt", dir: false },
+      { path: "skip.log", dir: false },
+      { path: "dir/app.log", dir: false },
+    ];
+    expect(prunePicksByExclude(picks, ["*.log"])).toEqual([
+      { path: "ok.txt", dir: false },
+    ]);
+  });
+
+  it("drops a folder pick when exclude covers the whole folder", () => {
     expect(
-      picksToSearchGlobs(file, "exclude", [], ["*.ts"], ["skip.ts"]),
-    ).toEqual({
-      globInclude: ["*.ts"],
-      globAnd: [],
-      globExclude: ["ok.txt", "skip.ts"],
-    });
+      prunePicksByExclude([{ path: "logs", dir: true }], ["logs/**"]),
+    ).toEqual([]);
+    expect(
+      prunePicksByExclude([{ path: "logs", dir: true }], ["*.log"]),
+    ).toEqual([{ path: "logs", dir: true }]);
+  });
+
+  it("returns the same array when nothing is excluded", () => {
+    const picks = [{ path: "ok.txt", dir: false }];
+    expect(prunePicksByExclude(picks, [])).toBe(picks);
+    expect(prunePicksByExclude(picks, ["*.log"])).toBe(picks);
   });
 });

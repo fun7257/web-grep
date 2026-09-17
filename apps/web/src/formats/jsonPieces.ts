@@ -1,3 +1,5 @@
+export const JSON_INDENT = 4;
+
 export type JsonTok = "key" | "str" | "num" | "bool" | "null" | "punct";
 
 export type JsonPiece = {
@@ -138,7 +140,7 @@ export function buildJsonPieces(original: string): JsonPiece[] | null {
   } catch {
     return null;
   }
-  const pretty = JSON.stringify(parsed, null, 2);
+  const pretty = JSON.stringify(parsed, null, JSON_INDENT);
   const origToks = tokenizeJson(original).filter(
     (token) => token.type !== "ws",
   );

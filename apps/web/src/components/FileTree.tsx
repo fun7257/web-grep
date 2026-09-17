@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { SearchHttpError } from "../api/searchClient.ts";
 import { fetchFileCount, fetchTree, type TreeEntry } from "../api/treeClient.ts";
 import { formatSearchCount } from "../searchCount.ts";
@@ -9,6 +9,7 @@ import {
   timeRangeMsgKey,
   type TimeRange,
 } from "../timeRange.ts";
+import { matchesAnyGlob, parseGlobs } from "../globs.ts";
 import { pickMark, type TreePick } from "../treePicks.ts";
 import {
   BrandMark,
@@ -16,11 +17,10 @@ import {
   IconCheck,
   IconChevron,
   IconDash,
+  IconExpand,
   IconHistory,
   IconLogout,
-  IconMinusCircle,
   IconPanel,
-  IconTarget,
   IconX,
 } from "./icons.tsx";
 import { LocaleToggle, ThemeToggle } from "./StatusBar.tsx";
@@ -38,6 +38,7 @@ type NodeProps = {
   activePath: string | null;
   picks: TreePick[];
   mtimeAfter?: number | undefined;
+  excludeGlobs?: string[];
   parentListed?: TreeEntry[] | null;
   coveringListed?: TreeEntry[] | null;
   onTogglePick: (
@@ -45,6 +46,7 @@ type NodeProps = {
     listedChildren?: TreeEntry[] | null,
     coveringChildren?: TreeEntry[] | null,
   ) => void;
+  onOpenFile?: (path: string) => void;
   onAuthFailure?: (err: SearchHttpError) => void;
 };
 
@@ -54,11 +56,14 @@ function TreeNode({
   activePath,
   picks,
   mtimeAfter,
+  excludeGlobs = [],
   parentListed = null,
   coveringListed = null,
   onTogglePick,
+  onOpenFile,
   onAuthFailure,
 }: NodeProps) {
+  const { t } = useLocale();
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -70,7 +75,7 @@ function TreeNode({
     let cancelled = false;
     const ac = new AbortController();
     setLoading(true);
-    void fetchTree(entry.path, ac.signal, mtimeAfter)
+    void fetchTree(entry.path, ac.signal, mtimeAfter, excludeGlobs)
       .then((listing) => {
         if (!cancelled) {
           setChildren(listing.entries);
@@ -94,7 +99,14 @@ function TreeNode({
       cancelled = true;
       ac.abort();
     };
-  }, [entry.dir, entry.path, expanded, mtimeAfter, onAuthFailure]);
+  }, [
+    entry.dir,
+    entry.path,
+    excludeGlobs,
+    expanded,
+    mtimeAfter,
+    onAuthFailure,
+  ]);
 
   const expand = (): void => {
     if (!entry.dir) {
@@ -169,6 +181,21 @@ function TreeNode({
           </span>
           <span className="tree-name">{entry.name}</span>
         </button>
+        {!entry.dir ? (
+          <button
+            type="button"
+            className="tree-open-file"
+            title={t("treeOpenFile")}
+            aria-label={t("treeOpenFile")}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onOpenFile?.(entry.path);
+            }}
+          >
+            <IconExpand />
+          </button>
+        ) : null}
       </div>
       {entry.dir && expanded ? (
         <div className="tree-children">
@@ -188,6 +215,7 @@ function TreeNode({
                 activePath={activePath}
                 picks={picks}
                 mtimeAfter={mtimeAfter}
+                excludeGlobs={excludeGlobs}
                 parentListed={children}
                 coveringListed={
                   mark === "on" && entry.dir && children !== null
@@ -195,6 +223,7 @@ function TreeNode({
                     : coveringListed
                 }
                 onTogglePick={onTogglePick}
+                {...(onOpenFile !== undefined ? { onOpenFile } : {})}
                 {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
               />
             ))
@@ -211,12 +240,13 @@ export function FileTree({
   rootLabel,
   activePath,
   picks,
-  scope,
   style,
   onTogglePick,
-  onSearchIn,
-  onSearchOut,
+  onOpenFile,
   onClear,
+  excludeGlobs = "",
+  onExcludeGlobsChange,
+  onExcludeApply,
   onAuthFailure,
   sessionReady = true,
   canLogout = false,
@@ -230,16 +260,17 @@ export function FileTree({
   rootLabel: string;
   activePath: string | null;
   picks: TreePick[];
-  scope: "all" | "include" | "exclude";
   style?: React.CSSProperties | undefined;
   onTogglePick: (
     entry: TreeEntry,
     listedChildren?: TreeEntry[] | null,
     coveringChildren?: TreeEntry[] | null,
   ) => void;
-  onSearchIn: () => void;
-  onSearchOut: () => void;
+  onOpenFile?: (path: string) => void;
   onClear: () => void;
+  excludeGlobs?: string;
+  onExcludeGlobsChange?: (value: string) => void;
+  onExcludeApply?: (value: string) => void;
   onAuthFailure?: (err: SearchHttpError) => void;
   sessionReady?: boolean;
   canLogout?: boolean;
@@ -254,18 +285,39 @@ export function FileTree({
   const [tick, setTick] = useState(0);
   const [fileCount, setFileCount] = useState(0);
   const n = fileCount;
-  const canUse = picks.length > 0;
+  const canClear =
+    picks.length > 0 || excludeGlobs.trim() !== "" || timeRange !== null;
   const label = rootLabel || t("treeTitle");
   const [mtimeAfter, setMtimeAfter] = useState<number | undefined>(() =>
     timeRange !== null ? mtimeAfterMs(timeRange) : undefined,
   );
+  const [excludeFilter, setExcludeFilter] = useState(excludeGlobs);
+  const excludeInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setMtimeAfter(timeRange !== null ? mtimeAfterMs(timeRange) : undefined);
   }, [timeRange]);
 
+  const applyExclude = (raw: string): void => {
+    setExcludeFilter(raw);
+    onExcludeApply?.(raw);
+  };
+
   useEffect(() => {
-    const files = picks.filter((item) => !item.dir);
+    const node = excludeInputRef.current;
+    if (node !== null && document.activeElement === node) {
+      return;
+    }
+    applyExclude(excludeGlobs);
+  }, [excludeGlobs]);
+
+  const excludeList = parseGlobs(excludeFilter);
+
+  useEffect(() => {
+    const exclude = parseGlobs(excludeFilter);
+    const files = picks.filter(
+      (item) => !item.dir && !matchesAnyGlob(item.path, exclude),
+    );
     const dirs = picks.filter((item) => item.dir);
     if (dirs.length === 0) {
       setFileCount(files.length);
@@ -273,7 +325,9 @@ export function FileTree({
     }
     const ac = new AbortController();
     void Promise.all(
-      dirs.map((item) => fetchFileCount(item.path, ac.signal, mtimeAfter)),
+      dirs.map((item) =>
+        fetchFileCount(item.path, ac.signal, mtimeAfter, exclude),
+      ),
     )
       .then((counts) => {
         setFileCount(
@@ -289,7 +343,7 @@ export function FileTree({
     return () => {
       ac.abort();
     };
-  }, [mtimeAfter, picks]);
+  }, [excludeFilter, mtimeAfter, picks]);
 
   useEffect(() => {
     if (!sessionReady) {
@@ -298,6 +352,7 @@ export function FileTree({
       return;
     }
     let cancelled = false;
+    const exclude = parseGlobs(excludeFilter);
     void (async () => {
       for (let attempt = 0; attempt < 16 && !cancelled; attempt++) {
         try {
@@ -305,6 +360,7 @@ export function FileTree({
             "",
             new AbortController().signal,
             mtimeAfter,
+            exclude,
           );
           if (cancelled) {
             return;
@@ -333,7 +389,7 @@ export function FileTree({
     return () => {
       cancelled = true;
     };
-  }, [mtimeAfter, onAuthFailure, sessionReady, t, tick]);
+  }, [excludeFilter, mtimeAfter, onAuthFailure, sessionReady, t, tick]);
 
   return (
     <aside
@@ -364,41 +420,65 @@ export function FileTree({
               <IconPanel open />
             </button>
           </div>
-          <div className="tree-actions">
-            <div className="tree-picked">
-              <span className="tree-picked-dot" />
-              {t("treePicked", { n })}
-            </div>
-            <div className="tree-seg" role="group">
+          <div className="tree-filters">
+            <div className="tree-actions">
+              <div className="tree-picked">
+                <span className="tree-picked-dot" />
+                {t("treePicked", { n })}
+              </div>
               <button
                 type="button"
-                aria-pressed={scope === "include"}
-                disabled={!canUse}
-                title={t("treeSearchIn")}
-                onClick={onSearchIn}
-              >
-                <IconTarget />
-                <span>{t("treeSearchIn")}</span>
-              </button>
-              <button
-                type="button"
-                aria-pressed={scope === "exclude"}
-                disabled={!canUse}
-                title={t("treeSearchOut")}
-                onClick={onSearchOut}
-              >
-                <IconMinusCircle />
-                <span>{t("treeSearchOut")}</span>
-              </button>
-              <button
-                type="button"
-                disabled={!canUse}
+                className="tree-clear"
+                disabled={!canClear}
                 title={t("treeClear")}
                 onClick={onClear}
               >
                 <IconX />
                 <span>{t("treeClear")}</span>
               </button>
+            </div>
+            <label className="filter-field">
+              <span className="filter-label">{t("excludeGlobLabel")}</span>
+              <input
+                ref={excludeInputRef}
+                type="text"
+                className="filter-input"
+                placeholder={t("excludeGlobs")}
+                value={excludeGlobs}
+                onChange={(event) => onExcludeGlobsChange?.(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") {
+                    return;
+                  }
+                  event.preventDefault();
+                  applyExclude(excludeGlobs);
+                  event.currentTarget.blur();
+                }}
+                onBlur={() => {
+                  applyExclude(excludeGlobs);
+                }}
+              />
+            </label>
+            <div className="tree-time" title={t("timeRangeHint")}>
+              <span className="tree-time-label">
+                <IconHistory />
+                {t("timeRange")}
+              </span>
+              <div className="tree-time-seg" role="group" aria-label={t("timeRange")}>
+                {TIME_RANGES.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    aria-pressed={timeRange === id}
+                    title={t("timeRangeHint")}
+                    onClick={() => {
+                      onTimeRange?.(timeRange === id ? null : id);
+                    }}
+                  >
+                    {t(timeRangeMsgKey(id))}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           <div className="tree-scroll">
@@ -425,7 +505,7 @@ export function FileTree({
               <div className="tree-empty">
                 <IconFolderEmpty />
                 <p>
-                  {timeRange !== null
+                  {timeRange !== null || excludeList.length > 0
                     ? t("treeEmptyFiltered")
                     : t("treeEmpty")}
                 </p>
@@ -433,39 +513,20 @@ export function FileTree({
             ) : (
               root.map((entry) => (
                 <TreeNode
-                  key={`${entry.path}:${mtimeAfter ?? "all"}`}
+                  key={`${entry.path}:${mtimeAfter ?? "all"}:${excludeFilter}`}
                   entry={entry}
                   depth={0}
                   activePath={activePath}
                   picks={picks}
                   mtimeAfter={mtimeAfter}
+                  excludeGlobs={excludeList}
                   parentListed={root}
                   onTogglePick={onTogglePick}
+                  {...(onOpenFile !== undefined ? { onOpenFile } : {})}
                   {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
                 />
               ))
             )}
-          </div>
-          <div className="tree-time" title={t("timeRangeHint")}>
-            <span className="tree-time-label">
-              <IconHistory />
-              {t("timeRange")}
-            </span>
-            <div className="tree-time-seg" role="group" aria-label={t("timeRange")}>
-              {TIME_RANGES.map((id) => (
-                <button
-                  key={id}
-                  type="button"
-                  aria-pressed={timeRange === id}
-                  title={t("timeRangeHint")}
-                  onClick={() => {
-                    onTimeRange?.(timeRange === id ? null : id);
-                  }}
-                >
-                  {t(timeRangeMsgKey(id))}
-                </button>
-              ))}
-            </div>
           </div>
           <div className="tree-foot">
             <ThemeToggle />

@@ -1,31 +1,51 @@
 import { isTimeRange, type TimeRange } from "./timeRange.ts";
 
-export type SearchHistoryItem = {
-  id: string;
-  parts: string[];
-  timeRange: TimeRange | null;
+export type HistoryPart = {
+  value: string;
   caseSensitive: boolean;
   wordMatch: boolean;
   regex: boolean;
 };
 
-export const SEARCH_HISTORY_KEY = "web-grep.searchHistory.v1";
+export type SearchHistoryItem = {
+  id: string;
+  parts: HistoryPart[];
+  timeRange: TimeRange | null;
+};
+
+export const SEARCH_HISTORY_KEY = "web-grep.searchHistory.v2";
 export const SEARCH_HISTORY_MAX = 20;
 
 function historyKey(item: {
-  parts: string[];
+  parts: HistoryPart[];
   timeRange: TimeRange | null;
-  caseSensitive: boolean;
-  wordMatch: boolean;
-  regex: boolean;
 }): string {
   return JSON.stringify({
     parts: item.parts,
     timeRange: item.timeRange,
-    caseSensitive: item.caseSensitive,
-    wordMatch: item.wordMatch,
-    regex: item.regex,
   });
+}
+
+function asHistoryPart(
+  value: unknown,
+  fallback: { caseSensitive: boolean; wordMatch: boolean; regex: boolean },
+): HistoryPart | null {
+  if (typeof value === "string" && value !== "") {
+    return { value, ...fallback };
+  }
+  if (typeof value !== "object" || value === null) {
+    return null;
+  }
+  const rec = value as Partial<HistoryPart>;
+  if (typeof rec.value !== "string" || rec.value === "") {
+    return null;
+  }
+  return {
+    value: rec.value,
+    caseSensitive: rec.caseSensitive === true,
+    wordMatch: rec.wordMatch === true,
+    regex: rec.regex === true,
+  };
 }
 
 export function loadSearchHistory(): SearchHistoryItem[] {
@@ -43,11 +63,22 @@ export function loadSearchHistory(): SearchHistoryItem[] {
       if (typeof row !== "object" || row === null) {
         continue;
       }
-      const rec = row as Partial<SearchHistoryItem>;
+      const rec = row as Partial<SearchHistoryItem> & {
+        caseSensitive?: boolean;
+        wordMatch?: boolean;
+        regex?: boolean;
+      };
       if (!Array.isArray(rec.parts) || rec.parts.length === 0) {
         continue;
       }
-      const parts = rec.parts.filter((p): p is string => typeof p === "string" && p !== "");
+      const fallback = {
+        caseSensitive: rec.caseSensitive === true,
+        wordMatch: rec.wordMatch === true,
+        regex: rec.regex === true,
+      };
+      const parts = rec.parts
+        .map((item) => asHistoryPart(item, fallback))
+        .filter((item): item is HistoryPart => item !== null);
       if (parts.length === 0) {
         continue;
       }
@@ -55,9 +86,6 @@ export function loadSearchHistory(): SearchHistoryItem[] {
         id: typeof rec.id === "string" ? rec.id : `h${out.length}`,
         parts,
         timeRange: isTimeRange(rec.timeRange) ? rec.timeRange : null,
-        caseSensitive: rec.caseSensitive === true,
-        wordMatch: rec.wordMatch === true,
-        regex: rec.regex === true,
       });
     }
     return out.slice(0, SEARCH_HISTORY_MAX);

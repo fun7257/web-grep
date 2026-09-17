@@ -39,7 +39,15 @@ type Listing struct {
 	Truncated bool    `json:"truncated"`
 }
 
-func List(rootReal, userRel string, allowSecrets bool, after time.Time) (Listing, error) {
+type Filter struct {
+	After   time.Time
+	Include []string
+	Exclude []string
+}
+
+func List(rootReal, userRel string, allowSecrets bool, filter Filter) (Listing, error) {
+	filter.Include = cleanGlobs(filter.Include)
+	filter.Exclude = cleanGlobs(filter.Exclude)
 	resolved, err := sandbox.ResolveUnderRoot(rootReal, userRel)
 	if err != nil {
 		return Listing{}, err
@@ -57,9 +65,11 @@ func List(rootReal, userRel string, allowSecrets bool, after time.Time) (Listing
 		return Listing{}, err
 	}
 
-	var recentDirs map[string]struct{}
-	if !after.IsZero() {
-		recentDirs = dirsWithRecentFiles(rootReal, resolved.Abs, after, allowSecrets)
+	after := filter.After
+	needDirFilter := !after.IsZero() || len(filter.Include) > 0 || len(filter.Exclude) > 0
+	var keepDirs map[string]struct{}
+	if needDirFilter {
+		keepDirs = dirsWithPassingFiles(rootReal, resolved.Abs, after, allowSecrets, filter.Include, filter.Exclude)
 	}
 
 	type ranked struct {
@@ -91,14 +101,14 @@ func List(rootReal, userRel string, allowSecrets bool, after time.Time) (Listing
 		if infoErr == nil {
 			mtime = info.ModTime()
 		}
-		if !after.IsZero() {
-			if isDir {
-				if _, ok := recentDirs[childRel]; !ok {
+		if isDir {
+			if needDirFilter {
+				if _, ok := keepDirs[childRel]; !ok {
 					continue
 				}
-			} else if infoErr != nil || mtime.Before(after) {
-				continue
 			}
+		} else if !filePasses(childRel, after, mtime, infoErr, filter.Include, filter.Exclude) {
+			continue
 		}
 		rankedEntries = append(rankedEntries, ranked{
 			entry: Entry{Name: name, Path: childRel, Dir: isDir},
@@ -126,7 +136,9 @@ func List(rootReal, userRel string, allowSecrets bool, after time.Time) (Listing
 	return Listing{Path: resolved.Rel, Entries: entries, Truncated: truncated}, nil
 }
 
-func CountFiles(rootReal, userRel string, allowSecrets bool, after time.Time) (int, error) {
+func CountFiles(rootReal, userRel string, allowSecrets bool, filter Filter) (int, error) {
+	filter.Include = cleanGlobs(filter.Include)
+	filter.Exclude = cleanGlobs(filter.Exclude)
 	resolved, err := sandbox.ResolveUnderRoot(rootReal, userRel)
 	if err != nil {
 		return 0, err
@@ -139,7 +151,11 @@ func CountFiles(rootReal, userRel string, allowSecrets bool, after time.Time) (i
 		if st.Mode()&os.ModeSymlink != 0 {
 			return 0, nil
 		}
-		if !after.IsZero() && st.ModTime().Before(after) {
+		posix := sandbox.ToPosixRel(resolved.Rel)
+		if posix == "" || posix == "." {
+			posix = filepath.Base(resolved.Abs)
+		}
+		if !filePasses(posix, filter.After, st.ModTime(), nil, filter.Include, filter.Exclude) {
 			return 0, nil
 		}
 		return 1, nil
@@ -180,7 +196,7 @@ func CountFiles(rootReal, userRel string, allowSecrets bool, after time.Time) (i
 		if infoErr != nil {
 			return nil
 		}
-		if !after.IsZero() && info.ModTime().Before(after) {
+		if !filePasses(posix, filter.After, info.ModTime(), infoErr, filter.Include, filter.Exclude) {
 			return nil
 		}
 		n++
@@ -189,7 +205,35 @@ func CountFiles(rootReal, userRel string, allowSecrets bool, after time.Time) (i
 	return n, err
 }
 
-func dirsWithRecentFiles(rootReal, startAbs string, after time.Time, allowSecrets bool) map[string]struct{} {
+func cleanGlobs(raw []string) []string {
+	out := make([]string, 0, len(raw))
+	for _, g := range raw {
+		clean, err := sandbox.SanitizeUserGlob(g)
+		if err != nil || clean == "" {
+			continue
+		}
+		out = append(out, clean)
+	}
+	return out
+}
+
+func filePasses(posix string, after time.Time, mtime time.Time, infoErr error, include, exclude []string) bool {
+	if infoErr != nil {
+		return false
+	}
+	if len(exclude) > 0 && len(sandbox.FilterByGlobs([]string{posix}, nil, exclude)) == 0 {
+		return false
+	}
+	if !after.IsZero() && mtime.Before(after) {
+		return false
+	}
+	if len(include) == 0 {
+		return true
+	}
+	return len(sandbox.FilterByGlobs([]string{posix}, include, nil)) == 1
+}
+
+func dirsWithPassingFiles(rootReal, startAbs string, after time.Time, allowSecrets bool, include, exclude []string) map[string]struct{} {
 	out := make(map[string]struct{})
 	_ = filepath.WalkDir(startAbs, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -223,7 +267,11 @@ func dirsWithRecentFiles(rootReal, startAbs string, after time.Time, allowSecret
 			return nil
 		}
 		info, infoErr := d.Info()
-		if infoErr != nil || info.ModTime().Before(after) {
+		mtime := time.Time{}
+		if infoErr == nil {
+			mtime = info.ModTime()
+		}
+		if !filePasses(posix, after, mtime, infoErr, include, exclude) {
 			return nil
 		}
 		dir := path.Dir(posix)

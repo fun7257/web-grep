@@ -13,6 +13,7 @@ import (
 
 	"web-grep/internal/config"
 	"web-grep/internal/sandbox"
+	"web-grep/internal/utf8cut"
 )
 
 const (
@@ -297,12 +298,12 @@ func decodeLine(raw []byte, truncated *bool) string {
 		}
 	}
 	text := string(body)
-	if !utf8.ValidString(text) {
-		text = strings.ToValidUTF8(text, "\uFFFD")
-	}
 	if len(text) > config.LineTextMaxChars {
 		*truncated = true
-		return text[:config.LineTextMaxChars]
+		return utf8cut.String(text, config.LineTextMaxChars)
+	}
+	if !utf8.ValidString(text) {
+		return strings.ToValidUTF8(text, "\uFFFD")
 	}
 	return text
 }

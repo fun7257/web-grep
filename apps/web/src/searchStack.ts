@@ -1,12 +1,21 @@
 import type { SearchRequestInput } from "@web-grep/shared";
 import type { TimeRange } from "./timeRange.ts";
 
+export type SearchModifiers = {
+  caseSensitive: boolean;
+  wordMatch: boolean;
+  regex: boolean;
+};
+
+export const DEFAULT_MODIFIERS: SearchModifiers = {
+  caseSensitive: false,
+  wordMatch: false,
+  regex: false,
+};
+
 export type QueryPart = {
   id: string;
   value: string;
-};
-
-export type SearchModifiers = {
   caseSensitive: boolean;
   wordMatch: boolean;
   regex: boolean;
@@ -26,9 +35,18 @@ export type SearchStack = {
 
 let partSeq = 0;
 
-export function newPart(value: string): QueryPart {
+export function newPart(
+  value: string,
+  mods: Partial<SearchModifiers> = {},
+): QueryPart {
   partSeq += 1;
-  return { id: `p${partSeq}`, value };
+  return {
+    id: `p${partSeq}`,
+    value,
+    caseSensitive: mods.caseSensitive ?? false,
+    wordMatch: mods.wordMatch ?? false,
+    regex: mods.regex ?? false,
+  };
 }
 
 export function parseDraft(raw: string): QueryPart | null {
@@ -146,6 +164,18 @@ export function stackedQuery(
   };
 }
 
+/** First term is the rg source; extra terms are piped `rg | rg`. */
+export function splitAndTerms(
+  parts: string[],
+  _regex = false,
+): { query: string; andTerms: string[] } {
+  const list = parts.map((item) => item.trim()).filter((item) => item !== "");
+  if (list.length <= 1) {
+    return { query: list[0] ?? "", andTerms: [] };
+  }
+  return { query: list[0] ?? "", andTerms: list.slice(1) };
+}
+
 export function compileParts(
   parts: QueryPart[],
   forceRegex = false,
@@ -179,43 +209,28 @@ export function joinAbs(root: string, rel: string): string {
 
 export function findMtimePredicate(range: TimeRange): string {
   switch (range) {
-    case "1h":
-      return "-mmin -60";
     case "today":
       return "-mmin -$(( $(date +%H) * 60 + $(date +%M) + 1 ))";
     case "24h":
       return "-mmin -1440";
     case "7d":
       return "-mtime -7";
-    case "30d":
-      return "-mtime -30";
   }
 }
 
-function rgGlobFlags(include?: string[], exclude?: string[]): string[] {
+function rgContentFlags(
+  opts: {
+    regex: boolean;
+    caseSensitive: boolean;
+    wordMatch: boolean;
+    hidden: boolean;
+  },
+  stage: "head" | "filter",
+): string[] {
   const args: string[] = [];
-  for (const glob of include ?? []) {
-    const trimmed = glob.trim();
-    if (trimmed !== "") {
-      args.push("--glob", shQuote(trimmed));
-    }
+  if (stage === "head") {
+    args.push("-n");
   }
-  for (const glob of exclude ?? []) {
-    const trimmed = glob.trim();
-    if (trimmed !== "") {
-      args.push("--glob", shQuote(`!${trimmed}`));
-    }
-  }
-  return args;
-}
-
-function rgMatchFlags(opts: {
-  regex: boolean;
-  caseSensitive: boolean;
-  wordMatch: boolean;
-  hidden: boolean;
-}): string[] {
-  const args = ["-n"];
   if (!opts.regex) {
     args.push("-F");
   }
@@ -223,11 +238,18 @@ function rgMatchFlags(opts: {
   if (opts.wordMatch) {
     args.push("-w");
   }
-  if (opts.hidden) {
+  if (stage === "head" && opts.hidden) {
     args.push("--hidden");
   }
   return args;
 }
+
+export type AndTermShare = {
+  query: string;
+  regex?: boolean;
+  caseSensitive?: boolean;
+  wordMatch?: boolean;
+};
 
 export function toRgShareCommand(opts: {
   query: string;
@@ -236,47 +258,53 @@ export function toRgShareCommand(opts: {
   wordMatch: boolean;
   hidden: boolean;
   rootAbs: string;
-  relPaths?: string[];
-  globInclude?: string[];
-  globExclude?: string[];
-  timeRange?: TimeRange | null;
+  relPaths: string[];
+  andTerms?: Array<string | AndTermShare>;
+  line?: number;
 }): string {
-  const relPaths = (opts.relPaths ?? ["."])
-    .map((path) => path.trim())
-    .map((path) => (path === "" ? "." : path));
-  const pathArgs = [...new Set(relPaths.length > 0 ? relPaths : ["."])].map(
-    shQuote,
-  );
-  const globFlags = rgGlobFlags(opts.globInclude, opts.globExclude);
-  const matchFlags = rgMatchFlags(opts);
+  const pathArgs = [
+    ...new Set(
+      opts.relPaths
+        .map((path) => path.trim())
+        .filter((path) => path !== "")
+        .map((path) => joinAbs(opts.rootAbs, path)),
+    ),
+  ].map(shQuote);
+  const headFlags = rgContentFlags(opts, "head");
   const query = shQuote(opts.query);
-  const content = ["rg", ...matchFlags, "--", query].join(" ");
-  const gitSkip = '! -path "*/.git/*"';
-  const inRoot = (cmd: string): string =>
-    `( cd ${shQuote(opts.rootAbs)} && ${cmd} )`;
-
-  if (opts.timeRange == null) {
-    return inRoot(
-      ["rg", ...matchFlags, ...globFlags, "--", query, ...pathArgs].join(" "),
-    );
-  }
-  const mtime = findMtimePredicate(opts.timeRange);
-  if (globFlags.length === 0) {
-    return inRoot(
-      `find ${pathArgs.join(" ")} -type f ${gitSkip} ${mtime} -print0 | xargs -0 -r ${content}`,
-    );
-  }
-  const listFiles = [
-    "rg",
-    "--null",
-    "--files",
-    ...(opts.hidden ? ["--hidden"] : []),
-    ...globFlags,
-    ...pathArgs,
-  ].join(" ");
-  return inRoot(
-    `${listFiles} | xargs -0 -r sh -c 'find "$@" -type f ${gitSkip} ${mtime} -print0' _ | xargs -0 -r ${content}`,
-  );
+  const extraAnd = (opts.andTerms ?? [])
+    .map((term) => {
+      if (typeof term === "string") {
+        return { query: term, regex: opts.regex, caseSensitive: opts.caseSensitive, wordMatch: opts.wordMatch };
+      }
+      return {
+        query: term.query,
+        regex: term.regex ?? false,
+        caseSensitive: term.caseSensitive ?? false,
+        wordMatch: term.wordMatch ?? false,
+      };
+    })
+    .map((term) => ({ ...term, query: term.query.trim() }))
+    .filter((term) => term.query !== "")
+    .map((term) => {
+      const flags = rgContentFlags(
+        {
+          regex: term.regex,
+          caseSensitive: term.caseSensitive,
+          wordMatch: term.wordMatch,
+          hidden: false,
+        },
+        "filter",
+      );
+      return `| rg ${flags.join(" ")} -- ${shQuote(term.query)}`;
+    })
+    .join(" ");
+  const lineLock =
+    opts.line !== undefined && opts.line > 0
+      ? ` | rg ${shQuote(`^${opts.line}:`)} -r ''`
+      : "";
+  const pipeAnd = extraAnd === "" ? "" : ` ${extraAnd}`;
+  return `${["rg", ...headFlags, "--", query, ...pathArgs].join(" ")}${pipeAnd}${lineLock}`;
 }
 
 export function toRequest(
@@ -284,23 +312,51 @@ export function toRequest(
   extraInclude: string[] = [],
   mtimeAfter?: number,
 ): SearchRequestInput {
-  const compiled = compileParts(stack.parts, stack.regex);
+  const ready = stack.parts
+    .map((part) => ({ ...part, value: part.value.trim() }))
+    .filter((part) => part.value !== "");
+  const head = ready[0];
+  const rest = ready.slice(1);
   let globInclude = stack.globInclude;
   const globAnd = stack.globAnd;
   let globExclude = stack.globExclude;
   if (extraInclude.length > 0) {
     globInclude = extraInclude;
   }
+  if (head === undefined) {
+    return {
+      query: "",
+      path: stack.path,
+      globInclude,
+      globAnd,
+      globExclude,
+      regex: stack.regex,
+      caseSensitive: stack.caseSensitive,
+      wordMatch: stack.wordMatch,
+      hidden: stack.hidden,
+      ...(mtimeAfter !== undefined ? { mtimeAfter } : {}),
+    };
+  }
   return {
-    query: compiled.query,
+    query: head.value,
     path: stack.path,
     globInclude,
     globAnd,
     globExclude,
-    regex: stack.regex || compiled.regex,
-    caseSensitive: stack.caseSensitive,
-    wordMatch: stack.wordMatch,
+    regex: head.regex,
+    caseSensitive: head.caseSensitive,
+    wordMatch: head.wordMatch,
     hidden: stack.hidden,
+    ...(rest.length > 0
+      ? {
+          andTerms: rest.map((part) => ({
+            query: part.value,
+            regex: part.regex,
+            caseSensitive: part.caseSensitive,
+            wordMatch: part.wordMatch,
+          })),
+        }
+      : {}),
     ...(mtimeAfter !== undefined ? { mtimeAfter } : {}),
   };
 }

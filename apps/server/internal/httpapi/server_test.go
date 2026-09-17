@@ -245,6 +245,15 @@ func TestSearchDefaultsMatchUI(t *testing.T) {
 	if got.Regex || got.CaseSensitive || !got.Hidden {
 		t.Fatalf("defaults: regex=%v case=%v hidden=%v", got.Regex, got.CaseSensitive, got.Hidden)
 	}
+	if !got.LimitToList {
+		t.Fatal("every search should pass an explicit file list")
+	}
+	if !slices.Contains(got.FileList, "ok.txt") {
+		t.Fatalf("expected ok.txt in file list: %v", got.FileList)
+	}
+	if slices.Contains(got.FileList, ".env") {
+		t.Fatalf("denied .env leaked into file list: %v", got.FileList)
+	}
 }
 
 func TestSearchMtimeAfterLimitsFileList(t *testing.T) {
@@ -560,6 +569,55 @@ func TestLiveRipgrepOnlySearchesPrefilteredFiles(t *testing.T) {
 	}
 	if strings.Contains(out, "old.txt") {
 		t.Fatalf("old.txt must not be searched: %s", out)
+	}
+}
+
+func TestSearchAndTermsPerTermModifiers(t *testing.T) {
+	var got rg.Input
+	eng := captureEngine{onSearch: func(in rg.Input) {
+		got = in
+	}}
+	s, root := testServer(t, eng)
+	if err := os.WriteFile(filepath.Join(root, "ok.txt"), []byte("Hello world\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
+		`{"query":"Hello","caseSensitive":true,"andTerms":[{"query":"world.*","regex":true}]}`, nil)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if !got.CaseSensitive || got.Regex {
+		t.Fatalf("head flags: case=%v regex=%v", got.CaseSensitive, got.Regex)
+	}
+	if len(got.AndTerms) != 1 || got.AndTerms[0].Query != "world.*" || !got.AndTerms[0].Regex || got.AndTerms[0].CaseSensitive {
+		t.Fatalf("piped term: %+v", got.AndTerms)
+	}
+}
+
+func TestLiveRipgrepAndTermsAnyOrder(t *testing.T) {
+	bin := rg.Detect("")
+	if bin == "" {
+		t.Skip("rg not available")
+	}
+	root := t.TempDir()
+	line := `"host":"test.gf.com.cn","route":"/trade-users/v1/me","industryType":"4","account":"030680228968"` + "\n"
+	if err := os.WriteFile(filepath.Join(root, "ok.txt"), []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, _ = filepath.EvalSymlinks(root)
+	cfg := config.Config{
+		RootReal: root, RootLabel: "t", Host: "127.0.0.1", Port: 8787,
+		MaxResults: 10000, TimeoutMs: 5000, NoIgnore: true,
+	}
+	s := &Server{Cfg: cfg, Search: search.New(cfg, rg.Engine{Bin: bin}, "rg", nil), Engine: "rg"}
+	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
+		`{"query":"030680228968","andTerms":["industryType","trade-users","host"]}`, nil)
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	out := rec.Body.String()
+	if !strings.Contains(out, `"path":"ok.txt"`) {
+		t.Fatalf("expected hit in any field order: %s", out)
 	}
 }
 

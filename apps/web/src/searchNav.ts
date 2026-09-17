@@ -1,11 +1,13 @@
 import type { TimeRange } from "./timeRange.ts";
+import type { SearchModifiers } from "./searchStack.ts";
+
+export type NavPart = {
+  value: string;
+} & SearchModifiers;
 
 export type SearchNavEntry = {
-  parts: string[];
+  parts: NavPart[];
   timeRange: TimeRange | null;
-  caseSensitive: boolean;
-  wordMatch: boolean;
-  regex: boolean;
 };
 
 export const SEARCH_NAV_MAX = 50;
@@ -13,11 +15,17 @@ export const SEARCH_NAV_MAX = 50;
 export function sameSearchNav(a: SearchNavEntry, b: SearchNavEntry): boolean {
   return (
     a.timeRange === b.timeRange &&
-    a.caseSensitive === b.caseSensitive &&
-    a.wordMatch === b.wordMatch &&
-    a.regex === b.regex &&
     a.parts.length === b.parts.length &&
-    a.parts.every((part, i) => part === b.parts[i])
+    a.parts.every((part, i) => {
+      const other = b.parts[i];
+      return (
+        other !== undefined &&
+        part.value === other.value &&
+        part.caseSensitive === other.caseSensitive &&
+        part.wordMatch === other.wordMatch &&
+        part.regex === other.regex
+      );
+    })
   );
 }
 

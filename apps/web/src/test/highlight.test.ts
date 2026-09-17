@@ -34,4 +34,12 @@ describe("spansForQuery", () => {
     expect(spans[0]?.tone).toBe(0);
     expect(spans[1]?.tone).toBe(1);
   });
+
+  it("honors per-term case sensitivity", () => {
+    const spans = spansForQuery("Hello WORLD", [
+      { value: "Hello", caseSensitive: true },
+      { value: "world", caseSensitive: true },
+    ]);
+    expect(spans).toEqual([{ start: 0, end: 5, tone: 0 }]);
+  });
 });

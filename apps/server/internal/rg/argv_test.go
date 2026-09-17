@@ -32,6 +32,25 @@ func TestBuildArgvOmitsDotDirAndAddsHidden(t *testing.T) {
 	}
 }
 
+func TestBuildArgvLimitToListOmitsUserGlobs(t *testing.T) {
+	argv, err := BuildArgv(Input{
+		RootReal:     "/tmp/root",
+		RelativeDir:  ".",
+		Query:        "needle",
+		LimitToList:  true,
+		FileList:     []string{"src/a.ts"},
+		GlobInclude:  []string{"*.ts"},
+		GlobExclude:  []string{"*.test.ts"},
+		AllowSecrets: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(argv, "--glob") {
+		t.Fatalf("content rg must not glob; files are preselected: %v", argv)
+	}
+}
+
 func TestBuildArgvLimitToListUsesRegexpFlagAndNoDir(t *testing.T) {
 	argv, err := BuildArgv(Input{
 		RootReal:    "/tmp/root",
@@ -76,6 +95,22 @@ func TestFormatCmdQuotesQuery(t *testing.T) {
 	got := formatCmd("/opt/rg", []string{"--json", "--", "a b", "src"})
 	if got != "/opt/rg --json -- 'a b' src" {
 		t.Fatal(got)
+	}
+}
+
+func TestBuildFilterArgvPipesLiteralFlags(t *testing.T) {
+	got := BuildFilterArgv(AndTerm{Query: "host", WordMatch: true})
+	want := []string{"--no-config", "-F", "-i", "-w", "--", "host"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+func TestBuildFilterArgvUsesPerTermModifiers(t *testing.T) {
+	got := BuildFilterArgv(AndTerm{Query: "H.llo", Regex: true, CaseSensitive: true})
+	want := []string{"--no-config", "-s", "--", "H.llo"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v want %v", got, want)
 	}
 }
 

@@ -2,12 +2,11 @@ import type { FormEvent, KeyboardEvent, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchHistoryItem } from "../searchHistory.ts";
-import type { QueryPart, SearchModifiers } from "../searchStack.ts";
+import type { QueryPart } from "../searchStack.ts";
 import { newPart } from "../searchStack.ts";
-import { timeRangeMsgKey, type TimeRange } from "../timeRange.ts";
+import type { TimeRange } from "../timeRange.ts";
 import {
   IconAnd,
-  IconCaret,
   IconHistory,
   IconNavBack,
   IconNavForward,
@@ -23,12 +22,6 @@ export function SearchBar({
   canClear,
   onClear,
   queryRef,
-  modifiers,
-  onModifiersChange,
-  includeGlobs = "",
-  onIncludeGlobsChange,
-  excludeGlobs = "",
-  onExcludeGlobsChange,
   timeRange: _timeRange = null,
   history = [],
   onRestoreHistory,
@@ -37,18 +30,12 @@ export function SearchBar({
   onGoBack,
   onGoForward,
 }: {
-  fields: string[];
-  onFieldsChange: (fields: string[]) => void;
+  fields: QueryPart[];
+  onFieldsChange: (fields: QueryPart[]) => void;
   onFlushSearch: (nextParts: QueryPart[]) => void;
   canClear: boolean;
   onClear: () => void;
   queryRef: RefObject<HTMLInputElement | null>;
-  modifiers?: SearchModifiers;
-  onModifiersChange?: (modifiers: SearchModifiers) => void;
-  includeGlobs?: string;
-  onIncludeGlobsChange?: (value: string) => void;
-  excludeGlobs?: string;
-  onExcludeGlobsChange?: (value: string) => void;
   timeRange?: TimeRange | null;
   history?: SearchHistoryItem[];
   onRestoreHistory?: (item: SearchHistoryItem) => void;
@@ -63,21 +50,39 @@ export function SearchBar({
   const pendingFocus = useRef(false);
   const [andOpen, setAndOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
-  const values = fields.length > 0 ? fields : [""];
+  const values = fields.length > 0 ? fields : [newPart("")];
   const extras = values.slice(1);
-  const canAdd = (values[values.length - 1] ?? "").trim() !== "";
+  const canAdd = (values[values.length - 1]?.value ?? "").trim() !== "";
 
   const sendSearch = (): void => {
     const terms = values
-      .map((value) => value.trim())
-      .filter((value) => value !== "");
+      .map((part) => ({ ...part, value: part.value.trim() }))
+      .filter((part) => part.value !== "");
     setAndOpen(false);
     setHistOpen(false);
-    onFlushSearch(terms.map(newPart));
+    onFlushSearch(terms);
   };
 
   const setField = (index: number, value: string): void => {
-    onFieldsChange(values.map((item, i) => (i === index ? value : item)));
+    onFieldsChange(
+      values.map((item, i) => (i === index ? { ...item, value } : item)),
+    );
+  };
+
+  const setFieldMods = (
+    index: number,
+    patch: Partial<Pick<QueryPart, "caseSensitive" | "wordMatch" | "regex">>,
+  ): void => {
+    const next = values.map((item, i) =>
+      i === index ? { ...item, ...patch } : item,
+    );
+    onFieldsChange(next);
+    const ready = next
+      .map((part) => ({ ...part, value: part.value.trim() }))
+      .filter((part) => part.value !== "");
+    if (ready.length > 0) {
+      onFlushSearch(ready);
+    }
   };
 
   const addField = (): void => {
@@ -87,7 +92,7 @@ export function SearchBar({
     pendingFocus.current = true;
     setHistOpen(false);
     setAndOpen(true);
-    onFieldsChange([...values, ""]);
+    onFieldsChange([...values, newPart("")]);
   };
   const addFieldRef = useRef(addField);
   addFieldRef.current = addField;
@@ -172,35 +177,27 @@ export function SearchBar({
     };
   }, [andOpen, histOpen]);
 
-  const onQueryKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+  const onQueryKeyDown = (
+    event: KeyboardEvent<HTMLElement>,
+    index: number,
+  ): void => {
     if (event.nativeEvent.isComposing) {
       return;
     }
-    if (event.altKey && (event.key === "c" || event.key === "C")) {
+    const part = values[index];
+    if (part !== undefined && event.altKey && (event.key === "c" || event.key === "C")) {
       event.preventDefault();
-      onModifiersChange?.({
-        caseSensitive: !modifiers?.caseSensitive,
-        wordMatch: modifiers?.wordMatch ?? false,
-        regex: modifiers?.regex ?? false,
-      });
+      setFieldMods(index, { caseSensitive: !part.caseSensitive });
       return;
     }
-    if (event.altKey && (event.key === "w" || event.key === "W")) {
+    if (part !== undefined && event.altKey && (event.key === "w" || event.key === "W")) {
       event.preventDefault();
-      onModifiersChange?.({
-        caseSensitive: modifiers?.caseSensitive ?? false,
-        wordMatch: !modifiers?.wordMatch,
-        regex: modifiers?.regex ?? false,
-      });
+      setFieldMods(index, { wordMatch: !part.wordMatch });
       return;
     }
-    if (event.altKey && (event.key === "r" || event.key === "R")) {
+    if (part !== undefined && event.altKey && (event.key === "r" || event.key === "R")) {
       event.preventDefault();
-      onModifiersChange?.({
-        caseSensitive: modifiers?.caseSensitive ?? false,
-        wordMatch: modifiers?.wordMatch ?? false,
-        regex: !modifiers?.regex,
-      });
+      setFieldMods(index, { regex: !part.regex });
       return;
     }
     if (event.key === "Escape" && (andOpen || histOpen)) {
@@ -290,12 +287,7 @@ export function SearchBar({
                       }}
                     >
                       <span className="search-history-q">
-                        {item.parts.join(" AND ")}
-                      </span>
-                      <span className="search-history-meta">
-                        {item.timeRange === null
-                          ? t("timeRangeAll")
-                          : t(timeRangeMsgKey(item.timeRange))}
+                        {item.parts.map((part) => part.value).join(" | ")}
                       </span>
                     </button>
                   ))}
@@ -328,86 +320,90 @@ export function SearchBar({
               spellCheck={false}
               aria-label={t("queryPlaceholder")}
               placeholder={t("queryPlaceholder")}
-              value={values[0] ?? ""}
+              value={values[0]?.value ?? ""}
               onChange={(event) => {
                 setField(0, event.target.value);
               }}
-              onKeyDown={onQueryKeyDown}
-            />
-            <button
-              type="button"
-              className={andOpen ? "search-caret is-open" : "search-caret"}
-              aria-expanded={andOpen}
-              aria-label={t("queryConditions")}
-              title={t("queryConditions")}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                toggleAnd();
+              onKeyDown={(event) => {
+                onQueryKeyDown(event, 0);
               }}
-            >
-              <IconCaret open={andOpen} />
-            </button>
+            />
+            <FieldMods
+              part={values[0] ?? newPart("")}
+              onToggle={(patch) => {
+                setFieldMods(0, patch);
+              }}
+            />
           </div>
           {andOpen ? (
             <div
               className="search-and-pop"
               role="dialog"
-              aria-label={t("queryAddField")}
+              aria-label={t("queryConditions")}
             >
               <div className="search-and-list">
-              {extras.map((value, extraIndex) => {
-                const index = extraIndex + 1;
-                return (
-                  <div key={`and-${index}`} className="search-and-item">
-                    <div className="search-and-join" aria-hidden="true">
-                      <span className="search-and-line" />
-                      <span className="search-and-badge">
-                        <IconAnd />
-                        {t("opAnd")}
-                      </span>
-                      <span className="search-and-line" />
+                {extras.map((part, extraIndex) => {
+                  const index = extraIndex + 1;
+                  return (
+                    <div key={part.id} className="search-and-item">
+                      <div className="search-and-join" aria-hidden="true">
+                        <span className="search-and-line" />
+                        <span className="search-and-badge">
+                          <IconAnd />
+                          {t("opAnd")}
+                        </span>
+                        <span className="search-and-line" />
+                      </div>
+                      <div className="search-and-row">
+                        <div
+                          className="search-field"
+                          onClick={() => {
+                            extraRefs.current[extraIndex]?.focus();
+                          }}
+                        >
+                          <span className="search-icon">
+                            <IconSearch />
+                          </span>
+                          <input
+                            ref={(node) => {
+                              extraRefs.current[extraIndex] = node;
+                            }}
+                            type="text"
+                            aria-label={t("queryAddField")}
+                            placeholder={t("queryFilterPlaceholder")}
+                            autoComplete="off"
+                            autoCorrect="off"
+                            autoCapitalize="off"
+                            spellCheck={false}
+                            value={part.value}
+                            onChange={(event) => {
+                              setField(index, event.target.value);
+                            }}
+                            onKeyDown={(event) => {
+                              onQueryKeyDown(event, index);
+                            }}
+                          />
+                          <FieldMods
+                            part={part}
+                            onToggle={(patch) => {
+                              setFieldMods(index, patch);
+                            }}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          className="search-field-remove"
+                          aria-label={t("queryRemoveField")}
+                          onClick={() => {
+                            removeField(index);
+                          }}
+                        >
+                          <IconX />
+                        </button>
+                      </div>
                     </div>
-                    <div
-                      className="search-field is-extra"
-                      onClick={() => {
-                        extraRefs.current[extraIndex]?.focus();
-                      }}
-                    >
-                      <span className="search-icon">
-                        <IconSearch />
-                      </span>
-                      <input
-                        ref={(node) => {
-                          extraRefs.current[extraIndex] = node;
-                        }}
-                        type="text"
-                        aria-label={t("queryAddField")}
-                        placeholder={t("queryPlaceholder")}
-                        autoComplete="off"
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        spellCheck={false}
-                        value={value}
-                        onChange={(event) => {
-                          setField(index, event.target.value);
-                        }}
-                        onKeyDown={onQueryKeyDown}
-                      />
-                      <button
-                        type="button"
-                        className="search-field-remove"
-                        aria-label={t("queryRemoveField")}
-                        onClick={() => {
-                          removeField(index);
-                        }}
-                      >
-                        <IconX />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
               </div>
               <div className="search-and-foot">
                 <div className="search-and-actions">
@@ -445,21 +441,20 @@ export function SearchBar({
         <button
           type="button"
           className={
-            extras.length > 0 ? "search-add-field is-on" : "search-add-field"
+            andOpen || extras.length > 0
+              ? "search-add-field is-on"
+              : "search-add-field"
           }
-          aria-label={t("queryAddField")}
-          title={t("queryAddField")}
+          aria-label={t("queryConditions")}
+          title={t("queryConditions")}
           aria-expanded={andOpen}
-          disabled={!canAdd}
           onClick={(event) => {
             event.preventDefault();
-            addField();
+            toggleAnd();
           }}
         >
-          <IconPlus />
-          {extras.length > 0 ? (
-            <span className="search-add-count">{extras.length}</span>
-          ) : null}
+          <IconAnd />
+          <span className="search-add-count">{extras.length}</span>
         </button>
         <div className="search-actions">
           <button
@@ -475,86 +470,6 @@ export function SearchBar({
           </button>
         </div>
       </form>
-      <div className="search-advanced">
-        <span className="search-advanced-label">{t("advancedOptions")}</span>
-        <button
-          type="button"
-          className={modifiers?.caseSensitive ? "mod-btn active" : "mod-btn"}
-          title={t("caseSensitive")}
-          aria-pressed={modifiers?.caseSensitive}
-          onClick={() => {
-            onModifiersChange?.({
-              caseSensitive: !modifiers?.caseSensitive,
-              wordMatch: modifiers?.wordMatch ?? false,
-              regex: modifiers?.regex ?? false,
-            });
-          }}
-        >
-          Aa
-        </button>
-        <button
-          type="button"
-          className={modifiers?.wordMatch ? "mod-btn active" : "mod-btn"}
-          title={t("wordMatch")}
-          aria-pressed={modifiers?.wordMatch}
-          onClick={() => {
-            onModifiersChange?.({
-              caseSensitive: modifiers?.caseSensitive ?? false,
-              wordMatch: !modifiers?.wordMatch,
-              regex: modifiers?.regex ?? false,
-            });
-          }}
-        >
-          \b
-        </button>
-        <button
-          type="button"
-          className={modifiers?.regex ? "mod-btn active" : "mod-btn"}
-          title={t("regex")}
-          aria-pressed={modifiers?.regex}
-          onClick={() => {
-            onModifiersChange?.({
-              caseSensitive: modifiers?.caseSensitive ?? false,
-              wordMatch: modifiers?.wordMatch ?? false,
-              regex: !modifiers?.regex,
-            });
-          }}
-        >
-          .*
-        </button>
-        <label className="filter-field">
-          <span className="filter-label">{t("includeGlobLabel")}</span>
-          <input
-            type="text"
-            className="filter-input"
-            placeholder={t("includeGlobs")}
-            value={includeGlobs}
-            onChange={(event) => onIncludeGlobsChange?.(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                sendSearch();
-              }
-            }}
-          />
-        </label>
-        <label className="filter-field">
-          <span className="filter-label">{t("excludeGlobLabel")}</span>
-          <input
-            type="text"
-            className="filter-input"
-            placeholder={t("excludeGlobs")}
-            value={excludeGlobs}
-            onChange={(event) => onExcludeGlobsChange?.(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                sendSearch();
-              }
-            }}
-          />
-        </label>
-      </div>
       {andOpen || histOpen ? (
         <div
           className="search-drop-backdrop"
@@ -565,6 +480,61 @@ export function SearchBar({
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+function FieldMods({
+  part,
+  onToggle,
+}: {
+  part: QueryPart;
+  onToggle: (
+    patch: Partial<Pick<QueryPart, "caseSensitive" | "wordMatch" | "regex">>,
+  ) => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <div className="search-field-mods">
+      <button
+        type="button"
+        className={part.caseSensitive ? "mod-btn active" : "mod-btn"}
+        title={t("caseSensitive")}
+        aria-pressed={part.caseSensitive}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggle({ caseSensitive: !part.caseSensitive });
+        }}
+      >
+        Aa
+      </button>
+      <button
+        type="button"
+        className={part.wordMatch ? "mod-btn active" : "mod-btn"}
+        title={t("wordMatch")}
+        aria-pressed={part.wordMatch}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggle({ wordMatch: !part.wordMatch });
+        }}
+      >
+        \b
+      </button>
+      <button
+        type="button"
+        className={part.regex ? "mod-btn active" : "mod-btn"}
+        title={t("regex")}
+        aria-pressed={part.regex}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          onToggle({ regex: !part.regex });
+        }}
+      >
+        .*
+      </button>
     </div>
   );
 }

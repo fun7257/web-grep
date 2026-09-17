@@ -1,3 +1,5 @@
+import { matchesAnyGlob } from "./globs.ts";
+
 export type TreePick = {
   path: string;
   dir: boolean;
@@ -153,38 +155,41 @@ export function picksToGlobs(picks: TreePick[]): string[] {
   });
 }
 
+export function pickMatchesExclude(
+  pick: TreePick,
+  exclude: string[],
+): boolean {
+  if (exclude.length === 0) {
+    return false;
+  }
+  if (matchesAnyGlob(pick.path, exclude)) {
+    return true;
+  }
+  if (!pick.dir) {
+    return false;
+  }
+  const child = pick.path === "" ? "__keep__" : `${pick.path}/__keep__`;
+  return matchesAnyGlob(child, exclude);
+}
+
+export function prunePicksByExclude(
+  picks: TreePick[],
+  exclude: string[],
+): TreePick[] {
+  if (exclude.length === 0 || picks.length === 0) {
+    return picks;
+  }
+  const next = picks.filter((item) => !pickMatchesExclude(item, exclude));
+  return next.length === picks.length ? picks : next;
+}
+
 export function picksToSearchGlobs(
   picks: TreePick[],
-  scope: "all" | "include" | "exclude",
   extraInclude: string[] = [],
-  manualInclude: string[] = [],
   manualExclude: string[] = [],
-): { globInclude: string[]; globAnd: string[]; globExclude: string[] } {
-  if (extraInclude.length > 0) {
-    return {
-      globInclude: extraInclude,
-      globAnd: [...manualInclude],
-      globExclude: [...manualExclude],
-    };
-  }
-  const pickGlobs = picksToGlobs(picks);
-  if (picks.length === 0) {
-    return {
-      globInclude: [...manualInclude],
-      globAnd: [],
-      globExclude: [...manualExclude],
-    };
-  }
-  if (scope === "exclude") {
-    return {
-      globInclude: [...manualInclude],
-      globAnd: [],
-      globExclude: [...pickGlobs, ...manualExclude],
-    };
-  }
+): { globInclude: string[]; globExclude: string[] } {
   return {
-    globInclude: pickGlobs,
-    globAnd: [...manualInclude],
+    globInclude: extraInclude.length > 0 ? extraInclude : picksToGlobs(picks),
     globExclude: [...manualExclude],
   };
 }

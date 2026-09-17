@@ -8,8 +8,14 @@ import { readJsonError, SearchHttpError } from "./searchClient.ts";
 export const PREVIEW_CHUNK = 160;
 
 export async function fetchFileWindow(
-  query: { path: string; from?: number; count?: number; tail?: boolean },
-  signal: AbortSignal,
+  query: {
+    path: string;
+    from?: number;
+    count?: number;
+    tail?: boolean;
+    line?: number;
+  },
+  signal?: AbortSignal,
 ): Promise<FileWindowResponse> {
   const params = new URLSearchParams();
   params.set("path", query.path);
@@ -17,11 +23,13 @@ export async function fetchFileWindow(
     params.set("tail", "1");
   } else if (query.from !== undefined) {
     params.set("from", String(query.from));
+  } else if (query.line !== undefined) {
+    params.set("line", String(query.line));
   }
   params.set("count", String(query.count ?? PREVIEW_CHUNK));
   const res = await fetch(`/api/file?${params.toString()}`, {
     headers: apiHeaders(),
-    signal,
+    ...(signal !== undefined ? { signal } : {}),
   });
   if (!res.ok) {
     throw await readJsonError(res);

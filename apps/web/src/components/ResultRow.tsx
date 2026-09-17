@@ -4,22 +4,14 @@ import {
   DEFAULT_HL_OPTS,
   HL_TONES,
   type HlOpts,
+  type HlSpan,
+  type HlTermInput,
   highlightSpans,
 } from "../highlight.ts";
+import { clipLineEnd, clipResultSnippets, shiftSpans } from "../resultSnippet.ts";
 import { FileIcon } from "./icons.tsx";
 
-export function HighlightedText({
-  text,
-  matches = [],
-  terms = [],
-  opts = DEFAULT_HL_OPTS,
-}: {
-  text: string;
-  matches?: Array<{ start: number; end: number }>;
-  terms?: string[];
-  opts?: HlOpts;
-}) {
-  const spans = highlightSpans(text, terms, opts, matches);
+function paintText(text: string, spans: HlSpan[]): ReactNode {
   const parts: ReactNode[] = [];
   let cursor = 0;
   let part = 0;
@@ -44,6 +36,89 @@ export function HighlightedText({
   return <>{parts}</>;
 }
 
+export function HighlightedText({
+  text,
+  matches = [],
+  terms = [],
+  opts = DEFAULT_HL_OPTS,
+}: {
+  text: string;
+  matches?: Array<{ start: number; end: number }>;
+  terms?: HlTermInput[];
+  opts?: HlOpts;
+}) {
+  return paintText(text, highlightSpans(text, terms, opts, matches));
+}
+
+export function LogLineText({
+  text,
+  matches = [],
+  terms = [],
+  opts = DEFAULT_HL_OPTS,
+}: {
+  text: string;
+  matches?: Array<{ start: number; end: number }>;
+  terms?: HlTermInput[];
+  opts?: HlOpts;
+}) {
+  const clip = clipLineEnd(text);
+  const slice = text.slice(clip.start, clip.end);
+  const shifted = matches
+    .map((match) => ({
+      start: Math.max(0, match.start - clip.start),
+      end: Math.min(clip.end - clip.start, match.end - clip.start),
+    }))
+    .filter((match) => match.end > match.start);
+  return (
+    <span className="result-text">
+      {paintText(slice, highlightSpans(slice, terms, opts, shifted))}
+    </span>
+  );
+}
+
+export function ResultHitText({
+  text,
+  matches = [],
+  terms = [],
+  opts = DEFAULT_HL_OPTS,
+}: {
+  text: string;
+  matches?: Array<{ start: number; end: number }>;
+  terms?: HlTermInput[];
+  opts?: HlOpts;
+}) {
+  const spans = highlightSpans(text, terms, opts, matches);
+  const clips = clipResultSnippets(text, spans);
+  const title = text.length > 500 ? `${text.slice(0, 500)}…` : text;
+  const clippedStart = (clips[0]?.start ?? 0) > 0;
+  const clippedEnd = (clips.at(-1)?.end ?? 0) < text.length;
+  return (
+    <>
+      <span className="result-text" title={title}>
+        {clips.map((clip, index) => {
+          const slice = text.slice(clip.start, clip.end);
+          return (
+            <span key={`${clip.start}-${clip.end}`}>
+              {index > 0 ? (
+                <span className="result-snip-skip"> ... </span>
+              ) : null}
+              {index === 0 && clippedStart ? (
+                <span className="result-snip-skip">...</span>
+              ) : null}
+              {paintText(slice, shiftSpans(spans, clip.start, clip.end))}
+            </span>
+          );
+        })}
+      </span>
+      {clippedEnd ? (
+        <span className="result-snip-skip is-end" title="省略">
+          ...
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 export const ResultRow = memo(function ResultRow({
   hit,
   selected,
@@ -56,7 +131,7 @@ export const ResultRow = memo(function ResultRow({
   selected: boolean;
   index: number;
   onSelect: (index: number) => void;
-  terms?: string[];
+  terms?: HlTermInput[];
   opts?: HlOpts;
 }) {
   const slash = hit.path.lastIndexOf("/");
@@ -80,14 +155,12 @@ export const ResultRow = memo(function ResultRow({
           <span className="result-line">{`:${hit.line}`}</span>
         </span>
       </div>
-      <span className="result-text">
-        <HighlightedText
-          text={hit.text}
-          matches={hit.matches}
-          terms={terms}
-          opts={opts}
-        />
-      </span>
+      <ResultHitText
+        text={hit.text}
+        matches={hit.matches}
+        terms={terms}
+        opts={opts}
+      />
     </button>
   );
 });

@@ -24,6 +24,18 @@ func FilterByGlobs(files, include, exclude []string) []string {
 	return out
 }
 
+// NewGlobMatcher compiles pats once. The returned func is true when path
+// matches any pattern. An empty pattern list never matches.
+func NewGlobMatcher(pats []string) func(string) bool {
+	res := compileUserGlobs(pats)
+	if len(res) == 0 {
+		return func(string) bool { return false }
+	}
+	return func(path string) bool {
+		return anyGlobMatch(res, path)
+	}
+}
+
 func compileUserGlobs(pats []string) []*regexp.Regexp {
 	out := make([]*regexp.Regexp, 0, len(pats))
 	for _, pat := range pats {

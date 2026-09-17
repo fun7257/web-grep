@@ -66,6 +66,7 @@ describe("SearchRequestSchema", () => {
     expect(parsed.globInclude).toEqual([]);
     expect(parsed.globAnd).toEqual([]);
     expect(parsed.globExclude).toEqual([]);
+    expect(parsed.andTerms).toEqual([]);
     expect(parsed.regex).toBe(false);
     expect(parsed.caseSensitive).toBe(false);
     expect(parsed.wordMatch).toBe(false);
@@ -90,6 +91,20 @@ describe("SearchRequestSchema", () => {
     expect(parsed.caseSensitive).toBe(true);
     expect(parsed.wordMatch).toBe(true);
     expect(parsed.regex).toBe(true);
+  });
+
+  it("accepts object andTerms with per-term modifiers", () => {
+    const parsed = SearchRequestSchema.parse({
+      query: "Hello",
+      andTerms: [
+        { query: "world.*", regex: true },
+        "plain",
+      ],
+    });
+    expect(parsed.andTerms).toEqual([
+      { query: "world.*", regex: true },
+      "plain",
+    ]);
   });
 
   it("accepts mtimeAfter as unix milliseconds", () => {

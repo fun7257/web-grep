@@ -34,7 +34,7 @@ func TestListNewerFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ListNewerFiles(root, ".", time.Now().Add(-2*time.Hour), true, false, false)
+	got, err := ListNewerFiles(root, ".", time.Now().Add(-2*time.Hour), true, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +48,7 @@ func TestListNewerFiles(t *testing.T) {
 		t.Fatalf("hidden should be included when hidden=true: %v", got)
 	}
 
-	noHidden, err := ListNewerFiles(root, ".", time.Now().Add(-2*time.Hour), false, false, false)
+	noHidden, err := ListNewerFiles(root, ".", time.Now().Add(-2*time.Hour), false, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,11 +56,22 @@ func TestListNewerFiles(t *testing.T) {
 		t.Fatalf("hidden leaked: %v", noHidden)
 	}
 
-	all, err := ListNewerFiles(root, ".", time.Time{}, true, false, false)
+	all, err := ListNewerFiles(root, ".", time.Time{}, true, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(all, "old.log") || !slices.Contains(all, "new.log") {
 		t.Fatalf("zero cutoff should list all files: %v", all)
+	}
+
+	excluded, err := ListNewerFiles(root, ".", time.Now().Add(-2*time.Hour), true, false, false, []string{"new.log"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(excluded, "new.log") {
+		t.Fatalf("exclude should drop new.log before mtime: %v", excluded)
+	}
+	if slices.Contains(excluded, "old.log") {
+		t.Fatalf("mtime should still drop old.log: %v", excluded)
 	}
 }

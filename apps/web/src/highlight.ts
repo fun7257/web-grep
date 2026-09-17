@@ -6,6 +6,30 @@ export type HlOpts = {
   regex: boolean;
 };
 
+export type HlTerm = {
+  value: string;
+  caseSensitive?: boolean;
+  wordMatch?: boolean;
+  regex?: boolean;
+};
+
+export type HlTermInput = string | HlTerm;
+
+function termValue(term: HlTermInput): string {
+  return typeof term === "string" ? term : term.value;
+}
+
+function termOpts(term: HlTermInput, fallback: HlOpts): HlOpts {
+  if (typeof term === "string") {
+    return fallback;
+  }
+  return {
+    caseSensitive: term.caseSensitive ?? fallback.caseSensitive,
+    wordMatch: term.wordMatch ?? fallback.wordMatch,
+    regex: term.regex ?? fallback.regex,
+  };
+}
+
 export type HlSpan = {
   start: number;
   end: number;
@@ -124,17 +148,17 @@ export function flattenSpans(length: number, spans: HlSpan[]): HlSpan[] {
 
 export function spansForQuery(
   text: string,
-  terms: string[],
+  terms: HlTermInput[],
   opts: HlOpts = DEFAULT_HL_OPTS,
 ): HlSpan[] {
   const found: HlSpan[] = [];
   terms.forEach((raw, index) => {
-    const term = raw.trim();
+    const term = termValue(raw).trim();
     if (term === "") {
       return;
     }
     const tone = index % HL_TONES;
-    for (const [start, end] of locateTerm(text, term, opts)) {
+    for (const [start, end] of locateTerm(text, term, termOpts(raw, opts))) {
       found.push({ start, end, tone });
     }
   });
@@ -163,13 +187,11 @@ export function spansFromOffsets(
 
 export function highlightSpans(
   text: string,
-  terms: string[],
+  terms: HlTermInput[],
   opts: HlOpts = DEFAULT_HL_OPTS,
   fallback: Array<{ start: number; end: number }> = [],
 ): HlSpan[] {
-  const cleaned = terms
-    .map((item) => item.trim())
-    .filter((item) => item !== "");
+  const cleaned = terms.filter((item) => termValue(item).trim() !== "");
   if (cleaned.length > 0) {
     return spansForQuery(text, cleaned, opts);
   }

@@ -10,7 +10,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TOKEN_STORAGE_KEY } from "../api/headers.ts";
 import { App } from "../App.tsx";
-import { findMtimePredicate } from "../searchStack.ts";
+
 
 const META = {
   engine: "rg",
@@ -242,11 +242,26 @@ function clickSearch(): void {
   fireEvent.click(document.querySelector(".search-go") as HTMLButtonElement);
 }
 
+function openFilters(): void {
+  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+}
+
+function addFilterField(): void {
+  if (document.querySelector(".search-and-pop") === null) {
+    openFilters();
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Add filter" }));
+}
+
 function locMatcher(label: string) {
   return (_content: string, node: Element | null): boolean =>
     node instanceof HTMLElement &&
     node.classList.contains("result-loc") &&
     (node.textContent ?? "") === label;
+}
+
+function fileRow(path: string): HTMLElement | null {
+  return document.querySelector(`[data-file-path="${path}"]`);
 }
 
 function getLoc(label: string): HTMLElement {
@@ -298,9 +313,12 @@ describe("search flow", () => {
     );
     render(<App />);
     await waitFor(() => {
-      expect(fetchMock.mock.calls.length).toBeGreaterThan(0);
+      expect(treeRequestUrls(fetchMock).length).toBeGreaterThan(0);
     });
-    fireEvent.click(screen.getByRole("button", { name: "1h" }));
+    expect(
+      treeRequestUrls(fetchMock).some((url) => url.includes("mtimeAfter=")),
+    ).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "24h" }));
     await waitFor(() => {
       const treeUrls = fetchMock.mock.calls
         .map((call) => requestUrl(call[0] as RequestInfo))
@@ -323,14 +341,15 @@ describe("search flow", () => {
     });
     fireEvent.click(screen.getByText("ok.txt"));
     expect(screen.getByText("1 selected")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "30d" }));
+    fireEvent.click(screen.getByRole("button", { name: "7d" }));
     await waitFor(() => {
       expect(screen.getByText("0 selected")).toBeTruthy();
     });
+    expect(screen.queryByRole("button", { name: "Search selected" })).toBeNull();
     expect(
-      (screen.getByRole("button", { name: "Search selected" }) as HTMLButtonElement)
+      (screen.getByRole("button", { name: "Clear conditions" }) as HTMLButtonElement)
         .disabled,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("search selected files sends globInclude", async () => {
@@ -357,7 +376,7 @@ describe("search flow", () => {
     fireEvent.click(screen.getByText("ok.txt"));
     expect(screen.getByText("1 selected")).toBeTruthy();
     typeQuery("needle");
-    fireEvent.click(screen.getByRole("button", { name: "Search selected" }));
+    clickSearch();
     await waitFor(() => {
       expect(body).toMatch(/globInclude/);
     });
@@ -396,7 +415,123 @@ describe("search flow", () => {
     expect(parsed.globInclude).toEqual(["ok.txt"]);
   });
 
-  it("exclude selected sends globExclude", async () => {
+  it("typing exclude does not filter the tree until enter or blur", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [
+          { name: "ok.txt", path: "ok.txt", dir: false },
+          { name: "skip.log", path: "skip.log", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    const input = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
+    input.focus();
+    fireEvent.change(input, { target: { value: "*.log" } });
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 50);
+    });
+    expect(
+      treeRequestUrls(fetchMock).some((url) => url.includes("exclude=")),
+    ).toBe(false);
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(document.activeElement).not.toBe(input);
+    await waitFor(() => {
+      expect(
+        treeRequestUrls(fetchMock).some((url) => url.includes("exclude=")),
+      ).toBe(true);
+    });
+  });
+
+  it("blurring the exclude box reloads the tree with exclude", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    const input = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
+    input.focus();
+    fireEvent.change(input, { target: { value: "*.test.ts" } });
+    fireEvent.blur(input);
+    await waitFor(() => {
+      expect(
+        treeRequestUrls(fetchMock).some((url) => url.includes("exclude=")),
+      ).toBe(true);
+    });
+  });
+
+  it("combined tree filter sends exclude before time", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    const input = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
+    input.focus();
+    fireEvent.change(input, { target: { value: "*.log" } });
+    fireEvent.blur(input);
+    fireEvent.click(screen.getByRole("button", { name: "24h" }));
+    await waitFor(() => {
+      const urls = treeRequestUrls(fetchMock).filter(
+        (url) => url.includes("exclude=") && url.includes("mtimeAfter="),
+      );
+      expect(urls.length).toBeGreaterThan(0);
+      const last = urls.at(-1) ?? "";
+      expect(last.indexOf("exclude=")).toBeGreaterThanOrEqual(0);
+      expect(last.indexOf("exclude=")).toBeLessThan(last.indexOf("mtimeAfter="));
+    });
+  });
+
+  it("applying exclude unchecks matching files and updates the selected count", async () => {
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [
+          { name: "ok.txt", path: "ok.txt", dir: false },
+          { name: "skip.log", path: "skip.log", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByText("ok.txt"));
+    fireEvent.click(screen.getByText("skip.log"));
+    expect(screen.getByText("2 selected")).toBeTruthy();
+    const exclude = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
+    fireEvent.change(exclude, { target: { value: "*.log" } });
+    fireEvent.blur(exclude);
+    await waitFor(() => {
+      expect(screen.getByText("1 selected")).toBeTruthy();
+    });
+    expect(
+      screen.getByText("ok.txt").closest("button")?.getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      screen.getByText("skip.log").closest("button")?.getAttribute("aria-pressed"),
+    ).toBe("false");
+  });
+
+  it("typed exclude sends globExclude and does not include selected files", async () => {
     let body = "";
     mockFetch(
       (init) => {
@@ -415,8 +550,11 @@ describe("search flow", () => {
       expect(screen.getByText("skip.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByText("skip.txt"));
+    fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
+      target: { value: "*.log" },
+    });
     typeQuery("needle");
-    fireEvent.click(screen.getByRole("button", { name: "Exclude selected" }));
+    clickSearch();
     await waitFor(() => {
       expect(body).toMatch(/globExclude/);
     });
@@ -424,11 +562,13 @@ describe("search flow", () => {
       globInclude?: string[];
       globExclude?: string[];
     };
-    expect(parsed.globInclude ?? []).toEqual([]);
-    expect(parsed.globExclude).toEqual(["skip.txt"]);
+    expect(parsed.globInclude).toEqual(["skip.txt"]);
+    expect(parsed.globExclude).toEqual(["*.log"]);
+    expect(screen.queryByRole("button", { name: "Exclude selected" })).toBeNull();
+    expect(screen.queryByPlaceholderText("*.ts, src/**")).toBeNull();
   });
 
-  it("clearing picks searches the whole tree again", async () => {
+  it("clearing conditions does not rerun search", async () => {
     const bodies: string[] = [];
     mockFetch(
       (init) => {
@@ -448,34 +588,18 @@ describe("search flow", () => {
     });
     fireEvent.click(screen.getByText("ok.txt"));
     typeQuery("needle");
-    fireEvent.click(screen.getByRole("button", { name: "Search selected" }));
+    clickSearch();
     await waitFor(() => {
       expect(bodies.length).toBe(1);
     });
-    fireEvent.click(
-      document.querySelector('.tree-seg button[title="Clear"]') as HTMLButtonElement,
-    );
-    clickSearch();
-    await waitFor(() => {
-      expect(bodies.length).toBe(2);
-    });
-    const parsed = JSON.parse(bodies[1] ?? "{}") as {
-      globInclude?: string[];
-      globExclude?: string[];
-    };
-    expect(parsed.globInclude ?? []).toEqual([]);
-    expect(parsed.globExclude ?? []).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Clear conditions" }));
+    expect(screen.getByText("0 selected")).toBeTruthy();
+    expect(bodies.length).toBe(1);
   });
 
-  it("search selected reuses the last query when the box is empty", async () => {
-    const bodies: string[] = [];
-    mockFetch(
-      (init) => {
-        if (typeof init?.body === "string") {
-          bodies.push(init.body);
-        }
-        return sseResponse([sseEvent("done", donePayload())]);
-      },
+  it("clear conditions resets picks, exclude, and time", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
       undefined,
       {
         treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
@@ -485,22 +609,36 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
+    fireEvent.click(screen.getByText("ok.txt"));
+    const exclude = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
+    fireEvent.change(exclude, { target: { value: "*.log" } });
+    fireEvent.blur(exclude);
+    fireEvent.click(screen.getByRole("button", { name: "24h" }));
+    expect(screen.getByText("0 selected")).toBeTruthy();
     typeQuery("needle");
     clickSearch();
     await waitFor(() => {
-      expect(bodies.length).toBe(1);
+      const parsed = lastSearchRequest(fetchMock);
+      expect(parsed.globExclude).toEqual(["*.log"]);
+      expect(parsed.mtimeAfter).toBeGreaterThan(0);
     });
-    fireEvent.click(screen.getByText("ok.txt"));
-    fireEvent.click(screen.getByRole("button", { name: "Search selected" }));
-    await waitFor(() => {
-      expect(bodies.length).toBe(2);
-    });
-    const parsed = JSON.parse(bodies[1] ?? "{}") as {
-      query?: string;
-      globInclude?: string[];
-    };
-    expect(parsed.query).toBe("needle");
-    expect(parsed.globInclude).toEqual(["ok.txt"]);
+    const searchesBefore = fetchMock.mock.calls.filter((call) =>
+      requestUrl(call[0] as RequestInfo).includes("/api/search"),
+    ).length;
+    fireEvent.click(screen.getByRole("button", { name: "Clear conditions" }));
+    expect(exclude.value).toBe("");
+    expect(
+      fetchMock.mock.calls.filter((call) =>
+        requestUrl(call[0] as RequestInfo).includes("/api/search"),
+      ).length,
+    ).toBe(searchesBefore);
+    expect(
+      screen.getByRole("button", { name: "24h" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+    expect(
+      (screen.getByRole("button", { name: "Clear conditions" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
   });
 
   it("sends mtimeAfter when a time range is selected", async () => {
@@ -512,14 +650,14 @@ describe("search flow", () => {
       return sseResponse([sseEvent("done", donePayload())]);
     });
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "1h" }));
+    fireEvent.click(screen.getByRole("button", { name: "24h" }));
     typeQuery("needle");
     clickSearch();
     await waitFor(() => {
       expect(body).toMatch(/mtimeAfter/);
     });
     const parsed = JSON.parse(body) as { mtimeAfter?: number };
-    expect(parsed.mtimeAfter).toBeGreaterThan(Date.now() - 2 * 3_600_000);
+    expect(parsed.mtimeAfter).toBeGreaterThan(Date.now() - 25 * 3_600_000);
     expect(parsed.mtimeAfter).toBeLessThanOrEqual(Date.now());
   });
 
@@ -574,14 +712,14 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getAllByRole("listitem")).toHaveLength(2);
+      expect(fileRow("src/a.ts")).toBeTruthy();
+      expect(fileRow("src/b.ts")).toBeTruthy();
     });
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
     expect(getLoc("src/a.ts:1")).toBeTruthy();
-    expect(getLoc("src/b.ts:3")).toBeTruthy();
-    const marks = document.querySelectorAll('[role="listitem"] mark');
-    expect(marks).toHaveLength(2);
-    expect(marks[0]?.textContent).toBe("hello");
-    expect(marks[1]?.textContent).toBe("hello");
+    expect(
+      document.querySelector(".result-log .result-text")?.textContent,
+    ).toContain("hello world");
   });
 
   it("shows No matches when done.matchCount is 0", async () => {
@@ -625,7 +763,7 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(getLoc("src/a.ts:1")).toBeTruthy();
+      expect(fileRow("src/a.ts")).toBeTruthy();
     });
     expect(screen.getByRole("alert").textContent).toMatch(/ripgrep failed/);
   });
@@ -798,13 +936,13 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(getLoc("src/a.ts:1")).toBeTruthy();
+      expect(fileRow("src/a.ts")).toBeTruthy();
     });
     clickSearch();
     await waitFor(() => {
       expect(screen.getByRole("dialog")).toBeTruthy();
     });
-    expect(getLoc("src/a.ts:1")).toBeTruthy();
+    expect(fileRow("src/a.ts")).toBeTruthy();
   });
 
   it("blurs the query on Escape when not running", () => {
@@ -852,31 +990,37 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getAllByRole("listitem")).toHaveLength(2);
+      expect(fileRow("src/a.ts")).toBeTruthy();
+      expect(fileRow("src/b.ts")).toBeTruthy();
     });
     await waitFor(() => {
       expect(
-        document.querySelector(".preview-line.current")?.textContent,
+        document.querySelector(".preview-pane .preview-line.current")
+          ?.textContent,
       ).toMatch(/hello world/);
     });
-    expect(document.querySelector(".preview-text mark")?.textContent).toBe(
-      "hello",
-    );
-    expect(document.querySelector(".preview-text mark")?.className).toContain(
-      "hl-0",
-    );
-    expect(document.querySelectorAll(".preview-line")).toHaveLength(1);
+    expect(
+      document.querySelector(".preview-pane .preview-text mark")?.textContent,
+    ).toBe("hello");
+    expect(
+      document.querySelector(".preview-pane .preview-text mark")?.className,
+    ).toContain("hl-0");
+    expect(
+      document.querySelectorAll(".preview-pane .preview-line"),
+    ).toHaveLength(1);
     expect(document.querySelector(".result-virtual-row")).toBeTruthy();
     const searchesAfterLoad = searchCallCount(fetchMock);
     fireEvent.click(getLoc("src/b.ts:3"));
     await waitFor(() => {
       expect(
-        document.querySelector(".preview-line.current")?.textContent,
+        document.querySelector(".preview-pane .preview-line.current")
+          ?.textContent,
       ).toMatch(/hello there/);
     });
-    expect(document.querySelectorAll(".preview-line")).toHaveLength(1);
+    expect(
+      document.querySelectorAll(".preview-pane .preview-line"),
+    ).toHaveLength(1);
     expect(searchCallCount(fetchMock)).toBe(searchesAfterLoad);
-    expect(document.querySelector(".result-virtual-row")).toBeTruthy();
   });
 
   it("opens a context modal with surrounding file lines", async () => {
@@ -902,6 +1046,204 @@ describe("search flow", () => {
       /line 1/,
     );
     expect(dialog.querySelector(".preview-find")).toBeNull();
+    expect(screen.queryByLabelText("Go to line")).toBeNull();
+  });
+
+  it("opens a tree file in the context modal from line 1", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    await waitFor(() => {
+      expect(dialog.textContent).toMatch(/ok\.txt line 1/);
+    });
+    const fileUrls = fetchMock.mock.calls
+      .map((call) => requestUrl(call[0] as RequestInfo))
+      .filter((url) => url.includes("/api/file"));
+    expect(fileUrls.some((url) => url.includes("from=1"))).toBe(true);
+    expect(screen.getByLabelText("Go to line")).toBeTruthy();
+    expect(screen.getByText("0 selected")).toBeTruthy();
+  });
+
+  it("jumps to a line in the tree file preview", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
+        /ok\.txt line 1/,
+      );
+    });
+    const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
+    fireEvent.change(goto, { target: { value: "5" } });
+    fireEvent.submit(goto.closest("form") as HTMLFormElement);
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
+        /ok\.txt line 5/,
+      );
+    });
+    fireEvent.change(goto, { target: { value: "50" } });
+    fireEvent.submit(goto.closest("form") as HTMLFormElement);
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
+        /ok\.txt line 50/,
+      );
+    });
+    const fileUrls = fetchMock.mock.calls
+      .map((call) => requestUrl(call[0] as RequestInfo))
+      .filter((url) => url.includes("/api/file"));
+    expect(fileUrls.some((url) => /from=50(?:&|$)/.test(url))).toBe(true);
+  });
+
+  it("shows an empty state when the tree file has no content", async () => {
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      () =>
+        jsonResponse(200, {
+          path: "empty.txt",
+          startLine: 1,
+          lineCount: 0,
+          truncated: false,
+          binary: false,
+          eof: true,
+          lines: [],
+        }),
+      { treeEntries: [{ name: "empty.txt", path: "empty.txt", dir: false }] },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("empty.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    await waitFor(() => {
+      expect(dialog.querySelector(".context-empty")?.textContent).toBe(
+        "This file is empty",
+      );
+    });
+    expect(
+      (screen.getByLabelText("Go to line") as HTMLInputElement).disabled,
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: "Go" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("clamps a missing line to the end of the tree file preview", async () => {
+    const lastLine = 8;
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      (url) => {
+        const parsed = new URL(url, "http://localhost");
+        const path = parsed.searchParams.get("path") ?? "ok.txt";
+        const tail = parsed.searchParams.get("tail") === "1";
+        if (tail) {
+          const lines = [];
+          for (let n = Math.max(1, lastLine - 2); n <= lastLine; n++) {
+            lines.push({ n, text: `${path} line ${n}` });
+          }
+          return jsonResponse(200, {
+            path,
+            startLine: lines[0]?.n ?? lastLine,
+            lineCount: lines.length,
+            truncated: false,
+            binary: false,
+            eof: true,
+            lines,
+          });
+        }
+        const from = Number(parsed.searchParams.get("from") ?? "1");
+        if (from > lastLine) {
+          return jsonResponse(200, {
+            path,
+            startLine: from,
+            lineCount: 0,
+            truncated: false,
+            binary: false,
+            eof: true,
+            lines: [],
+          });
+        }
+        const count = Number(parsed.searchParams.get("count") ?? "160");
+        const last = Math.min(from + Math.min(count, 8) - 1, lastLine);
+        const lines = [];
+        for (let n = from; n <= last; n++) {
+          lines.push({ n, text: `${path} line ${n}` });
+        }
+        return jsonResponse(200, {
+          path,
+          startLine: from,
+          lineCount: lines.length,
+          truncated: false,
+          binary: false,
+          eof: last >= lastLine,
+          lines,
+        });
+      },
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
+        /ok\.txt line 1/,
+      );
+    });
+    const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
+    fireEvent.change(goto, { target: { value: "50" } });
+    fireEvent.submit(goto.closest("form") as HTMLFormElement);
+    await waitFor(() => {
+      expect(screen.getByText("No line 50 · jumped to 8")).toBeTruthy();
+      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
+        /ok\.txt line 8/,
+      );
+    });
+    expect(goto.value).toBe("8");
+    fireEvent.change(goto, { target: { value: "3" } });
+    fireEvent.submit(goto.closest("form") as HTMLFormElement);
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
+        /ok\.txt line 3/,
+      );
+    });
+    expect(screen.queryByText(/No line 50/)).toBeNull();
+  });
+
+  it("rejects an invalid line number in the tree file preview", async () => {
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    await screen.findByRole("dialog", { name: "Context" });
+    const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
+    fireEvent.change(goto, { target: { value: "abc" } });
+    fireEvent.submit(goto.closest("form") as HTMLFormElement);
+    expect(screen.getByText("Enter a valid line number")).toBeTruthy();
   });
 
   it("copy icon copies the full preview line", async () => {
@@ -956,7 +1298,7 @@ describe("search flow", () => {
       "input",
     )[1] as HTMLInputElement | null;
     expect(rgInput?.value).toBe(
-      `( cd /tmp/project && find . -type f ! -path "*/.git/*" ${findMtimePredicate("today")} -print0 | xargs -0 -r rg -n -F -i --hidden -- hello )`,
+      "rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg '^1:' -r ''",
     );
     expect(linkInput?.value).toContain("q=hello");
     expect(new URL(linkInput?.value ?? "").searchParams.get("p")).toBe(
@@ -965,7 +1307,7 @@ describe("search flow", () => {
     expect(linkInput?.value).toContain("n=1");
     fireEvent.click(screen.getByRole("button", { name: "Copy rg command" }));
     expect(writeText).toHaveBeenCalledWith(
-      `( cd /tmp/project && find . -type f ! -path "*/.git/*" ${findMtimePredicate("today")} -print0 | xargs -0 -r rg -n -F -i --hidden -- hello )`,
+      "rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg '^1:' -r ''",
     );
     fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
     expect(writeText).toHaveBeenLastCalledWith(linkInput?.value);
@@ -990,7 +1332,7 @@ describe("search flow", () => {
       .getByRole("dialog", { name: "Share" })
       .querySelector("input") as HTMLInputElement | null;
     expect(rgInput?.value).toBe(
-      '( cd /tmp/project && find . -type f ! -path "*/.git/*" -mtime -7 -print0 | xargs -0 -r rg -n -F -i --hidden -- hello )',
+      "rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg '^1:' -r ''",
     );
   });
 
@@ -1011,9 +1353,6 @@ describe("search flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Aa" }));
     fireEvent.click(screen.getByRole("button", { name: "\\b" }));
     fireEvent.click(screen.getByRole("button", { name: ".*" }));
-    fireEvent.change(screen.getByPlaceholderText("*.ts, src/**"), {
-      target: { value: "*.ts" },
-    });
     fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
       target: { value: "*.test.ts" },
     });
@@ -1030,7 +1369,7 @@ describe("search flow", () => {
       "input",
     )[1] as HTMLInputElement | null;
     expect(rgInput?.value).toBe(
-      `( cd /tmp/project && rg --null --files --hidden --glob '*.ts' --glob '!*.test.ts' . | xargs -0 -r sh -c 'find "$@" -type f ! -path "*/.git/*" ${findMtimePredicate("today")} -print0' _ | xargs -0 -r rg -n -s -w --hidden -- hello )`,
+      "rg -n -s -w --hidden -- hello /tmp/project/src/a.ts | rg '^1:' -r ''",
     );
     const shared = new URL(linkInput?.value ?? "");
     expect(shared.searchParams.get("q")).toBe("hello");
@@ -1039,7 +1378,7 @@ describe("search flow", () => {
     expect(shared.searchParams.get("s")).toBe("1");
     expect(shared.searchParams.get("w")).toBe("1");
     expect(shared.searchParams.get("r")).toBe("1");
-    expect(shared.searchParams.get("i")).toBe("*.ts");
+    expect(shared.searchParams.get("i")).toBeNull();
     expect(shared.searchParams.get("x")).toBe("*.test.ts");
   });
 
@@ -1067,9 +1406,6 @@ describe("search flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Aa" }));
     fireEvent.click(screen.getByRole("button", { name: "\\b" }));
     fireEvent.click(screen.getByRole("button", { name: ".*" }));
-    fireEvent.change(screen.getByPlaceholderText("*.ts, src/**"), {
-      target: { value: "*.ts" },
-    });
     fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
       target: { value: "*.test.ts" },
     });
@@ -1086,7 +1422,7 @@ describe("search flow", () => {
       "input",
     )[1] as HTMLInputElement | null;
     expect(rgInput?.value).toBe(
-      `( cd /tmp/project && rg --null --files --hidden --glob '*.ts' --glob '!*.test.ts' ok.txt | xargs -0 -r sh -c 'find "$@" -type f ! -path "*/.git/*" ${findMtimePredicate("today")} -print0' _ | xargs -0 -r rg -n -s -w --hidden -- hello )`,
+      "rg -n -s -w --hidden -- hello /tmp/project/src/a.ts | rg '^1:' -r ''",
     );
     const shared = new URL(linkInput?.value ?? "");
     expect(shared.searchParams.get("q")).toBe("hello");
@@ -1095,10 +1431,11 @@ describe("search flow", () => {
     expect(shared.searchParams.get("s")).toBe("1");
     expect(shared.searchParams.get("w")).toBe("1");
     expect(shared.searchParams.get("r")).toBe("1");
-    expect(shared.searchParams.get("i")).toBe("*.ts");
+    expect(shared.searchParams.get("i")).toBeNull();
+    expect(shared.searchParams.get("k")).toBeNull();
     expect(shared.searchParams.get("x")).toBe("*.test.ts");
     expect(window.location.search).toContain("f=ok.txt");
-    expect(window.location.search).toContain("i=");
+    expect(window.location.search).not.toContain("i=");
   });
 
   it("share link and rg command carry AND terms", async () => {
@@ -1110,8 +1447,8 @@ describe("search flow", () => {
     );
     render(<App />);
     typeQuery("hello");
-    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
-    fireEvent.change(await screen.findByRole("textbox", { name: "Add condition" }), {
+    addFilterField();
+    fireEvent.change(await screen.findByRole("textbox", { name: "Add filter" }), {
       target: { value: "world" },
     });
     clickSearch();
@@ -1124,12 +1461,12 @@ describe("search flow", () => {
     const linkInput = dialog.querySelectorAll("input")[1] as HTMLInputElement;
     const shared = new URL(linkInput.value);
     expect(shared.searchParams.getAll("q")).toEqual(["hello", "world"]);
-    expect(rgInput.value).toContain("hello.*world");
-    expect(rgInput.value).toContain("world.*hello");
-    expect(rgInput.value).not.toContain(" -F ");
+    expect(rgInput.value).toContain(" -- hello /tmp/project/src/a.ts");
+    expect(rgInput.value).toContain("| rg -F -i -- world");
+    expect(rgInput.value).toContain("| rg '^1:' -r ''");
   });
 
-  it("share link and rg command carry exclude-selected files", async () => {
+  it("share link carries selected files as include picks", async () => {
     mockFetch(
       () =>
         sseResponse([
@@ -1147,7 +1484,7 @@ describe("search flow", () => {
     });
     fireEvent.click(screen.getByText("skip.txt"));
     typeQuery("hello");
-    fireEvent.click(screen.getByRole("button", { name: "Exclude selected" }));
+    clickSearch();
     await waitFor(() => {
       expect(screen.getByRole("button", { name: "Share" })).toBeTruthy();
     });
@@ -1157,10 +1494,10 @@ describe("search flow", () => {
     const linkInput = dialog.querySelectorAll("input")[1] as HTMLInputElement;
     const shared = new URL(linkInput.value);
     expect(shared.searchParams.getAll("f")).toEqual(["skip.txt"]);
-    expect(shared.searchParams.get("k")).toBe("x");
-    expect(rgInput.value).toContain("--glob '!skip.txt'");
-    expect(rgInput.value).toContain(" cd /tmp/project && ");
-    expect(rgInput.value).toContain("find \"$@\" -type f");
+    expect(shared.searchParams.get("k")).toBeNull();
+    expect(rgInput.value).toBe(
+      "rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg '^1:' -r ''",
+    );
   });
 
   it("share omits time from both links when the range is cleared", async () => {
@@ -1171,7 +1508,6 @@ describe("search flow", () => {
       ]),
     );
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Today" }));
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
@@ -1183,7 +1519,7 @@ describe("search flow", () => {
     const linkInput = dialog.querySelectorAll("input")[1] as HTMLInputElement;
     expect(new URL(linkInput.value).searchParams.get("t")).toBeNull();
     expect(rgInput.value).toBe(
-      "( cd /tmp/project && rg -n -F -i --hidden -- hello . )",
+      "rg -n -F -i --hidden -- hello /tmp/project/src/a.ts | rg '^1:' -r ''",
     );
   });
 
@@ -1221,7 +1557,7 @@ describe("search flow", () => {
     window.history.replaceState(
       {},
       "",
-      "/?q=hello&p=src%2Fb.ts&n=3&s=1&w=1&r=1&i=*.ts&x=*.test.ts",
+      "/?q=hello&p=src%2Fb.ts&n=3&s=1&w=1&r=1&x=*.test.ts",
     );
     let body = "";
     mockFetch((init) => {
@@ -1247,9 +1583,7 @@ describe("search flow", () => {
     expect(screen.getByRole("button", { name: ".*" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    expect(
-      (screen.getByPlaceholderText("*.ts, src/**") as HTMLInputElement).value,
-    ).toBe("*.ts");
+    expect(screen.queryByPlaceholderText("*.ts, src/**")).toBeNull();
     expect(
       (screen.getByPlaceholderText("*.test.ts") as HTMLInputElement).value,
     ).toBe("*.test.ts");
@@ -1267,7 +1601,7 @@ describe("search flow", () => {
     expect(parsed.wordMatch).toBe(true);
     expect(parsed.regex).toBe(true);
     expect(parsed.globInclude).toEqual(["src/b.ts"]);
-    expect(parsed.globAnd).toEqual(["*.ts"]);
+    expect(parsed.globAnd ?? []).toEqual([]);
     expect(parsed.globExclude).toEqual(["*.test.ts"]);
   });
 
@@ -1275,7 +1609,7 @@ describe("search flow", () => {
     window.history.replaceState(
       {},
       "",
-      "/?q=hello&f=ok.txt&s=1&w=1&r=1&i=*.ts&x=*.test.ts&p=src%2Fa.ts&n=1",
+      "/?q=hello&f=ok.txt&s=1&w=1&r=1&x=*.test.ts&p=src%2Fa.ts&n=1",
     );
     let body = "";
     mockFetch(
@@ -1300,9 +1634,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("1 selected")).toBeTruthy();
     });
-    expect(
-      (screen.getByPlaceholderText("*.ts, src/**") as HTMLInputElement).value,
-    ).toBe("*.ts");
+    expect(screen.queryByPlaceholderText("*.ts, src/**")).toBeNull();
     const parsed = JSON.parse(body) as {
       caseSensitive?: boolean;
       wordMatch?: boolean;
@@ -1315,15 +1647,15 @@ describe("search flow", () => {
     expect(parsed.wordMatch).toBe(true);
     expect(parsed.regex).toBe(true);
     expect(parsed.globInclude).toEqual(["ok.txt"]);
-    expect(parsed.globAnd).toEqual(["*.ts"]);
+    expect(parsed.globAnd ?? []).toEqual([]);
     expect(parsed.globExclude).toEqual(["*.test.ts"]);
   });
 
-  it("opens a shared AND query and exclude-selected files", async () => {
+  it("opens a shared AND query with tree picks as include", async () => {
     window.history.replaceState(
       {},
       "",
-      "/?q=hello&q=world&f=skip.txt&k=x&t=7d",
+      "/?q=hello&q=world&f=skip.txt&t=7d",
     );
     let body = "";
     mockFetch(
@@ -1348,14 +1680,23 @@ describe("search flow", () => {
     const parsed = JSON.parse(body) as {
       query: string;
       regex?: boolean;
+      andTerms?: string[];
       globInclude?: string[];
       globExclude?: string[];
       mtimeAfter?: number;
     };
-    expect(parsed.regex).toBe(true);
-    expect(parsed.query).toContain("hello.*world");
-    expect(parsed.globInclude ?? []).toEqual([]);
-    expect(parsed.globExclude).toEqual(["skip.txt"]);
+    expect(parsed.regex ?? false).toBe(false);
+    expect(parsed.query).toBe("hello");
+    expect(parsed.andTerms ?? []).toEqual([
+      {
+        query: "world",
+        regex: false,
+        caseSensitive: false,
+        wordMatch: false,
+      },
+    ]);
+    expect(parsed.globInclude).toEqual(["skip.txt"]);
+    expect(parsed.globExclude ?? []).toEqual([]);
     expect(parsed.mtimeAfter).toBeGreaterThan(Date.now() - 8 * 86_400_000);
   });
 
@@ -1480,7 +1821,7 @@ describe("search flow", () => {
     });
   });
 
-  it("search selection keeps case, word, regex, include, and exclude", async () => {
+  it("search selection keeps case, word, regex, picks, and exclude", async () => {
     const fetchMock = mockFetch(
       () =>
         sseResponse([
@@ -1517,9 +1858,6 @@ describe("search flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Aa" }));
     fireEvent.click(screen.getByRole("button", { name: "\\b" }));
     fireEvent.click(screen.getByRole("button", { name: ".*" }));
-    fireEvent.change(screen.getByPlaceholderText("*.ts, src/**"), {
-      target: { value: "*.ts" },
-    });
     fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
       target: { value: "*.test.ts" },
     });
@@ -1544,11 +1882,11 @@ describe("search flow", () => {
     expect(body.wordMatch).toBe(true);
     expect(body.regex).toBe(true);
     expect(body.globInclude).toEqual(["ok.txt"]);
-    expect(body.globAnd).toEqual(["*.ts"]);
+    expect(body.globAnd ?? []).toEqual([]);
     expect(body.globExclude).toEqual(["*.test.ts"]);
   });
 
-  it("search selection without tree picks still sends include and exclude", async () => {
+  it("search selection without tree picks still sends exclude", async () => {
     const fetchMock = mockFetch(() =>
       sseResponse([
         sseEvent("hit", HIT_A),
@@ -1567,9 +1905,6 @@ describe("search flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Aa" }));
     fireEvent.click(screen.getByRole("button", { name: "\\b" }));
     fireEvent.click(screen.getByRole("button", { name: ".*" }));
-    fireEvent.change(screen.getByPlaceholderText("*.ts, src/**"), {
-      target: { value: "src/**" },
-    });
     fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
       target: { value: "*.test.ts" },
     });
@@ -1593,7 +1928,7 @@ describe("search flow", () => {
     expect(body.caseSensitive).toBe(true);
     expect(body.wordMatch).toBe(true);
     expect(body.regex).toBe(true);
-    expect(body.globInclude).toEqual(["src/**"]);
+    expect(body.globInclude ?? []).toEqual([]);
     expect(body.globAnd ?? []).toEqual([]);
     expect(body.globExclude).toEqual(["*.test.ts"]);
   });
@@ -1602,22 +1937,23 @@ describe("search flow", () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
-    expect(screen.queryByRole("textbox", { name: "Add condition" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Add filter" })).toBeNull();
+    openFilters();
     expect(
-      (screen.getByRole("button", { name: "Add condition" }) as HTMLButtonElement)
+      (screen.getByRole("button", { name: "Add filter" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
   });
 
-  it("Shift+Enter adds a condition even when the AND caret is focused", async () => {
+  it("Shift+Enter adds a filter even when the filter button is focused", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     typeQuery("hello");
-    const caret = screen.getByRole("button", { name: "AND conditions" });
+    const caret = screen.getByRole("button", { name: "Filters" });
     caret.focus();
     fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
     expect(
-      await screen.findByRole("textbox", { name: "Add condition" }),
+      await screen.findByRole("textbox", { name: "Add filter" }),
     ).toBeTruthy();
     expect(document.querySelector(".search-and-pop")).toBeTruthy();
     expect(document.querySelectorAll(".search-and-item")).toHaveLength(1);
@@ -1634,20 +1970,28 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(getLoc("src/a.ts:1")).toBeTruthy();
+      expect(fileRow("src/a.ts")).toBeTruthy();
     });
     const searchesAfterFirst = searchCallCount(fetchMock);
     const box = screen.getByRole("searchbox");
     fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
-    const extra = await screen.findByRole("textbox", { name: "Add condition" });
+    const extra = await screen.findByRole("textbox", { name: "Add filter" });
     expect(document.querySelector(".search-and-pop")).toBeTruthy();
     expect(searchCallCount(fetchMock)).toBe(searchesAfterFirst);
     fireEvent.change(extra, { target: { value: "world" } });
     clickSearch();
     await waitFor(() => {
-      expect(lastSearchBody(fetchMock).query).toBe(
-        "hello.*world|world.*hello",
-      );
+      const body = lastSearchRequest(fetchMock);
+      expect(body.query).toBe("hello");
+      expect(body.regex ?? false).toBe(false);
+      expect(body.andTerms ?? []).toEqual([
+        {
+          query: "world",
+          regex: false,
+          caseSensitive: false,
+          wordMatch: false,
+        },
+      ]);
     });
   });
 
@@ -1662,10 +2006,10 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(getLoc("src/a.ts:1")).toBeTruthy();
+      expect(fileRow("src/a.ts")).toBeTruthy();
     });
     await waitFor(() => {
-      expect(document.querySelector(".preview-line.current")).toBeTruthy();
+      expect(document.querySelector(".preview-pane .preview-line.current")).toBeTruthy();
     });
     fireEvent.click(
       document.querySelector(".search-clear") as HTMLButtonElement,
@@ -1673,7 +2017,7 @@ describe("search flow", () => {
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("");
     expect(document.querySelectorAll(".q-chip")).toHaveLength(0);
     expect(queryLoc("src/a.ts:1")).toBeNull();
-    expect(document.querySelector(".preview-line.current")).toBeNull();
+    expect(document.querySelector(".preview-pane .preview-line.current")).toBeNull();
     expect(document.querySelector(".empty-idle")).toBeTruthy();
     expect(document.querySelector(".preview-idle")).toBeTruthy();
   });
@@ -1694,28 +2038,64 @@ describe("search flow", () => {
     expect(lastSearchBody(fetchMock).regex).toBe(false);
   });
 
+  it("lets each AND field set its own regex flag", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([sseEvent("done", donePayload())]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    addFilterField();
+    const extra = await screen.findByRole("textbox", { name: "Add filter" });
+    fireEvent.change(extra, { target: { value: "world.*" } });
+    const regexBtns = screen.getAllByRole("button", { name: ".*" });
+    expect(regexBtns.length).toBeGreaterThan(1);
+    fireEvent.click(regexBtns[1] as HTMLButtonElement);
+    await waitFor(() => {
+      const body = lastSearchRequest(fetchMock);
+      expect(body.query).toBe("hello");
+      expect(body.regex ?? false).toBe(false);
+      expect(body.andTerms).toEqual([
+        {
+          query: "world.*",
+          regex: true,
+          caseSensitive: false,
+          wordMatch: false,
+        },
+      ]);
+    });
+  });
+
   it("adds another search field for an AND condition", async () => {
     const fetchMock = mockFetch(() =>
       sseResponse([sseEvent("done", donePayload())]),
     );
     render(<App />);
     typeQuery("hello world");
-    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
-    const extra = await screen.findByRole("textbox", { name: "Add condition" });
+    addFilterField();
+    const extra = await screen.findByRole("textbox", { name: "Add filter" });
     fireEvent.change(extra, { target: { value: "timeout" } });
     clickSearch();
     await waitFor(() => {
-      expect(lastSearchBody(fetchMock).query).toBe(
-        "hello world.*timeout|timeout.*hello world",
-      );
+      const body = lastSearchRequest(fetchMock);
+      expect(body.query).toBe("hello world");
+      expect(body.andTerms).toEqual([
+        {
+          query: "timeout",
+          regex: false,
+          caseSensitive: false,
+          wordMatch: false,
+        },
+      ]);
+      expect(body.regex ?? false).toBe(false);
     });
     expect(document.querySelector(".search-and-pop")).toBeNull();
+    expect(document.querySelector(".search-add-count")?.textContent).toBe("1");
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
       "hello world",
     );
-    fireEvent.click(screen.getByRole("button", { name: "AND conditions" }));
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
     expect(
-      (screen.getByRole("textbox", { name: "Add condition" }) as HTMLInputElement)
+      (screen.getByRole("textbox", { name: "Add filter" }) as HTMLInputElement)
         .value,
     ).toBe("timeout");
   });
@@ -1768,16 +2148,17 @@ describe("search flow", () => {
     expect(document.querySelector(".search-and-pop")).toBeNull();
   });
 
-  it("opens AND conditions from the caret without adding a field", async () => {
+  it("opens Filters from the filter button without adding a field", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     expect(document.querySelector(".search-and-pop")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "AND conditions" }));
+    expect(document.querySelector(".search-add-count")?.textContent).toBe("0");
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
     expect(document.querySelector(".search-and-pop")).toBeTruthy();
     expect(document.querySelector(".search-drop-backdrop")).toBeTruthy();
     expect(screen.queryByText("Recent searches")).toBeNull();
     expect(
-      screen.queryByRole("textbox", { name: "Add condition" }),
+      screen.queryByRole("textbox", { name: "Add filter" }),
     ).toBeNull();
     expect(document.querySelector(".search-and-more")).toBeTruthy();
     expect(document.querySelector(".search-and-go")).toBeTruthy();
@@ -1793,8 +2174,8 @@ describe("search flow", () => {
     );
     render(<App />);
     typeQuery("hello");
-    fireEvent.click(screen.getByRole("button", { name: "Add condition" }));
-    await screen.findByRole("textbox", { name: "Add condition" });
+    addFilterField();
+    await screen.findByRole("textbox", { name: "Add filter" });
     expect(
       (document.querySelector(".search-and-more") as HTMLButtonElement).disabled,
     ).toBe(true);
@@ -1849,7 +2230,7 @@ describe("search flow", () => {
     });
   });
 
-  it("toggles between grouped and flat result views", async () => {
+  it("groups logs under filenames without collapsing", async () => {
     mockFetch(() =>
       sseResponse([
         sseEvent("hit", HIT_A),
@@ -1861,19 +2242,257 @@ describe("search flow", () => {
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
-      expect(document.querySelector(".result-group-header")).toBeTruthy();
+      expect(fileRow("src/a.ts")).toBeTruthy();
+      expect(fileRow("src/b.ts")).toBeTruthy();
+      expect(getLoc("src/a.ts:1")).toBeTruthy();
+      expect(getLoc("src/b.ts:3")).toBeTruthy();
     });
-    fireEvent.click(screen.getByTitle("Flat View"));
+    expect(
+      document.querySelector(".result-sticky-header .result-group-path")
+        ?.textContent,
+    ).toBe("src/a.ts");
+    expect(screen.queryByRole("button", { name: "Back to files" })).toBeNull();
+    expect(
+      document.querySelector(".result-log .result-text")?.textContent,
+    ).toContain("hello world");
+    fireEvent.click(fileRow("src/a.ts") as HTMLElement);
     await waitFor(() => {
-      expect(document.querySelector(".result-group-header")).toBeNull();
-      expect(document.querySelector(".result-virtual-row")).toBeTruthy();
+      expect(queryLoc("src/a.ts:1")).toBeNull();
     });
-    fireEvent.click(screen.getByTitle("Group by File"));
+    expect(queryLoc("src/b.ts:3")).toBeTruthy();
+    fireEvent.click(fileRow("src/a.ts") as HTMLElement);
     await waitFor(() => {
-      expect(document.querySelector(".result-group-header")).toBeTruthy();
+      expect(queryLoc("src/a.ts:1")).toBeTruthy();
+    });
+  });
+
+  it("collapses and expands every file from the results pane", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("hit", HIT_B),
+        sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(getLoc("src/a.ts:1")).toBeTruthy();
+      expect(getLoc("src/b.ts:3")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    await waitFor(() => {
+      expect(queryLoc("src/a.ts:1")).toBeNull();
+      expect(queryLoc("src/b.ts:3")).toBeNull();
+    });
+    expect(fileRow("src/a.ts")).toBeTruthy();
+    expect(fileRow("src/b.ts")).toBeTruthy();
+    expect(document.querySelector(".pane-head .result-fold-all")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    await waitFor(() => {
+      expect(getLoc("src/a.ts:1")).toBeTruthy();
+      expect(getLoc("src/b.ts:3")).toBeTruthy();
+    });
+    fireEvent.click(fileRow("src/a.ts") as HTMLElement);
+    await waitFor(() => {
+      expect(queryLoc("src/a.ts:1")).toBeNull();
+    });
+    expect(queryLoc("src/b.ts:3")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
+    await waitFor(() => {
+      expect(queryLoc("src/a.ts:1")).toBeNull();
+      expect(queryLoc("src/b.ts:3")).toBeNull();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    await waitFor(() => {
+      expect(getLoc("src/a.ts:1")).toBeTruthy();
+      expect(getLoc("src/b.ts:3")).toBeTruthy();
+    });
+  });
+
+  it("keeps both filenames after collapsing every group", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("hit", HIT_B),
+        sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(fileRow("src/a.ts")).toBeTruthy();
+      expect(fileRow("src/b.ts")).toBeTruthy();
+    });
+    for (const path of ["src/a.ts", "src/b.ts"]) {
+      for (const node of document.querySelectorAll(
+        `[data-file-path="${path}"]`,
+      )) {
+        if (node.getAttribute("aria-expanded") === "true") {
+          fireEvent.click(node);
+        }
+      }
+    }
+    await waitFor(() => {
+      expect(queryLoc("src/a.ts:1")).toBeNull();
+      expect(queryLoc("src/b.ts:3")).toBeNull();
+    });
+    const visibleNames = Array.from(
+      document.querySelectorAll(".result-group-path"),
+    )
+      .filter((node) => node.closest(".is-stuck") === null)
+      .map((node) => node.textContent);
+    expect(visibleNames).toContain("src/a.ts");
+    expect(visibleNames).toContain("src/b.ts");
+    expect(new Set(visibleNames).size).toBe(2);
+  });
+
+  it("keeps the frozen filename after sorting the second file", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", {
+          path: "src/a.ts",
+          line: 1,
+          text: "hello a-1",
+          matches: [{ start: 0, end: 5 }],
+        }),
+        sseEvent("hit", {
+          path: "src/a.ts",
+          line: 2,
+          text: "hello a-2",
+          matches: [{ start: 0, end: 5 }],
+        }),
+        sseEvent("hit", {
+          path: "src/b.ts",
+          line: 10,
+          text: "hello b-10",
+          matches: [{ start: 0, end: 5 }],
+        }),
+        sseEvent("hit", {
+          path: "src/b.ts",
+          line: 20,
+          text: "hello b-20",
+          matches: [{ start: 0, end: 5 }],
+        }),
+        sseEvent("done", donePayload({ matchCount: 4, fileCount: 2 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(getLoc("src/b.ts:10")).toBeTruthy();
+    });
+    fireEvent.click(getLoc("src/b.ts:20"));
+    const sortButtons = screen.getAllByRole("button", {
+      name: "Line number ascending",
+    });
+    fireEvent.click(sortButtons[sortButtons.length - 1] as HTMLButtonElement);
+    await waitFor(() => {
+      expect(
+        document.querySelector(".result-sticky-header .result-group-path")
+          ?.textContent,
+      ).toBeTruthy();
+    });
+    const frozen = document.querySelector(
+      ".result-sticky-header .result-group-path",
+    )?.textContent;
+    expect(frozen === "src/a.ts" || frozen === "src/b.ts").toBe(true);
+    expect(
+      document.querySelector(".result-sticky-header")?.textContent,
+    ).toMatch(/src\//);
+  });
+
+  it("shows long file logs without skip chips", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", {
+          path: "src/a.ts",
+          line: 1,
+          text: `hello ${"x".repeat(4000)}`,
+          matches: [{ start: 0, end: 5 }],
+        }),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(
+        document.querySelector(".result-log .result-text")?.textContent,
+      ).toMatch(/^hello /);
+    });
+    expect(document.querySelector(".result-log .result-snip-skip")).toBeNull();
+  });
+
+  it("sorts each file's hits by line number independently", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", {
+          path: "src/a.ts",
+          line: 1,
+          text: "hello first",
+          matches: [{ start: 0, end: 5 }],
+        }),
+        sseEvent("hit", {
+          path: "src/a.ts",
+          line: 9,
+          text: "hello last",
+          matches: [{ start: 0, end: 5 }],
+        }),
+        sseEvent("hit", {
+          path: "src/b.ts",
+          line: 2,
+          text: "hello b-low",
+          matches: [{ start: 0, end: 5 }],
+        }),
+        sseEvent("hit", {
+          path: "src/b.ts",
+          line: 8,
+          text: "hello b-high",
+          matches: [{ start: 0, end: 5 }],
+        }),
+        sseEvent("done", donePayload({ matchCount: 4, fileCount: 2 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(getLoc("src/a.ts:1")).toBeTruthy();
+    });
+    const pills = () =>
+      Array.from(document.querySelectorAll(".result-line-pill")).map(
+        (node) => node.textContent,
+      );
+    expect(pills()).toEqual(["1", "9", "2", "8"]);
+    fireEvent.click(
+      screen.getAllByRole("button", { name: "Line number ascending" })[0] as HTMLButtonElement,
+    );
+    await waitFor(() => {
+      expect(pills()).toEqual(["9", "1", "2", "8"]);
+    });
+    expect(
+      document.querySelector(".result-log.selected .result-line-pill")
+        ?.textContent,
+    ).toBe("9");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Line number ascending" }),
+    );
+    await waitFor(() => {
+      expect(pills()).toEqual(["9", "1", "8", "2"]);
     });
   });
 });
+
+function treeRequestUrls(fetchMock: ReturnType<typeof vi.fn>): string[] {
+  return fetchMock.mock.calls
+    .map((call) => requestUrl(call[0] as RequestInfo))
+    .filter((url) => url.includes("/api/tree"));
+}
 
 function searchCalls(fetchMock: ReturnType<typeof vi.fn>) {
   return fetchMock.mock.calls.filter(
@@ -1898,9 +2517,11 @@ function lastSearchRequest(fetchMock: ReturnType<typeof vi.fn>): {
   regex: boolean;
   caseSensitive?: boolean;
   wordMatch?: boolean;
+  andTerms?: string[];
   globInclude?: string[];
   globAnd?: string[];
   globExclude?: string[];
+  mtimeAfter?: number;
 } {
   const raw = searchCalls(fetchMock).at(-1)?.[1]?.body;
   if (typeof raw !== "string") {
@@ -1911,8 +2532,10 @@ function lastSearchRequest(fetchMock: ReturnType<typeof vi.fn>): {
     regex: boolean;
     caseSensitive?: boolean;
     wordMatch?: boolean;
+    andTerms?: string[];
     globInclude?: string[];
     globAnd?: string[];
     globExclude?: string[];
+    mtimeAfter?: number;
   };
 }

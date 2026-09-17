@@ -2,6 +2,7 @@ package rg
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"path/filepath"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"web-grep/internal/config"
 	"web-grep/internal/sandbox"
+	"web-grep/internal/utf8cut"
 )
 
 var (
@@ -50,7 +52,8 @@ func ParseMatchLine(line []byte) (Match, bool) {
 				Text string `json:"text"`
 			} `json:"path"`
 			Lines struct {
-				Text string `json:"text"`
+				Text  string `json:"text"`
+				Bytes string `json:"bytes"`
 			} `json:"lines"`
 			LineNumber int `json:"line_number"`
 			Submatches []struct {
@@ -68,7 +71,7 @@ func ParseMatchLine(line []byte) (Match, bool) {
 	m := Match{
 		Path: raw.Data.Path.Text,
 		Line: raw.Data.LineNumber,
-		Text: raw.Data.Lines.Text,
+		Text: decodeRgLine(raw.Data.Lines.Text, raw.Data.Lines.Bytes),
 	}
 	for _, s := range raw.Data.Submatches {
 		m.Submatches = append(m.Submatches, [2]int{s.Start, s.End})
@@ -106,10 +109,7 @@ func ToRelativeHit(rootReal string, allowSecrets bool, m Match) (Hit, bool) {
 	if sandbox.IsDenied(rel, allowSecrets) {
 		return Hit{}, false
 	}
-	text := stripLineEnd(m.Text)
-	if len(text) > config.LineTextMaxChars {
-		text = text[:config.LineTextMaxChars]
-	}
+	text := utf8cut.String(stripLineEnd(m.Text), config.LineTextMaxChars)
 	limit := utf16Len(text)
 	var spans []Span
 	for _, sm := range m.Submatches {
@@ -159,6 +159,20 @@ func utf8ByteOffsetToUTF16(s string, byteOff int) int {
 		return -1
 	}
 	return utf16Len(prefix)
+}
+
+func decodeRgLine(text, b64 string) string {
+	if text != "" {
+		return text
+	}
+	if b64 == "" {
+		return ""
+	}
+	raw, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return ""
+	}
+	return strings.ToValidUTF8(string(raw), "\uFFFD")
 }
 
 func stripLineEnd(text string) string {

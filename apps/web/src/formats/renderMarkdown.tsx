@@ -12,7 +12,7 @@ export function MarkdownView({
   opts = DEFAULT_HL_OPTS,
 }: {
   text: string;
-  terms?: string[];
+  terms?: import("../highlight.ts").HlTermInput[];
   opts?: HlOpts;
 }) {
   const html = useMemo(() => {

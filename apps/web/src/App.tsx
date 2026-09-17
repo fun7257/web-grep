@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ContextModal } from "./components/ContextModal.tsx";
+import {
+  ContextModal,
+  type ContextTarget,
+} from "./components/ContextModal.tsx";
 import { EmptyState } from "./components/EmptyState.tsx";
 import { FilePreview } from "./components/FilePreview.tsx";
 import {
@@ -8,7 +11,7 @@ import {
   useTreeOpen,
 } from "./components/FileTree.tsx";
 import { HotkeyHelpModal } from "./components/HotkeyHelpModal.tsx";
-import { IconListFlat, IconListGroup } from "./components/icons.tsx";
+
 import { ResultList } from "./components/ResultList.tsx";
 import { SearchBar } from "./components/SearchBar.tsx";
 import { ShareModal } from "./components/ShareModal.tsx";
@@ -20,6 +23,8 @@ import { LocaleProvider, useLocale } from "./hooks/useLocale.ts";
 import { useResizablePanes } from "./hooks/useResizablePanes.ts";
 import { useSearch } from "./hooks/useSearch.ts";
 import { copyText } from "./copyText.ts";
+import { parseGlobs } from "./globs.ts";
+import type { HlTermInput } from "./highlight.ts";
 import { useAuth } from "./hooks/useAuth.ts";
 import {
   buildShareUrl,
@@ -27,14 +32,16 @@ import {
   parseShareSearch,
   shareUrlSearch,
 } from "./searchShare.ts";
-import { picksToGlobs, picksToSearchGlobs, type TreePick, togglePick } from "./treePicks.ts";
 import {
-  compileParts,
+  picksToSearchGlobs,
+  prunePicksByExclude,
+  type TreePick,
+  togglePick,
+} from "./treePicks.ts";
+import {
   newPart,
   type QueryPart,
-  type SearchModifiers,
   type SearchStack,
-  stackedQuery,
   toRequest,
   toRgShareCommand,
 } from "./searchStack.ts";
@@ -51,20 +58,12 @@ import {
   type TimeRange,
 } from "./timeRange.ts";
 
-const EMPTY_HL_TERMS: string[] = [];
+const EMPTY_HL_TERMS: HlTermInput[] = [];
 
-function parseGlobs(raw: string): string[] {
-  return raw
-    .split(/[,;\s]+/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
-
-function partsFromFields(values: string[]): QueryPart[] {
+function partsFromFields(values: QueryPart[]): QueryPart[] {
   return values
-    .map((value) => value.trim())
-    .filter((value) => value !== "")
-    .map(newPart);
+    .map((part) => ({ ...part, value: part.value.trim() }))
+    .filter((part) => part.value !== "");
 }
 
 function AppShell() {
@@ -75,28 +74,18 @@ function AppShell() {
   const listRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLElement>(null);
   const [parts, setParts] = useState<QueryPart[]>([]);
-  const [fields, setFields] = useState<string[]>([""]);
+  const [fields, setFields] = useState<QueryPart[]>(() => [newPart("")]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [treeOpen, toggleTree] = useTreeOpen();
   const [picks, setPicks] = useState<TreePick[]>([]);
-  const [scope, setScope] = useState<"all" | "include" | "exclude">("all");
-  const [modifiers, setModifiers] = useState<SearchModifiers>({
-    caseSensitive: false,
-    wordMatch: false,
-    regex: false,
-  });
-  const [includeGlobs, setIncludeGlobs] = useState("");
   const [excludeGlobs, setExcludeGlobs] = useState("");
-  const [viewMode, setViewMode] = useState<"grouped" | "flat">(() => {
-    return (
-      (localStorage.getItem("web-grep.viewMode") as "grouped" | "flat") ||
-      "grouped"
-    );
-  });
+
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
-  const [contextOpen, setContextOpen] = useState(false);
+  const [contextTarget, setContextTarget] = useState<ContextTarget | null>(
+    null,
+  );
   const [timeRange, setTimeRange] = useState<TimeRange | null>(loadTimeRange);
   const [searchHistory, setSearchHistory] = useState(loadSearchHistory);
   const [nav, setNav] = useState<{ stack: SearchNavEntry[]; index: number }>({
@@ -107,6 +96,9 @@ function AppShell() {
   const stackRef = useRef<SearchStack | null>(null);
   const bootstrapped = useRef(false);
   const pendingSelect = useRef<{ path: string; line: number } | null>(null);
+  const [hitsHeadActions, setHitsHeadActions] = useState<HTMLDivElement | null>(
+    null,
+  );
 
   const { treeWidth, hitsWidth, startResizeTree, startResizeHits } =
     useResizablePanes();
@@ -121,14 +113,20 @@ function AppShell() {
   const selectedHit = search.hits[selectedIndexClamped] ?? null;
   const lastStack = stackRef.current;
   const hlTerms = useMemo(
-    () => lastStack?.parts.map((part) => part.value) ?? EMPTY_HL_TERMS,
+    () =>
+      lastStack?.parts.map((part) => ({
+        value: part.value,
+        caseSensitive: part.caseSensitive,
+        wordMatch: part.wordMatch,
+        regex: part.regex,
+      })) ?? EMPTY_HL_TERMS,
     [lastStack],
   );
   const hlOpts = useMemo(
     () => ({
-      caseSensitive: lastStack?.caseSensitive ?? false,
-      wordMatch: lastStack?.wordMatch ?? false,
-      regex: lastStack?.regex ?? false,
+      caseSensitive: lastStack?.parts[0]?.caseSensitive ?? false,
+      wordMatch: lastStack?.parts[0]?.wordMatch ?? false,
+      regex: lastStack?.parts[0]?.regex ?? false,
     }),
     [lastStack],
   );
@@ -137,30 +135,15 @@ function AppShell() {
     () =>
       captureShareState({
         fields,
-        fallbackParts: lastStack?.parts.map((part) => part.value),
-        caseSensitive: modifiers.caseSensitive,
-        wordMatch: modifiers.wordMatch,
-        regex: modifiers.regex,
-        includeGlobs,
         excludeGlobs,
         picks,
-        scope,
         timeRange,
+        ...(lastStack !== null ? { fallbackParts: lastStack.parts } : {}),
         ...(selectedHit !== null
           ? { hitPath: selectedHit.path, hitLine: selectedHit.line }
           : {}),
       }),
-    [
-      excludeGlobs,
-      fields,
-      includeGlobs,
-      lastStack,
-      modifiers,
-      picks,
-      scope,
-      selectedHit,
-      timeRange,
-    ],
+    [excludeGlobs, fields, lastStack, picks, selectedHit, timeRange],
   );
   const webUrl =
     shareState !== null && selectedHit !== null
@@ -173,29 +156,31 @@ function AppShell() {
     rootAbs !== undefined &&
     rootAbs !== ""
   ) {
-    const compiled = stackedQuery(shareState.parts, modifiers.regex);
-    if (compiled.query !== "") {
-      const include = parseGlobs(includeGlobs);
-      const exclude = parseGlobs(excludeGlobs);
-      let relPaths = ["."];
-      let globInclude = include;
-      let globExclude = exclude;
-      if (picks.length > 0 && scope === "exclude") {
-        globExclude = [...picksToGlobs(picks), ...exclude];
-      } else if (picks.length > 0) {
-        relPaths = picks.map((item) => (item.path === "" ? "." : item.path));
-      }
+    const query = shareState.parts[0] ?? "";
+    if (query !== "") {
+      const head = shareState.mods?.[0] ?? {
+        caseSensitive: shareState.caseSensitive,
+        wordMatch: shareState.wordMatch,
+        regex: shareState.regex,
+      };
       rgCommand = toRgShareCommand({
-        query: compiled.query,
-        regex: modifiers.regex || compiled.regex,
-        caseSensitive: modifiers.caseSensitive,
-        wordMatch: modifiers.wordMatch,
+        query,
+        regex: head.regex,
+        caseSensitive: head.caseSensitive,
+        wordMatch: head.wordMatch,
         hidden: lastStack?.hidden ?? true,
         rootAbs,
-        relPaths,
-        globInclude,
-        globExclude,
-        timeRange,
+        relPaths: [selectedHit.path],
+        andTerms: shareState.parts.slice(1).map((term, index) => {
+          const mod = shareState.mods?.[index + 1];
+          return {
+            query: term,
+            regex: mod?.regex ?? false,
+            caseSensitive: mod?.caseSensitive ?? false,
+            wordMatch: mod?.wordMatch ?? false,
+          };
+        }),
+        line: selectedHit.line,
       });
     }
   }
@@ -207,59 +192,46 @@ function AppShell() {
   const searchWithParts = useCallback(
     (
       nextParts: QueryPart[],
-      nextScope: "all" | "include" | "exclude" = scope,
       extraInclude: string[] = [],
-      nextModifiers: SearchModifiers = modifiers,
       nextTime: TimeRange | null = timeRange,
       nextPicks: TreePick[] = picks,
-      nextIncludeRaw: string = includeGlobs,
       nextExcludeRaw: string = excludeGlobs,
     ) => {
-      if (nextParts.length === 0) {
+      const ready = partsFromFields(nextParts);
+      if (ready.length === 0) {
         return;
       }
-      const compiled = compileParts(nextParts, nextModifiers.regex);
-      if (compiled.query === "") {
-        return;
-      }
-      const effective: "all" | "include" | "exclude" =
-        nextPicks.length === 0
-          ? "all"
-          : nextScope === "exclude"
-            ? "exclude"
-            : "include";
       const globs = picksToSearchGlobs(
         nextPicks,
-        effective,
         extraInclude,
-        parseGlobs(nextIncludeRaw),
         parseGlobs(nextExcludeRaw),
       );
+      const head = ready[0];
 
       const stack: SearchStack = {
-        parts: nextParts,
+        parts: ready,
         globInclude: globs.globInclude,
-        globAnd: globs.globAnd,
+        globAnd: [],
         globExclude: globs.globExclude,
         path: "",
-        caseSensitive: nextModifiers.caseSensitive,
-        wordMatch: nextModifiers.wordMatch,
-        regex: nextModifiers.regex,
+        caseSensitive: head?.caseSensitive ?? false,
+        wordMatch: head?.wordMatch ?? false,
+        regex: head?.regex ?? false,
         hidden: true,
       };
 
       stackRef.current = stack;
-      setParts(nextParts);
-      setFields(
-        nextParts.length === 0 ? [""] : nextParts.map((part) => part.value),
-      );
+      setParts(ready);
+      setFields(ready);
       setSelectedIndex(0);
       const navEntry: SearchNavEntry = {
-        parts: nextParts.map((part) => part.value),
+        parts: ready.map((part) => ({
+          value: part.value,
+          caseSensitive: part.caseSensitive,
+          wordMatch: part.wordMatch,
+          regex: part.regex,
+        })),
         timeRange: nextTime,
-        caseSensitive: nextModifiers.caseSensitive,
-        wordMatch: nextModifiers.wordMatch,
-        regex: nextModifiers.regex,
       };
       if (!skipNavRef.current) {
         setNav((cur) => pushSearchNav(cur.stack, cur.index, navEntry));
@@ -274,33 +246,27 @@ function AppShell() {
         ),
       );
     },
-    [
-      excludeGlobs,
-      includeGlobs,
-      modifiers,
-      picks,
-      runSearch,
-      scope,
-      timeRange,
-    ],
+    [excludeGlobs, picks, runSearch, timeRange],
   );
 
-  const submit = useCallback(
-    (nextScope: "all" | "include" | "exclude" = scope) => {
-      const parsed = partsFromFields(fields);
-      const fallback = stackRef.current?.parts ?? parts;
-      searchWithParts(parsed.length > 0 ? parsed : fallback, nextScope);
-    },
-    [fields, parts, scope, searchWithParts],
-  );
+  const submit = useCallback(() => {
+    const parsed = partsFromFields(fields);
+    const fallback = stackRef.current?.parts ?? parts;
+    searchWithParts(parsed.length > 0 ? parsed : fallback);
+  }, [fields, parts, searchWithParts]);
 
   const searchSelected = useCallback(
     (text: string) => {
-      const nextScope =
-        picks.length > 0 && scope !== "exclude" ? "include" : scope;
-      searchWithParts([newPart(text)], nextScope, [], modifiers);
+      const current = fields[0];
+      searchWithParts([
+        newPart(text, {
+          caseSensitive: current?.caseSensitive ?? false,
+          wordMatch: current?.wordMatch ?? false,
+          regex: current?.regex ?? false,
+        }),
+      ]);
     },
-    [modifiers, picks.length, scope, searchWithParts],
+    [fields, searchWithParts],
   );
 
   const clearAll = useCallback(() => {
@@ -308,9 +274,9 @@ function AppShell() {
     stackRef.current = null;
     pendingSelect.current = null;
     setShareOpen(false);
-    setContextOpen(false);
+    setContextTarget(null);
     setParts([]);
-    setFields([""]);
+    setFields([newPart("")]);
     setSelectedIndex(0);
     window.history.replaceState(
       window.history.state,
@@ -332,25 +298,10 @@ function AppShell() {
     if (parsed === null) {
       return;
     }
-    const nextMods = {
-      caseSensitive: parsed.caseSensitive,
-      wordMatch: parsed.wordMatch,
-      regex: parsed.regex,
-    };
-    const nextInclude = parsed.includeGlobs ?? "";
     const nextExclude = parsed.excludeGlobs ?? "";
     const nextPicks = parsed.picks ?? [];
-    const nextScope =
-      parsed.scope === "exclude"
-        ? "exclude"
-        : nextPicks.length > 0
-          ? "include"
-          : "all";
-    setModifiers(nextMods);
-    setIncludeGlobs(nextInclude);
     setExcludeGlobs(nextExclude);
     setPicks(nextPicks);
-    setScope(nextScope);
     if (parsed.path !== undefined && parsed.line !== undefined) {
       pendingSelect.current = { path: parsed.path, line: parsed.line };
     }
@@ -365,13 +316,12 @@ function AppShell() {
         ? [parsed.path]
         : [];
     searchWithParts(
-      parsed.parts.map((value) => newPart(value)),
-      nextScope,
+      parsed.parts.map((value, index) =>
+        newPart(value, parsed.mods?.[index]),
+      ),
       extraInclude,
-      nextMods,
       parsed.timeRange ?? null,
       nextPicks,
-      nextInclude,
       nextExclude,
     );
   }, [searchWithParts, token.hostForbidden, token.meta, token.promptOpen]);
@@ -426,7 +376,7 @@ function AppShell() {
     modalOpen:
       helpOpen ||
       shareOpen ||
-      contextOpen ||
+      contextTarget !== null ||
       (token.promptOpen && !token.hostForbidden),
     queryRef,
     listRef,
@@ -443,7 +393,6 @@ function AppShell() {
         rootLabel={token.meta?.rootLabel ?? t("treeTitle")}
         activePath={selectedHit?.path ?? null}
         picks={picks}
-        scope={scope}
         style={
           treeOpen
             ? { flex: `0 0 ${treeWidth}px`, width: `${treeWidth}px` }
@@ -463,31 +412,15 @@ function AppShell() {
             coveringChildren,
           );
           setPicks(next);
-          if (next.length === 0) {
-            setScope("all");
-          } else if (picks.length === 0) {
-            setScope("include");
-          }
         }}
-        onSearchIn={() => {
-          setScope("include");
-          submit("include");
-        }}
-        onSearchOut={() => {
-          setScope("exclude");
-          submit("exclude");
+        onOpenFile={(path) => {
+          setContextTarget({ path, allowGotoLine: true });
         }}
         onClear={() => {
           setPicks([]);
-          setScope("all");
-          if (stackRef.current !== null) {
-            stackRef.current = {
-              ...stackRef.current,
-              globInclude: [],
-              globAnd: [],
-              globExclude: [],
-            };
-          }
+          setExcludeGlobs("");
+          setTimeRange(null);
+          saveTimeRange(null);
         }}
         sessionReady={token.sessionReady}
         canLogout={token.canLogout}
@@ -495,23 +428,26 @@ function AppShell() {
           search.searchCount,
           token.meta?.searchCount ?? 0,
         )}
+        excludeGlobs={excludeGlobs}
+        onExcludeGlobsChange={setExcludeGlobs}
+        onExcludeApply={(raw) => {
+          setPicks((current) => prunePicksByExclude(current, parseGlobs(raw)));
+        }}
         timeRange={timeRange}
         onTimeRange={(next) => {
           setPicks([]);
-          setScope("all");
           if (stackRef.current !== null) {
             stackRef.current = {
               ...stackRef.current,
               globInclude: [],
               globAnd: [],
-              globExclude: [],
             };
           }
           setTimeRange(next);
           saveTimeRange(next);
           const nextParts = partsFromFields(fields);
           if (nextParts.length > 0) {
-            searchWithParts(nextParts, "all", [], modifiers, next, []);
+            searchWithParts(nextParts, [], next, []);
           }
         }}
         onLogout={() => {
@@ -519,10 +455,9 @@ function AppShell() {
             resetSearch();
             stackRef.current = null;
             setParts([]);
-            setFields([""]);
+            setFields([newPart("")]);
             setSelectedIndex(0);
             setPicks([]);
-            setScope("all");
           });
         }}
         {...(token.handleAuthFailure !== undefined
@@ -546,24 +481,12 @@ function AppShell() {
           onFlushSearch={searchWithParts}
           canClear={
             parts.length > 0 ||
-            fields.some((value) => value !== "") ||
+            fields.some((part) => part.value !== "") ||
             search.hits.length > 0 ||
             search.status !== "idle"
           }
           onClear={clearAll}
           queryRef={queryRef}
-          modifiers={modifiers}
-          onModifiersChange={(next) => {
-            setModifiers(next);
-            const nextParts = partsFromFields(fields);
-            if (nextParts.length > 0) {
-              searchWithParts(nextParts, scope, [], next);
-            }
-          }}
-          includeGlobs={includeGlobs}
-          onIncludeGlobsChange={setIncludeGlobs}
-          excludeGlobs={excludeGlobs}
-          onExcludeGlobsChange={setExcludeGlobs}
           timeRange={timeRange}
           history={searchHistory}
           canGoBack={nav.index > 0}
@@ -579,19 +502,11 @@ function AppShell() {
             }
             setNav((cur) => ({ ...cur, index: nextIndex }));
             skipNavRef.current = true;
-            const mods = {
-              caseSensitive: entry.caseSensitive,
-              wordMatch: entry.wordMatch,
-              regex: entry.regex,
-            };
-            setModifiers(mods);
             setTimeRange(entry.timeRange);
             saveTimeRange(entry.timeRange);
             searchWithParts(
-              entry.parts.map((value) => newPart(value)),
-              scope,
+              entry.parts.map((part) => newPart(part.value, part)),
               [],
-              mods,
               entry.timeRange,
             );
           }}
@@ -606,70 +521,27 @@ function AppShell() {
             }
             setNav((cur) => ({ ...cur, index: nextIndex }));
             skipNavRef.current = true;
-            const mods = {
-              caseSensitive: entry.caseSensitive,
-              wordMatch: entry.wordMatch,
-              regex: entry.regex,
-            };
-            setModifiers(mods);
             setTimeRange(entry.timeRange);
             saveTimeRange(entry.timeRange);
             searchWithParts(
-              entry.parts.map((value) => newPart(value)),
-              scope,
+              entry.parts.map((part) => newPart(part.value, part)),
               [],
-              mods,
               entry.timeRange,
             );
           }}
           onRestoreHistory={(item: SearchHistoryItem) => {
-            const nextParts = item.parts.map((value) => newPart(value));
-            setModifiers({
-              caseSensitive: item.caseSensitive,
-              wordMatch: item.wordMatch,
-              regex: item.regex,
-            });
             setTimeRange(item.timeRange);
             saveTimeRange(item.timeRange);
             searchWithParts(
-              nextParts,
-              scope,
+              item.parts.map((part) => newPart(part.value, part)),
               [],
-              {
-                caseSensitive: item.caseSensitive,
-                wordMatch: item.wordMatch,
-                regex: item.regex,
-              },
               item.timeRange,
             );
           }}
         />
         <div className="pane-head">
           <span>{t("paneHits")}</span>
-          <div className="view-mode-toggle">
-            <button
-              type="button"
-              className={viewMode === "grouped" ? "active" : ""}
-              title={t("viewGrouped")}
-              onClick={() => {
-                setViewMode("grouped");
-                localStorage.setItem("web-grep.viewMode", "grouped");
-              }}
-            >
-              <IconListGroup />
-            </button>
-            <button
-              type="button"
-              className={viewMode === "flat" ? "active" : ""}
-              title={t("viewFlat")}
-              onClick={() => {
-                setViewMode("flat");
-                localStorage.setItem("web-grep.viewMode", "flat");
-              }}
-            >
-              <IconListFlat />
-            </button>
-          </div>
+          <div ref={setHitsHeadActions} className="pane-head-actions" />
           <StatusBar
             status={search.status}
             done={search.done}
@@ -694,9 +566,9 @@ function AppShell() {
             selectedIndex={selectedIndexClamped}
             onSelect={selectHit}
             listRef={listRef}
-            viewMode={viewMode}
             terms={hlTerms}
             opts={hlOpts}
+            headActions={hitsHeadActions}
           />
         )}
       </section>
@@ -719,7 +591,14 @@ function AppShell() {
             ? { onShare: () => setShareOpen(true) }
             : {})}
           onOpenContext={() => {
-            setContextOpen(true);
+            if (selectedHit === null) {
+              return;
+            }
+            setContextTarget({
+              path: selectedHit.path,
+              highlightLine: selectedHit.line,
+              matches: selectedHit.matches,
+            });
           }}
           onSearchSelected={searchSelected}
           onCopyNotice={(txt) => {
@@ -743,12 +622,12 @@ function AppShell() {
         }}
       />
       <ContextModal
-        open={contextOpen}
-        hit={selectedHit}
+        open={contextTarget !== null}
+        target={contextTarget}
         terms={hlTerms}
         opts={hlOpts}
         onClose={() => {
-          setContextOpen(false);
+          setContextTarget(null);
         }}
       />
       <Toast message={toastMsg} onClose={() => setToastMsg(null)} />
