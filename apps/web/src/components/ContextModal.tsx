@@ -211,7 +211,8 @@ export function ContextModal({
     } else {
       virtualizer.scrollToIndex(index, { align });
     }
-    const current = root?.querySelector(".preview-line.current");
+    const current =
+      root === null ? null : root.querySelector(".preview-line.current");
     if (root !== null && current !== null && lineIsPinned(root, current, align)) {
       focusReq.current = null;
       focusTries.current = 0;
