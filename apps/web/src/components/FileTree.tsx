@@ -27,6 +27,7 @@ import {
 import { LocaleToggle, ThemeToggle } from "./StatusBar.tsx";
 
 const TREE_OPEN_KEY = "web-grep.treeOpen.v2";
+/** Matches `--rail-w` in styles.css (L-RAIL). */
 export const TREE_RAIL_WIDTH = 56;
 
 function loadOpen(): boolean {
@@ -558,6 +559,7 @@ export function FileTree({
                 <div>{error}</div>
                 <button
                   type="button"
+                  className="tree-retry"
                   onClick={() => {
                     setError(null);
                     setRoot(null);

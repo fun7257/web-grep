@@ -129,6 +129,7 @@ function mappedBodySelection(
   return visible;
 }
 
+/** Right-pane hit snippet / browse. Full-file virtualization lives in ContextModal. */
 export function FilePreview({
   hit,
   browsePath = null,
@@ -150,6 +151,20 @@ export function FilePreview({
   onSearchSelected?: (text: string) => void;
   onCopyNotice?: (msg: string) => void;
 }) {
+  if (hit !== null) {
+    return (
+      <FilePreviewReady
+        key={`${hit.path}:${hit.line}`}
+        hit={hit}
+        terms={terms}
+        opts={opts}
+        {...(onShare !== undefined ? { onShare } : {})}
+        {...(onOpenContext !== undefined ? { onOpenContext } : {})}
+        {...(onSearchSelected !== undefined ? { onSearchSelected } : {})}
+        {...(onCopyNotice !== undefined ? { onCopyNotice } : {})}
+      />
+    );
+  }
   if (browsePath !== null && browsePath !== "") {
     return (
       <FilePreviewBrowse
@@ -160,21 +175,7 @@ export function FilePreview({
       />
     );
   }
-  if (hit === null) {
-    return <PreviewIdle />;
-  }
-  return (
-    <FilePreviewReady
-      key={`${hit.path}:${hit.line}`}
-      hit={hit}
-      terms={terms}
-      opts={opts}
-      {...(onShare !== undefined ? { onShare } : {})}
-      {...(onOpenContext !== undefined ? { onOpenContext } : {})}
-      {...(onSearchSelected !== undefined ? { onSearchSelected } : {})}
-      {...(onCopyNotice !== undefined ? { onCopyNotice } : {})}
-    />
-  );
+  return <PreviewIdle />;
 }
 
 function PreviewSkeleton() {

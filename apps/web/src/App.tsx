@@ -1,3 +1,4 @@
+import { mapLegacyErrorCode } from "@web-grep/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ContextModal,
@@ -15,7 +16,7 @@ import { HotkeyHelpModal } from "./components/HotkeyHelpModal.tsx";
 import { ResultList } from "./components/ResultList.tsx";
 import { SearchBar } from "./components/SearchBar.tsx";
 import { ShareModal } from "./components/ShareModal.tsx";
-import { StatusBar, WarnBanners } from "./components/StatusBar.tsx";
+import { InfoCue, StatusBar, WarnBanners } from "./components/StatusBar.tsx";
 import { Toast } from "./components/Toast.tsx";
 import { AuthDialog } from "./components/AuthDialog.tsx";
 import { useHotkeys } from "./hooks/useHotkeys.ts";
@@ -81,6 +82,9 @@ function AppShell() {
   const [excludeGlobs, setExcludeGlobs] = useState("");
 
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [infoCue, setInfoCue] = useState<string | null>(null);
+  const [sharePendingCue, setSharePendingCue] = useState<string | null>(null);
+  const infoCueTimer = useRef(0);
   const [helpOpen, setHelpOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(
@@ -192,10 +196,23 @@ function AppShell() {
     setSelectedIndex(index);
   }, []);
 
+  const showInfoCue = useCallback((message: string) => {
+    window.clearTimeout(infoCueTimer.current);
+    setInfoCue(message);
+    infoCueTimer.current = window.setTimeout(() => {
+      setInfoCue(null);
+    }, 2800);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(infoCueTimer.current);
+    };
+  }, []);
+
   const engineDown =
     token.meta?.engine === "none" ||
-    search.error?.code === "ENGINE" ||
-    search.error?.code === "ENGINE_UNSUPPORTED";
+    mapLegacyErrorCode(search.error?.code ?? "") === "ENGINE";
   const searchLocked = token.hostForbidden || engineDown;
   const authOpen = token.promptOpen && !token.hostForbidden;
 
@@ -283,6 +300,8 @@ function AppShell() {
     resetSearch();
     stackRef.current = null;
     pendingSelect.current = null;
+    setSharePendingCue(null);
+    setInfoCue(null);
     setShareOpen(false);
     setContextTarget(null);
     setBrowsePath(null);
@@ -315,6 +334,12 @@ function AppShell() {
     setPicks(nextPicks);
     if (parsed.path !== undefined && parsed.line !== undefined) {
       pendingSelect.current = { path: parsed.path, line: parsed.line };
+      setSharePendingCue(
+        t("sharePendingSelect", {
+          path: parsed.path,
+          line: parsed.line,
+        }),
+      );
     }
     if (parsed.timeRange !== undefined) {
       setTimeRange(parsed.timeRange);
@@ -335,7 +360,7 @@ function AppShell() {
       nextPicks,
       nextExclude,
     );
-  }, [searchWithParts, token.hostForbidden, token.meta, token.promptOpen]);
+  }, [searchWithParts, t, token.hostForbidden, token.meta, token.promptOpen]);
 
   useEffect(() => {
     if (!bootstrapped.current || shareState === null) {
@@ -361,9 +386,11 @@ function AppShell() {
     );
     if (idx >= 0) {
       setSelectedIndex(idx);
+      setSharePendingCue(null);
     }
     if (search.status === "done" || search.status === "error") {
       pendingSelect.current = null;
+      setSharePendingCue(null);
     }
   }, [search.hits, search.status]);
 
@@ -397,7 +424,11 @@ function AppShell() {
   });
 
   return (
-    <div className={authOpen ? "app app-dimmed" : "app"}>
+    <div
+      className={
+        authOpen || contextTarget !== null ? "app app-dimmed" : "app"
+      }
+    >
       <FileTree
         open={treeOpen}
         onToggle={toggleTree}
@@ -425,6 +456,10 @@ function AppShell() {
           setPicks(next);
         }}
         onOpenFile={(path) => {
+          if (selectedHit !== null) {
+            setContextTarget({ path, allowGotoLine: true });
+            return;
+          }
           setBrowsePath(path);
           setBrowseEpoch((n) => n + 1);
         }}
@@ -554,6 +589,9 @@ function AppShell() {
           running={search.status === "running"}
           searchLocked={searchLocked}
           onCancel={cancelSearch}
+          onOptionFlush={() => {
+            showInfoCue(t("optionFlushed"));
+          }}
         />
         <div className="pane-head">
           <span className="pane-head-title">
@@ -570,6 +608,7 @@ function AppShell() {
             onCancel={cancelSearch}
           />
         </div>
+        <InfoCue message={infoCue ?? sharePendingCue} />
         <WarnBanners done={search.done} />
         {search.hits.length === 0 ? (
           <EmptyState
@@ -604,7 +643,7 @@ function AppShell() {
         aria-hidden={selectedHit === null && browsePath === null}
       >
         <FilePreview
-          hit={browsePath !== null ? null : selectedHit}
+          hit={selectedHit}
           browsePath={browsePath}
           browseEpoch={browseEpoch}
           terms={hlTerms}
@@ -613,18 +652,17 @@ function AppShell() {
             ? { onShare: () => setShareOpen(true) }
             : {})}
           onOpenContext={() => {
+            if (selectedHit !== null) {
+              setContextTarget({
+                path: selectedHit.path,
+                highlightLine: selectedHit.line,
+                matches: selectedHit.matches,
+              });
+              return;
+            }
             if (browsePath !== null) {
               setContextTarget({ path: browsePath, allowGotoLine: true });
-              return;
             }
-            if (selectedHit === null) {
-              return;
-            }
-            setContextTarget({
-              path: selectedHit.path,
-              highlightLine: selectedHit.line,
-              matches: selectedHit.matches,
-            });
           }}
           onSearchSelected={searchSelected}
           onCopyNotice={(txt) => {

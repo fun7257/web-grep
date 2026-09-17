@@ -68,6 +68,7 @@ export const enUS = {
   loginSubmit: "Sign in",
   passwordLabel: "Password",
   loginFailed: "Invalid password",
+  loginBusy: "Signing in…",
   authInvalid: "Wrong password (INVALID_AUTH)",
   rememberMe: "Remember password",
   logout: "Log out",
@@ -133,6 +134,8 @@ export const enUS = {
   excludeClear: "Remove",
   copiedPath: "Copied relative path",
   copiedLine: "Copied path with line number",
+  optionFlushed: "Re-searched with the new options",
+  sharePendingSelect: "Will select {path}:{line}",
   hotkeysTitle: "Keyboard Shortcuts",
   close: "Close",
 } as const satisfies Record<MsgKey, string>;

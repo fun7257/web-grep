@@ -52,6 +52,17 @@ export function LocaleToggle() {
   );
 }
 
+export function InfoCue({ message }: { message: string | null }) {
+  if (message === null || message === "") {
+    return null;
+  }
+  return (
+    <div className="info-cue" role="status">
+      <span className="info-cue-label">{message}</span>
+    </div>
+  );
+}
+
 export function WarnBanners({ done }: { done: SseDone | null }) {
   const { t } = useLocale();
   if (done === null || (!done.truncated && !done.timedOut)) {

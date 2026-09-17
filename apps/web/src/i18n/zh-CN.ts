@@ -68,6 +68,7 @@ export const zhCN = {
   loginSubmit: "登录",
   passwordLabel: "密码",
   loginFailed: "密码不正确",
+  loginBusy: "登录中…",
   authInvalid: "密码错误（INVALID_AUTH）",
   rememberMe: "记住密码",
   logout: "退出登录",
@@ -133,6 +134,8 @@ export const zhCN = {
   excludeClear: "移除",
   copiedPath: "已复制相对路径",
   copiedLine: "已复制路径与行号",
+  optionFlushed: "已按开关重搜",
+  sharePendingSelect: "将选中 {path}:{line}",
   hotkeysTitle: "键盘快捷键速查",
   close: "关闭",
 } as const satisfies Record<MsgKey, string>;

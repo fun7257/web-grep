@@ -91,8 +91,15 @@ export function AuthDialog({
           />
           {t("rememberMe")}
         </label>
-        <button type="submit" disabled={busy}>
-          {t("loginSubmit")}
+        <button type="submit" className="auth-submit" disabled={busy}>
+          {busy ? (
+            <>
+              <span className="auth-spinner" aria-hidden="true" />
+              {t("loginBusy")}
+            </>
+          ) : (
+            t("loginSubmit")
+          )}
         </button>
       </form>
     </div>

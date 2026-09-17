@@ -52,6 +52,18 @@ describe("shipped stylesheet tokens", () => {
     expect(ruleBody(".warn-banner")).toContain("var(--warn-bg)");
     expect(ruleBody(".search-bar .search-go.cancel")).toContain("var(--danger)");
     expect(css).toContain(".app.app-dimmed");
+    expect(css).toContain("--rail-w:");
+    expect(css).toContain("--modal-xl:");
+    expect(css).toContain("--splitter-hit:");
+    expect(dark).toContain("--info-bg:");
+    expect(light).toContain("--info-bg:");
+    expect(dark).toContain("--toast-bg:");
+    expect(light).toContain("--toast-bg:");
+    expect(ruleBody(".tree-pane.collapsed")).toContain("var(--rail-w)");
+    expect(css).toContain("width: min(var(--modal-xl), 92vw)");
+    expect(ruleBody(".splitter")).toContain("var(--splitter-hit)");
+    expect(ruleBody(".info-cue")).toContain("var(--info-bg)");
+    expect(ruleBody(".toast-pill")).toContain("var(--toast-bg)");
   });
 
   it("gives results and preview different background tokens", () => {

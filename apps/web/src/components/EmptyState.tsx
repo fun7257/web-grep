@@ -1,10 +1,10 @@
-import type { JsonError, SseDone } from "@web-grep/shared";
+import { mapLegacyErrorCode, type JsonError, type SseDone } from "@web-grep/shared";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
 import { IdleMark } from "./icons.tsx";
 
-function engineCode(code: string | undefined): boolean {
-  return code === "ENGINE" || code === "ENGINE_UNSUPPORTED";
+function isEngineError(code: string | undefined): boolean {
+  return code !== undefined && mapLegacyErrorCode(code) === "ENGINE";
 }
 
 export function EmptyState({
@@ -23,7 +23,7 @@ export function EmptyState({
   engine?: string | null;
 }) {
   const { t } = useLocale();
-  const engineDown = engine === "none" || engineCode(error?.code);
+  const engineDown = engine === "none" || isEngineError(error?.code);
 
   if (hitCount > 0) {
     return null;

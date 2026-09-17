@@ -66,6 +66,7 @@ export const MSG_KEYS = [
   "loginSubmit",
   "passwordLabel",
   "loginFailed",
+  "loginBusy",
   "authInvalid",
   "rememberMe",
   "logout",
@@ -132,6 +133,8 @@ export const MSG_KEYS = [
 
   "copiedPath",
   "copiedLine",
+  "optionFlushed",
+  "sharePendingSelect",
   "hotkeysTitle",
   "close",
 ] as const;

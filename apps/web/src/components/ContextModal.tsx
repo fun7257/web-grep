@@ -1,3 +1,4 @@
+/** Full virtualized /api/file window. This is not FilePreview (right-pane snippet). */
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SseHit } from "@web-grep/shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";

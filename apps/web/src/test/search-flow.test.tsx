@@ -1084,6 +1084,7 @@ describe("search flow", () => {
     );
     expect(dialog.querySelector(".preview-find")).toBeNull();
     expect(screen.queryByLabelText("Go to line")).toBeNull();
+    expect(document.querySelector(".app-dimmed")).toBeTruthy();
   });
 
   it("opens a tree file in the preview pane from line 1", async () => {
@@ -2756,6 +2757,146 @@ describe("search flow", () => {
     expect(
       (document.querySelector(".search-go") as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it("maps leftover ENGINE_UNSUPPORTED into ENGINE empty-state copy", async () => {
+    mockFetch(() =>
+      jsonResponse(503, {
+        code: "ENGINE_UNSUPPORTED",
+        message: "regex not supported",
+      }),
+    );
+    render(<App />);
+    typeQuery("eng-unsup");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByText("Search engine unavailable")).toBeTruthy();
+    });
+    expect(
+      screen.getByText("The engine is not ready, so search is disabled"),
+    ).toBeTruthy();
+    expect(screen.getByText("ENGINE")).toBeTruthy();
+    expect(screen.queryByText("ENGINE_UNSUPPORTED")).toBeNull();
+    expect(document.querySelector(".empty-code")?.textContent).toBe("ENGINE");
+    expect(
+      (document.querySelector(".search-go") as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("shows AuthDialog busy copy while login is in flight", async () => {
+    mockFetch(
+      () =>
+        jsonResponse(401, {
+          code: "UNAUTHORIZED",
+          message: "missing or invalid session",
+        }),
+      undefined,
+      { authRequired: true },
+    );
+    const inner = globalThis.fetch as typeof fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if (requestUrl(input).includes("/api/auth/login")) {
+        return neverSettle(init);
+      }
+      return inner(input, init);
+    });
+    render(<App />);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
+      target: { value: "secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      expect(screen.getByText("Signing in…")).toBeTruthy();
+    });
+    expect(document.querySelector(".auth-spinner")).toBeTruthy();
+    expect(
+      (document.querySelector(".auth-submit") as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("retries the file tree after a load error", async () => {
+    let failTree = true;
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    const inner = globalThis.fetch as typeof fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if (requestUrl(input).includes("/api/tree") && failTree) {
+        return Promise.resolve(
+          jsonResponse(403, { code: "DENIED", message: "tree denied" }),
+        );
+      }
+      return inner(input, init);
+    });
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("tree denied")).toBeTruthy();
+    });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    failTree = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(treeName("ok.txt")).toBeTruthy();
+    });
+  });
+
+  it("shows an option-flush info cue when modifiers re-search", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("needle");
+    fireEvent.click(screen.getByRole("button", { name: "Aa" }));
+    await waitFor(() => {
+      expect(screen.getByText("Re-searched with the new options")).toBeTruthy();
+    });
+    expect(document.querySelector(".info-cue")).toBeTruthy();
+  });
+
+  it("shows a pending path:line cue when restoring a share URL", async () => {
+    window.history.replaceState({}, "", "/?q=hello&p=src%2Fb.ts&n=3");
+    mockFetch((init) => neverSettle(init));
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Will select src/b.ts:3")).toBeTruthy();
+    });
+    expect(document.querySelector(".info-cue")).toBeTruthy();
+  });
+
+  it("keeps the hit snippet and opens ContextModal for a tree file", async () => {
+    mockFetch(
+      () =>
+        sseResponse([
+          sseEvent("hit", HIT_A),
+          sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+        ]),
+      undefined,
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(
+        document.querySelector(".preview-pane .preview-line.current")
+          ?.textContent,
+      ).toMatch(/hello world/);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    expect(document.querySelector(".app-dimmed")).toBeTruthy();
+    expect(document.querySelector(".preview-browse")).toBeNull();
+    expect(
+      document.querySelector(".preview-pane .preview-line.current")
+        ?.textContent,
+    ).toMatch(/hello world/);
+    expect(dialog.querySelector(".preview-find")).toBeNull();
   });
 
   it("caps AND fields at 16 and shows the limit hint", async () => {
