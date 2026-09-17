@@ -41,16 +41,23 @@ describe("shipped stylesheet tokens", () => {
     expect(light).toContain("--chip-fill:");
     expect(light).toMatch(/--line:\s*rgb\(28 30 36 \/ 10%\)/);
     expect(ruleBody(".tree-pane")).toContain("flex: 0 0 var(--tree-w)");
-    expect(ruleBody(".tree-pane")).toContain("border-right: 1px solid var(--line)");
-    expect(ruleBody(".hits-pane")).toContain("border-right: 1px solid var(--line)");
+    expect(ruleBody(".tree-pane")).toContain(
+      "border-right: 1px solid var(--line)",
+    );
+    expect(ruleBody(".hits-pane")).toContain(
+      "border-right: 1px solid var(--line)",
+    );
     expect(ruleBody(".result-log.selected")).toContain("var(--accent)");
     expect(ruleBody(".exclude-chip")).toContain("var(--chip-fill)");
     expect(ruleBody(".empty-title")).toContain("var(--fs-lg)");
     expect(ruleBody(".empty-helper")).toContain("var(--fs-xs)");
+    expect(ruleBody(".empty-detail")).toContain("var(--fs-xs)");
     expect(light).toContain("--warn-bg:");
     expect(dark).toContain("--warn-bg:");
     expect(ruleBody(".warn-banner")).toContain("var(--warn-bg)");
-    expect(ruleBody(".search-bar .search-go.cancel")).toContain("var(--danger)");
+    expect(ruleBody(".search-bar .search-go.cancel")).toContain(
+      "var(--danger)",
+    );
     expect(css).toContain(".app.app-dimmed");
     expect(css).toContain("--rail-w:");
     expect(css).toContain("--modal-xl:");
@@ -99,7 +106,7 @@ describe("shipped stylesheet tokens", () => {
   });
 
   it("uses a theme token for Search hover so light ink stays readable", () => {
-    const body = ruleBody(".search-bar .search-go:hover");
+    const body = ruleBody(".search-bar .search-go:hover:not(:disabled)");
     expect(body).toContain("var(--accent-hover)");
     expect(body).not.toMatch(/#[0-9a-fA-F]{3,8}/);
   });

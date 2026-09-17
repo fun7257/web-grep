@@ -134,6 +134,7 @@ export function FilePreview({
   hit,
   browsePath = null,
   browseEpoch = 0,
+  pendingSelect = null,
   terms = [],
   opts = DEFAULT_HL_OPTS,
   onShare,
@@ -144,6 +145,7 @@ export function FilePreview({
   hit: SseHit | null;
   browsePath?: string | null;
   browseEpoch?: number;
+  pendingSelect?: { path: string; line: number } | null;
   terms?: import("../highlight.ts").HlTermInput[];
   opts?: HlOpts;
   onShare?: () => void;
@@ -175,7 +177,7 @@ export function FilePreview({
       />
     );
   }
-  return <PreviewIdle />;
+  return <PreviewIdle pendingSelect={pendingSelect} />;
 }
 
 function PreviewSkeleton() {
@@ -313,8 +315,25 @@ function FilePreviewBrowse({
   );
 }
 
-function PreviewIdle() {
+function PreviewIdle({
+  pendingSelect = null,
+}: {
+  pendingSelect?: { path: string; line: number } | null;
+}) {
   const { t } = useLocale();
+  if (pendingSelect !== null) {
+    return (
+      <div className="preview preview-idle">
+        <IdleMark kind="preview" />
+        <p className="empty-title">
+          {t("previewSharePending", {
+            path: pendingSelect.path,
+            line: pendingSelect.line,
+          })}
+        </p>
+      </div>
+    );
+  }
   return (
     <div className="preview preview-idle">
       <IdleMark kind="preview" />

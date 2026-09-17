@@ -441,6 +441,7 @@ export function SearchBar({
                   <button
                     type="button"
                     className="search-and-go"
+                    disabled={searchLocked}
                     onClick={(event) => {
                       event.preventDefault();
                       sendSearch();

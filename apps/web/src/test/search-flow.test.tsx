@@ -147,6 +147,7 @@ function mockFetch(
   auth?: {
     authRequired?: boolean;
     treeEntries?: { name: string; path: string; dir: boolean }[];
+    engine?: "rg" | "none";
   },
 ): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -180,7 +181,12 @@ function mockFetch(
       return Promise.resolve(jsonResponse(200, { token: "sess-abc" }));
     }
     if (url.includes("/api/meta")) {
-      return Promise.resolve(jsonResponse(200, META));
+      return Promise.resolve(
+        jsonResponse(200, {
+          ...META,
+          engine: auth?.engine ?? META.engine,
+        }),
+      );
     }
     if (url.includes("/api/auth/logout")) {
       return Promise.resolve(jsonResponse(200, { ok: true }));
@@ -804,7 +810,10 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(fileRow("src/a.ts")).toBeTruthy();
     });
-    expect(screen.getByRole("alert").textContent).toMatch(/ripgrep failed/);
+    expect(screen.getByRole("alert").textContent).toMatch(
+      /Search engine unavailable/,
+    );
+    expect(screen.getByRole("alert").textContent).not.toMatch(/ripgrep failed/);
   });
 
   it("submits search on ⌘Enter", async () => {
@@ -2771,6 +2780,60 @@ describe("search flow", () => {
     ).toBe(true);
   });
 
+  it("demotes raw engine stderr under the ENGINE empty-state title", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("error", { code: "ENGINE", message: "exit status 2" }),
+      ]),
+    );
+    render(<App />);
+    typeQuery("eng-stderr");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByText("Search engine unavailable")).toBeTruthy();
+    });
+    expect(document.querySelector(".empty-title")?.textContent).toBe(
+      "Search engine unavailable",
+    );
+    expect(document.querySelector(".empty-code")?.textContent).toBe("ENGINE");
+    expect(screen.queryByText("ENGINE_UNSUPPORTED")).toBeNull();
+    const detail = document.querySelector(".empty-detail");
+    expect(detail?.textContent).toMatch(/exit status 2/);
+    expect(document.querySelector(".empty-title")?.textContent).not.toMatch(
+      /exit status 2/,
+    );
+    const alert = screen.getByRole("alert");
+    expect(alert.textContent).toMatch(/Search engine unavailable/);
+    expect(alert.textContent).not.toMatch(/exit status 2/);
+    expect(
+      (document.querySelector(".search-go") as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("disables Search when meta.engine is none", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      { engine: "none" },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Search engine unavailable")).toBeTruthy();
+    });
+    expect(screen.getByText("ENGINE")).toBeTruthy();
+    expect(screen.queryByText("ENGINE_UNSUPPORTED")).toBeNull();
+    const go = document.querySelector(".search-go") as HTMLButtonElement;
+    expect(go.disabled).toBe(true);
+    typeQuery("hello");
+    clickSearch();
+    fireEvent.keyDown(window, { key: "Enter", metaKey: true });
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        requestUrl(call[0] as RequestInfo | URL).includes("/api/search"),
+      ),
+    ).toBe(false);
+  });
+
   it("maps leftover ENGINE_UNSUPPORTED into ENGINE empty-state copy", async () => {
     mockFetch(() =>
       jsonResponse(503, {
@@ -2876,9 +2939,19 @@ describe("search flow", () => {
     mockFetch((init) => neverSettle(init));
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText("Will select src/b.ts:3")).toBeTruthy();
+      expect(screen.getByText("Pending select src/b.ts:3")).toBeTruthy();
     });
-    expect(document.querySelector(".info-cue")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Restored conditions from the share link and searched automatically",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Share link pending select src/b.ts:3"),
+    ).toBeTruthy();
+    expect(document.querySelectorAll(".info-cue").length).toBeGreaterThanOrEqual(
+      2,
+    );
   });
 
   it("keeps the hit snippet and opens ContextModal for a tree file", async () => {

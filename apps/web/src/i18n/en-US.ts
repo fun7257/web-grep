@@ -26,7 +26,8 @@ export const enUS = {
   emptyHint: "Type a keyword to search",
   emptyHintHelper: "Use the left pane to narrow by path, exclude, or time",
   noResults: "No matches",
-  noResultsHelper: "Try a wider time range, or drop exclude filters and search again",
+  noResultsHelper:
+    "Try a wider time range, or drop exclude filters and search again",
   truncated: "Results truncated",
   truncatedBanner: "Results truncated — only some hits are shown",
   timedOutBanner: "Timed out — showing hits received before the cutoff",
@@ -43,6 +44,7 @@ export const enUS = {
   searchSelected: "Search selection",
   previewEmpty: "Select a result to preview",
   previewEmptyHelper: "Click a hit to preview the matching line here",
+  previewSharePending: "Share link pending select {path}:{line}",
   previewBinary: "Binary file, cannot preview",
   previewBinaryHelper: "This file is binary and cannot be opened in preview",
   previewDenied: "Path cannot be previewed",
@@ -125,7 +127,8 @@ export const enUS = {
   treeClear: "Clear conditions",
   treeOpenFile: "Open file",
   timeRange: "Time",
-  timeRangeHint: "Only files modified in this window, not log-line time. Click again to clear.",
+  timeRangeHint:
+    "Only files modified in this window, not log-line time. Click again to clear.",
   timeRangeToday: "Today",
   timeRange24h: "24h",
   timeRange7d: "7d",
@@ -138,7 +141,9 @@ export const enUS = {
   copiedPath: "Copied relative path",
   copiedLine: "Copied path with line number",
   optionFlushed: "Re-searched with the new options",
-  sharePendingSelect: "Will select {path}:{line}",
+  shareRestored:
+    "Restored conditions from the share link and searched automatically",
+  sharePendingSelect: "Pending select {path}:{line}",
   hotkeysTitle: "Keyboard Shortcuts",
   close: "Close",
 } as const satisfies Record<MsgKey, string>;
