@@ -60,8 +60,6 @@ export const zhCN = {
   loginFailed: "密码不正确",
   rememberMe: "记住密码",
   logout: "退出登录",
-  literalEngineBanner:
-    "未找到 ripgrep，已降级为字面量搜索（不读取 gitignore，不支持正则）",
   engineNoneBanner: "未找到 ripgrep，搜索不可用",
   loading: "搜索中…",
   searchProgress: "已扫 {files} 个文件 · {matches} 条命中",

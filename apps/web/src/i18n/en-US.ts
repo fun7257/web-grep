@@ -60,8 +60,6 @@ export const enUS = {
   loginFailed: "Invalid password",
   rememberMe: "Remember password",
   logout: "Log out",
-  literalEngineBanner:
-    "ripgrep not found; using literal search (no gitignore, no regex)",
   engineNoneBanner: "ripgrep not found; search is unavailable",
   loading: "Searching…",
   searchProgress: "Scanned {files} files · {matches} matches",

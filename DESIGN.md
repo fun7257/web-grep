@@ -110,7 +110,7 @@ Pain points the design must not reintroduce:
 | HTTP framework | Hono 4.13 on `@hono/node-server` 2.1.1 | First-class TypeScript, native `streamSSE`, Zod middleware, abort-signal fixes in v2. |
 | Search transport | **SSE** over `POST /api/search` | One-way server→client hit stream; cancel via `AbortController`. Not Hono RPC (`hc`) — SSE events are not request/response RPC. |
 | SSE lifecycle | Pre-stream failures are HTTP JSON; every opened SSE stream ends with exactly one `done` **or** one `error` | See protocol section. Timeout is `done.timedOut=true`, not `event: error`. |
-| Search engine | `rg` required for regex. Resolution: `WEB_GREP_RG` → `PATH` walk → `@vscode/ripgrep`. Literal JS walker is last-resort, **not equivalent** | `@vscode/ripgrep` ships platform binaries in optionalDependencies (no postinstall download). Literal mode ignores gitignore and rejects regex. |
+| Search engine | `rg` required. Resolution: `WEB_GREP_RG` → `PATH` walk → `@vscode/ripgrep`. Contract engine is `rg \| none` only | `@vscode/ripgrep` ships platform binaries in optionalDependencies (no postinstall download). Missing `rg` is `engine: "none"` + HTTP 503 `ENGINE`. |
 | Auth | Loopback bind + optional `WEB_GREP_TOKEN` + **sessionStorage token prompt** | Non-loopback listen **requires** the token **and** `WEB_GREP_PUBLIC_HOST` (hard fail on boot). Browser sends `X-Web-Grep-Token` from `sessionStorage`. No cookies, no query-string token, no HTML injection. |
 | DNS rebinding | Split Host/Origin policy: loopback names on the listen port; LAN/TLS via `WEB_GREP_PUBLIC_HOST`. Never treat `0.0.0.0` as a Host. **No CORS middleware.** | Vite `Host: *:5173` is allowed only in development. See Bind + auth. |
 | Path model | Client never sees absolute paths | Spawn `rg` with `cwd: rootReal` and a **relative** search path. Every hit is re-resolved; absolute/`..` paths are dropped. |
@@ -433,7 +433,7 @@ SSE payloads are untagged JSON; the discriminator is the SSE `event:` field. Sha
 ```ts
 export const SseMetaSchema = z.object({
   searchId: z.string().uuid(),
-  engine: z.enum(["rg", "literal"]),
+  engine: z.enum(["rg", "none"]),
 });
 export const SseHitSchema = z.object({
   path: z.string(), // POSIX relative, never absolute
@@ -459,7 +459,6 @@ export const ErrorCodeSchema = z.enum([
   "DENIED",
   "BUSY",
   "ENGINE",
-  "ENGINE_UNSUPPORTED",
   "UNAUTHORIZED",
   "FORBIDDEN_HOST",
   "INTERNAL",
@@ -503,8 +502,8 @@ sequenceDiagram
       API-->>UI: HTTP 400 INVALID_PATH JSON
     else denylist path
       API-->>UI: HTTP 403 DENIED JSON
-    else engine none / regex on literal
-      API-->>UI: HTTP 400/503 JSON
+    else engine none
+      API-->>UI: HTTP 503 ENGINE JSON
     else ok
       API-->>UI: SSE headers + event meta
       API->>RG: spawn cwd=rootReal --no-config -- json flags -- pattern relDir
@@ -543,14 +542,14 @@ sequenceDiagram
 1. `WEB_GREP_RG` if set — must be an absolute path, `fs.access` X_OK.
 2. Walk `process.env.PATH` split by `path.delimiter`; first `rg` / `rg.exe` that is executable.
 3. `@vscode/ripgrep` `rgPath` if the optional native package resolved for this platform.
-4. Else `engine: "none"` until literal fallback exists; then `engine: "literal"`.
+4. Else `engine: "none"`. Current contract is `rg | none` only (no `literal` engine).
 
 `@vscode/ripgrep` ships per-platform binaries as **optionalDependencies** inside the published tarball. There is **no postinstall network fetch**. Air-gapped installs work when the optional package for the host arch is present; exotic arch falls through to `WEB_GREP_RG` or literal. Pin the exact `@vscode/ripgrep` version in the lockfile at the PR that adds it.
 
-On boot, `GET /api/meta` reports `{ engine: "rg" | "literal" | "none", rgVersion, rootLabel, limits }`. The UI shows a banner if `engine !== "rg"`.
+On boot, `GET /api/meta` reports `{ engine: "rg" | "none", rgVersion, rootLabel, limits }`. The UI shows a banner if `engine === "none"`.
 
-Regex + `engine === "literal"` → **HTTP 400** `ENGINE_UNSUPPORTED` (before SSE).  
-`engine === "none"` → **HTTP 503** `ENGINE` (before SSE).
+`engine === "none"` → **HTTP 503** `ENGINE` (before SSE).  
+`ENGINE_UNSUPPORTED` is not a current error code. If a client still sees it, treat it as `ENGINE`.
 
 #### `rg` argv (this block is the source of truth)
 
@@ -645,11 +644,13 @@ Each stdout line is one JSON object.
 - Client abort / `onAbort` → try to send `event: done` `{ cancelled: true }` if the writable is still open; then close. If the client already hung up, just kill `rg`.
 - After `event: error` or `event: done`: close the SSE stream. No further events.
 - Heartbeat: every `LIMITS.heartbeatMs` (5s) write an SSE comment `: ping\n\n` so Vite/nginx idle timeouts do not kill a long scan with no hits.
-- Global concurrency: max **2** simultaneous searches. Check **before** SSE headers. A third request is **HTTP 429** JSON `{ code: "BUSY" }` — never SSE `BUSY`.
+- Global concurrency: default **8** simultaneous searches (`max_concurrent` / `WEB_GREP_MAX_CONCURRENT`, `MaxConcurrentDefault=8`). Check **before** SSE headers. A request beyond the limit is **HTTP 429** JSON `{ code: "BUSY" }` — never SSE `BUSY`.
 - `searchId = crypto.randomUUID()`. Registry `Map<string, ChildProcess>`.
 - **Truncation and counters count only emitted hits.** Increment `matchCount` after `toRelativeHit` succeeds and the SSE `hit` is written — never on raw `rg` `match` lines that are later dropped (denied, symlink escape, absolute path). Truncate when **emitted** `matchCount >= maxResults`. `fileCount` is the number of unique emitted POSIX relative paths (not rg’s `searches_with_match`). `done.matchCount` / `done.fileCount` must equal what the UI received.
 
 #### Literal fallback (no `rg`) — last resort, not equivalent
+
+**Not in the current contract.** Engine is `rg | none` only. Missing `rg` is HTTP 503 `ENGINE` (no `engine: "literal"`, no `ENGINE_UNSUPPORTED`). If a client still sees `ENGINE_UNSUPPORTED`, treat it as `ENGINE`.
 
 Walk with `fs.promises.opendir` (iterative). For each dirent:
 
@@ -661,11 +662,11 @@ Walk with `fs.promises.opendir` (iterative). For each dirent:
 - Does **not** honor `.gitignore` / `.ignore` / `.rgignore`.
 - Depth 32 vs unlimited `rg`.
 - Unicode case-folding is not rg’s.
-- Regex mode is refused (`ENGINE_UNSUPPORTED`).
+- Regex mode is refused (historical `ENGINE_UNSUPPORTED`; current clients map that leftover code to `ENGINE`).
 
-Banner copy (`literalEngineBanner`):  
-zh-CN: `未找到 ripgrep，已降级为字面量搜索（不读取 gitignore，不支持正则）`  
-en-US: `ripgrep not found; using literal search (no gitignore, no regex)`
+Banner copy (historical `literalEngineBanner`; current UI only shows `engineNoneBanner` when `engine === "none"`):  
+zh-CN: `未找到 ripgrep，搜索不可用`  
+en-US: `ripgrep not found; search is unavailable`
 
 v1 still **prefers** shipping `@vscode/ripgrep` so most machines never see this path. We keep the walker so a laptop without a native binary can still do literal search; we do **not** claim feature parity.
 
@@ -677,7 +678,7 @@ All JSON request/response bodies are Zod-validated. Shared schemas live in `pack
 
 | When | How it fails / ends |
 | --- | --- |
-| Auth, Host/Origin, Zod, busy, path sandbox, denylist, engine missing, regex-on-literal | **HTTP 4xx/503 + `JsonError` body. No SSE headers.** |
+| Auth, Host/Origin, Zod, busy, path sandbox, denylist, engine missing | **HTTP 4xx/503 + `JsonError` body. No SSE headers.** |
 | SSE stream has started | Heartbeats (`: ping`) allowed. Terminal event is **exactly one** of `done` or `error`. Then close. |
 | Timeout | `done.timedOut = true` |
 | Client/proxy abort | `done.cancelled = true` if writable; always SIGTERM `rg` |
@@ -694,13 +695,13 @@ No auth.
 { "ok": true, "engine": "rg" }
 ```
 
-`engine` is `"rg" | "literal" | "none"`. Does **not** include `rootLabel` or the absolute root. Unhelpful for “did the root vanish”; boot already refused a missing root. If the root is deleted after boot, the next search returns `INVALID_PATH`.
+`engine` is `"rg" | "none"`. Does **not** include `rootLabel` or the absolute root. Unhelpful for “did the root vanish”; boot already refused a missing root. If the root is deleted after boot, the next search returns `INVALID_PATH`.
 
 #### `GET /api/meta` (auth)
 
 ```ts
 export const MetaResponseSchema = z.object({
-  engine: z.enum(["rg", "literal", "none"]),
+  engine: z.enum(["rg", "none"]),
   rgVersion: z.string().nullable(),
   rootLabel: z.string(),
   followSymlinks: z.boolean(),
@@ -887,7 +888,7 @@ This is the **only** v1 way the SPA sends `WEB_GREP_TOKEN`. Do not inject the to
 | `truncated` | 结果已截断 | Results truncated |
 | `copyPath` | 复制路径 | Copy path |
 | `tokenPrompt` | 输入访问令牌 | Enter access token |
-| `literalEngineBanner` | 未找到 ripgrep，已降级为字面量搜索（不读取 gitignore，不支持正则） | ripgrep not found; using literal search (no gitignore, no regex) |
+| `engineNoneBanner` | 未找到 ripgrep，搜索不可用 | ripgrep not found; search is unavailable |
 
 Locale is stored in `localStorage` key `web-grep.locale`, default `zh-CN`. A small `中 / EN` toggle lives in the status bar. Catalogs are `satisfies Record<MsgKey, string>`.
 
@@ -1071,7 +1072,7 @@ Query history (`web-grep.history`) is **v1.1**, not v1.
 
 - **JS-only:** 10–100× slower; gitignore is hard; ReDoS. **Rejected as primary engine.**
 - **Require `rg`, no JS fallback:** smallest correctness surface; air-gapped / exotic-arch machines need `WEB_GREP_RG`. Attractive.
-- **Keep literal fallback (chosen):** last resort after PATH + `@vscode/ripgrep`; regex refused; banner states non-parity (no gitignore). Removes a hard boot dependency without pretending to be `rg`.
+- **Keep literal fallback:** last resort after PATH + `@vscode/ripgrep` (historical). **Not shipped.** Current contract is `rg | none` only; missing `rg` is HTTP 503 `ENGINE`.
 
 ### 6. Indexed search (tgrep, Sourcegraph, Zoekt)
 
@@ -1385,7 +1386,7 @@ Spin `createApp` with a fixture root. Fake `RgEngine` in unit tests; live `rg` g
 
 - Literal/regex search for a known string returns ≥1 `hit` then **exactly one** `done`.
 - Path outside sandbox → **HTTP 400** JSON `INVALID_PATH` (not SSE).
-- Third concurrent search → **HTTP 429** `BUSY` (not SSE).
+- A search beyond `max_concurrent` (default **8**) → **HTTP 429** `BUSY` (not SSE).
 - Query `-n` and `--json` succeed as patterns (one `--` argv).
 - NUL-containing file under fixture → **no** `hit`.
 - `link-out` symlink to a file that contains the needle → **no** `hit`.

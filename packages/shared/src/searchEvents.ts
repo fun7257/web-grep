@@ -3,7 +3,7 @@ import { JsonErrorSchema } from "./errors.ts";
 
 export const SseMetaSchema = z.object({
   searchId: z.string().uuid(),
-  engine: z.enum(["rg", "literal"]),
+  engine: z.enum(["rg", "none"]),
   searchCount: z.number().int().nonnegative().optional(),
 });
 export type SseMeta = z.output<typeof SseMetaSchema>;
