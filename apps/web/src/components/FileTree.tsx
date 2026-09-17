@@ -19,6 +19,7 @@ import {
   IconDash,
   IconExpand,
   IconHistory,
+  IconLock,
   IconLogout,
   IconPanel,
   IconX,
@@ -67,6 +68,7 @@ function TreeNode({
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const [denied, setDenied] = useState(false);
 
   useEffect(() => {
     if (!entry.dir || !expanded) {
@@ -75,9 +77,11 @@ function TreeNode({
     let cancelled = false;
     const ac = new AbortController();
     setLoading(true);
+    setDenied(false);
     void fetchTree(entry.path, ac.signal, mtimeAfter, excludeGlobs)
       .then((listing) => {
         if (!cancelled) {
+          setDenied(false);
           setChildren(listing.entries);
         }
       })
@@ -87,6 +91,7 @@ function TreeNode({
         }
         if (err instanceof SearchHttpError) {
           onAuthFailure?.(err);
+          setDenied(err.body.code === "DENIED");
         }
         setChildren([]);
       })
@@ -201,12 +206,24 @@ function TreeNode({
       </div>
       {entry.dir && expanded ? (
         <div className="tree-children">
-          {loading && children === null ? (
+          {denied ? (
             <div
-              className="tree-muted tree-loading"
+              className="tree-row denied"
               style={{ paddingLeft: `${1.15 + depth * 0.78}rem` }}
             >
-              <span className="tree-spinner" />
+              <span className="tree-lock" aria-hidden="true">
+                <IconLock />
+              </span>
+              <span className="tree-name">{t("treeDenied")}</span>
+            </div>
+          ) : loading && children === null ? (
+            <TreeSkeleton depth={depth + 1} />
+          ) : (children ?? []).length === 0 ? (
+            <div
+              className="tree-row empty-folder"
+              style={{ paddingLeft: `${1.15 + depth * 0.78}rem` }}
+            >
+              <span className="tree-name">{t("treeEmptyFolder")}</span>
             </div>
           ) : (
             (children ?? []).map((child) => (
@@ -245,6 +262,7 @@ export function FileTree({
   style,
   onTogglePick,
   onOpenFile,
+  onRemovePick,
   onClear,
   excludeGlobs = "",
   onExcludeGlobsChange,
@@ -269,6 +287,7 @@ export function FileTree({
     coveringChildren?: TreeEntry[] | null,
   ) => void;
   onOpenFile?: (path: string) => void;
+  onRemovePick?: (pick: TreePick) => void;
   onClear: () => void;
   excludeGlobs?: string;
   onExcludeGlobsChange?: (value: string) => void;
@@ -439,6 +458,28 @@ export function FileTree({
                 <span>{t("treeClear")}</span>
               </button>
             </div>
+            {picks.length > 0 ? (
+              <div className="tree-picked-chips">
+                {picks.map((pick) => (
+                  <span key={pick.path} className="pick-chip">
+                    <span className="pick-chip-name" title={pick.path} aria-hidden="true">
+                      {pick.path.split("/").pop() || pick.path}
+                    </span>
+                    <button
+                      type="button"
+                      className="pick-chip-x"
+                      title={t("excludeClear")}
+                      aria-label={t("excludeClear")}
+                      onClick={() => {
+                        onRemovePick?.(pick);
+                      }}
+                    >
+                      <IconX />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <div className="exclude-row">
               <span className="exclude-label">{t("excludeGlobLabel")}</span>
               <div
@@ -527,9 +568,8 @@ export function FileTree({
                 </button>
               </div>
             ) : root === null ? (
-              <div className="tree-muted tree-loading">
-                <span className="tree-spinner" />
-                <span>{t("treeLoading")}</span>
+              <div className="tree-muted tree-loading" aria-busy="true">
+                <TreeSkeleton depth={0} rows={4} />
               </div>
             ) : root.length === 0 ? (
               <div className="tree-empty">
@@ -644,6 +684,32 @@ export function FileTree({
         </div>
       )}
     </aside>
+  );
+}
+
+function TreeSkeleton({
+  depth,
+  rows = 2,
+}: {
+  depth: number;
+  rows?: number;
+}) {
+  return (
+    <div className="tree-skel-list" aria-hidden="true">
+      {Array.from({ length: rows }, (_, index) => (
+        <div
+          key={index}
+          className="tree-skel"
+          style={{ paddingLeft: `${0.9 + depth * 0.78}rem` }}
+        >
+          <span className="skel-bar icon" />
+          <span
+            className="skel-bar name"
+            style={{ maxWidth: `${88 + (index % 3) * 18}px` }}
+          />
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -15,7 +15,7 @@ import { HotkeyHelpModal } from "./components/HotkeyHelpModal.tsx";
 import { ResultList } from "./components/ResultList.tsx";
 import { SearchBar } from "./components/SearchBar.tsx";
 import { ShareModal } from "./components/ShareModal.tsx";
-import { StatusBar } from "./components/StatusBar.tsx";
+import { StatusBar, WarnBanners } from "./components/StatusBar.tsx";
 import { Toast } from "./components/Toast.tsx";
 import { AuthDialog } from "./components/AuthDialog.tsx";
 import { useHotkeys } from "./hooks/useHotkeys.ts";
@@ -86,6 +86,8 @@ function AppShell() {
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(
     null,
   );
+  const [browsePath, setBrowsePath] = useState<string | null>(null);
+  const [browseEpoch, setBrowseEpoch] = useState(0);
   const [timeRange, setTimeRange] = useState<TimeRange | null>(loadTimeRange);
   const [searchHistory, setSearchHistory] = useState(loadSearchHistory);
   const [nav, setNav] = useState<{ stack: SearchNavEntry[]; index: number }>({
@@ -186,8 +188,16 @@ function AppShell() {
   }
 
   const selectHit = useCallback((index: number) => {
+    setBrowsePath(null);
     setSelectedIndex(index);
   }, []);
+
+  const engineDown =
+    token.meta?.engine === "none" ||
+    search.error?.code === "ENGINE" ||
+    search.error?.code === "ENGINE_UNSUPPORTED";
+  const searchLocked = token.hostForbidden || engineDown;
+  const authOpen = token.promptOpen && !token.hostForbidden;
 
   const searchWithParts = useCallback(
     (
@@ -275,6 +285,7 @@ function AppShell() {
     pendingSelect.current = null;
     setShareOpen(false);
     setContextTarget(null);
+    setBrowsePath(null);
     setParts([]);
     setFields([newPart("")]);
     setSelectedIndex(0);
@@ -386,12 +397,12 @@ function AppShell() {
   });
 
   return (
-    <div className="app">
+    <div className={authOpen ? "app app-dimmed" : "app"}>
       <FileTree
         open={treeOpen}
         onToggle={toggleTree}
         rootLabel={token.meta?.rootLabel ?? t("treeTitle")}
-        activePath={selectedHit?.path ?? null}
+        activePath={browsePath ?? selectedHit?.path ?? null}
         picks={picks}
         style={
           treeOpen
@@ -414,7 +425,13 @@ function AppShell() {
           setPicks(next);
         }}
         onOpenFile={(path) => {
-          setContextTarget({ path, allowGotoLine: true });
+          setBrowsePath(path);
+          setBrowseEpoch((n) => n + 1);
+        }}
+        onRemovePick={(pick) => {
+          setPicks((current) =>
+            current.filter((item) => item.path !== pick.path),
+          );
         }}
         onClear={() => {
           setPicks([]);
@@ -534,9 +551,14 @@ function AppShell() {
               item.timeRange,
             );
           }}
+          running={search.status === "running"}
+          searchLocked={searchLocked}
+          onCancel={cancelSearch}
         />
         <div className="pane-head">
-          <span className="pane-head-title">{t("paneHits")}</span>
+          <span className="pane-head-title">
+            {search.status === "running" ? t("loading") : t("paneHits")}
+          </span>
           <div ref={setHitsHeadActions} className="pane-head-actions" />
           <StatusBar
             status={search.status}
@@ -545,9 +567,9 @@ function AppShell() {
             error={search.error}
             hostForbidden={token.hostForbidden}
             meta={token.meta}
-            onCancel={cancelSearch}
           />
         </div>
+        <WarnBanners done={search.done} />
         {search.hits.length === 0 ? (
           <EmptyState
             status={search.status}
@@ -555,6 +577,7 @@ function AppShell() {
             done={search.done}
             error={search.error}
             hostForbidden={token.hostForbidden}
+            engine={token.meta?.engine}
           />
         ) : (
           <ResultList
@@ -577,16 +600,22 @@ function AppShell() {
         className="preview-pane"
         ref={previewRef}
         tabIndex={-1}
-        aria-hidden={selectedHit === null}
+        aria-hidden={selectedHit === null && browsePath === null}
       >
         <FilePreview
-          hit={selectedHit}
+          hit={browsePath !== null ? null : selectedHit}
+          browsePath={browsePath}
+          browseEpoch={browseEpoch}
           terms={hlTerms}
           opts={hlOpts}
           {...(webUrl !== null || rgCommand !== null
             ? { onShare: () => setShareOpen(true) }
             : {})}
           onOpenContext={() => {
+            if (browsePath !== null) {
+              setContextTarget({ path: browsePath, allowGotoLine: true });
+              return;
+            }
             if (selectedHit === null) {
               return;
             }

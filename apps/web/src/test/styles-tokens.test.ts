@@ -47,6 +47,11 @@ describe("shipped stylesheet tokens", () => {
     expect(ruleBody(".exclude-chip")).toContain("var(--chip-fill)");
     expect(ruleBody(".empty-title")).toContain("var(--fs-lg)");
     expect(ruleBody(".empty-helper")).toContain("var(--fs-xs)");
+    expect(light).toContain("--warn-bg:");
+    expect(dark).toContain("--warn-bg:");
+    expect(ruleBody(".warn-banner")).toContain("var(--warn-bg)");
+    expect(ruleBody(".search-bar .search-go.cancel")).toContain("var(--danger)");
+    expect(css).toContain(".app.app-dimmed");
   });
 
   it("gives results and preview different background tokens", () => {

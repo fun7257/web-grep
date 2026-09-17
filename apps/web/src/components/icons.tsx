@@ -329,6 +329,48 @@ export function IconX() {
   );
 }
 
+export function IconLock() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="3.5" y="7.2" width="9" height="6.4" rx="1.4" {...stroke} />
+      <path d="M5.4 7.2V5.4a2.6 2.6 0 0 1 5.2 0v1.8" {...stroke} />
+    </svg>
+  );
+}
+
+export function IconWarn() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 2.6 14.2 13.4H1.8L8 2.6z" {...stroke} />
+      <path d="M8 6.6v3.2M8 11.6v.2" {...stroke} />
+    </svg>
+  );
+}
+
+export function IconBinary() {
+  return (
+    <svg className="icon idle-mark" viewBox="0 0 88 88" aria-hidden="true">
+      <rect
+        x="24"
+        y="18"
+        width="40"
+        height="52"
+        rx="6"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+      />
+      <path
+        d="M34 36h20M34 46h14M34 56h18"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
 export function BrandMark() {
   return (
     <span className="brand-mark" aria-hidden="true">

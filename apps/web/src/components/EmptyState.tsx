@@ -3,26 +3,50 @@ import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
 import { IdleMark } from "./icons.tsx";
 
+function engineCode(code: string | undefined): boolean {
+  return code === "ENGINE" || code === "ENGINE_UNSUPPORTED";
+}
+
 export function EmptyState({
   status,
   hitCount,
   done,
   error,
   hostForbidden,
+  engine,
 }: {
   status: SearchStatus;
   hitCount: number;
   done: SseDone | null;
   error: JsonError | null;
   hostForbidden: boolean;
+  engine?: string | null;
 }) {
   const { t } = useLocale();
+  const engineDown = engine === "none" || engineCode(error?.code);
 
   if (hitCount > 0) {
     return null;
   }
-  if (hostForbidden) {
-    return <div className="empty-state">{t("hostNotAllowed")}</div>;
+  if (hostForbidden || error?.code === "FORBIDDEN_HOST") {
+    return (
+      <div className="empty-state empty-idle">
+        <IdleMark kind="nomatch" />
+        <p className="empty-title danger">{t("hostNotAllowed")}</p>
+        <p className="empty-helper">{t("hostForbiddenHelper")}</p>
+        <p className="empty-code">{t("errorCodeHost")}</p>
+      </div>
+    );
+  }
+  if (engineDown && (status === "error" || status === "idle" || engine === "none")) {
+    return (
+      <div className="empty-state empty-idle">
+        <IdleMark kind="nomatch" />
+        <p className="empty-title danger">{t("engineUnavailable")}</p>
+        <p className="empty-helper">{t("engineUnavailableHelper")}</p>
+        <p className="empty-code">{t("errorCodeEngine")}</p>
+      </div>
+    );
   }
   if (status === "running") {
     return (
@@ -37,6 +61,18 @@ export function EmptyState({
       <div className="empty-state empty-idle">
         <IdleMark kind="nomatch" />
         <p className="empty-title">{t("cancelled")}</p>
+        <p className="empty-helper">{t("cancelledHelper")}</p>
+        <p className="empty-code">{t("errorCodeCancelled")}</p>
+      </div>
+    );
+  }
+  if (status === "error" && error?.code === "BUSY") {
+    return (
+      <div className="empty-state empty-idle">
+        <IdleMark kind="nomatch" />
+        <p className="empty-title">{t("searchBusy")}</p>
+        <p className="empty-helper">{t("searchBusyHelper")}</p>
+        <p className="empty-code">{t("errorCodeBusy")}</p>
       </div>
     );
   }
@@ -44,10 +80,8 @@ export function EmptyState({
     return (
       <div className="empty-state empty-idle">
         <IdleMark kind="nomatch" />
-        <p className="empty-title">
-          {error?.code === "FORBIDDEN_HOST"
-            ? t("hostNotAllowed")
-            : (error?.message ?? t("searchFailed"))}
+        <p className="empty-title danger">
+          {error?.message ?? t("searchFailed")}
         </p>
       </div>
     );
