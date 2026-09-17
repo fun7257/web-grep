@@ -656,6 +656,7 @@ function AppShell() {
                 path: selectedHit.path,
                 highlightLine: selectedHit.line,
                 matches: selectedHit.matches,
+                allowGotoLine: true,
               });
               return;
             }

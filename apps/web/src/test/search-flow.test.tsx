@@ -1085,7 +1085,15 @@ describe("search flow", () => {
       /line 1/,
     );
     expect(dialog.querySelector(".preview-find")).toBeNull();
-    expect(screen.queryByLabelText("Go to line")).toBeNull();
+    const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
+    expect(goto).toBeTruthy();
+    fireEvent.change(goto, { target: { value: "5" } });
+    fireEvent.submit(goto.closest("form") as HTMLFormElement);
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
+        /src\/a\.ts line 5/,
+      );
+    });
     expect(document.querySelector(".app-dimmed")).toBeTruthy();
   });
 
