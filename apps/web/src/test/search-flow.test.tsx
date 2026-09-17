@@ -2771,7 +2771,9 @@ describe("search flow", () => {
     typeQuery("eng");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getByText("Search engine unavailable")).toBeTruthy();
+      expect(document.querySelector(".empty-title")?.textContent).toBe(
+        "Search engine unavailable",
+      );
     });
     expect(screen.getByText("ENGINE")).toBeTruthy();
     expect(screen.queryByText("ENGINE_UNSUPPORTED")).toBeNull();
@@ -2790,7 +2792,9 @@ describe("search flow", () => {
     typeQuery("eng-stderr");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getByText("Search engine unavailable")).toBeTruthy();
+      expect(document.querySelector(".empty-title")?.textContent).toBe(
+        "Search engine unavailable",
+      );
     });
     expect(document.querySelector(".empty-title")?.textContent).toBe(
       "Search engine unavailable",
@@ -2845,7 +2849,9 @@ describe("search flow", () => {
     typeQuery("eng-unsup");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getByText("Search engine unavailable")).toBeTruthy();
+      expect(document.querySelector(".empty-title")?.textContent).toBe(
+        "Search engine unavailable",
+      );
     });
     expect(
       screen.getByText("The engine is not ready, so search is disabled"),
