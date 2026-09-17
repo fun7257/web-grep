@@ -82,6 +82,7 @@ export function StatusBar({
   error,
   hostForbidden,
   meta,
+  onCancel,
 }: {
   status: SearchStatus;
   done: SseDone | null;
@@ -89,6 +90,7 @@ export function StatusBar({
   error: JsonError | null;
   hostForbidden: boolean;
   meta: MetaResponse | null;
+  onCancel?: () => void;
 }) {
   const { t } = useLocale();
 
@@ -138,6 +140,11 @@ export function StatusBar({
       >
         {text}
       </div>
+      {status === "running" && onCancel !== undefined ? (
+        <button type="button" className="status-cancel" onClick={onCancel}>
+          {t("cancel")}
+        </button>
+      ) : null}
       {meta?.engine === "none" ? (
         <div className="status-banner">{t("engineNoneBanner")}</div>
       ) : null}

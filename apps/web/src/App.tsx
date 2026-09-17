@@ -567,6 +567,7 @@ function AppShell() {
             error={search.error}
             hostForbidden={token.hostForbidden}
             meta={token.meta}
+            onCancel={cancelSearch}
           />
         </div>
         <WarnBanners done={search.done} />
