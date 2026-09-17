@@ -1,4 +1,5 @@
 import { useLocale } from "../hooks/useLocale.ts";
+import { AppModal } from "./AppModal.tsx";
 
 export function HotkeyHelpModal({
   open,
@@ -8,10 +9,6 @@ export function HotkeyHelpModal({
   onClose: () => void;
 }) {
   const { t } = useLocale();
-
-  if (!open) {
-    return null;
-  }
 
   const shortcuts = [
     { key: "Enter", desc: "提交搜索 / Submit search" },
@@ -31,38 +28,20 @@ export function HotkeyHelpModal({
   ];
 
   return (
-    <div
-      className="token-overlay"
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
+    <AppModal
+      open={open}
+      title={t("hotkeysTitle")}
+      boxClass="hotkey-modal"
+      onClose={onClose}
     >
-      <div
-        className="hotkey-modal"
-        onClick={(e) => {
-          e.stopPropagation();
-        }}
-      >
-        <div className="hotkey-header">
-          <h2>{t("hotkeysTitle")}</h2>
-          <button
-            type="button"
-            className="hotkey-close"
-            onClick={onClose}
-            aria-label={t("close")}
-          >
-            ×
-          </button>
-        </div>
-        <div className="hotkey-list">
-          {shortcuts.map((item) => (
-            <div key={item.key} className="hotkey-row">
-              <kbd className="hotkey-kbd">{item.key}</kbd>
-              <span className="hotkey-desc">{item.desc}</span>
-            </div>
-          ))}
-        </div>
+      <div className="hotkey-list">
+        {shortcuts.map((item) => (
+          <div key={item.key} className="hotkey-row">
+            <kbd className="hotkey-kbd">{item.key}</kbd>
+            <span className="hotkey-desc">{item.desc}</span>
+          </div>
+        ))}
       </div>
-    </div>
+    </AppModal>
   );
 }

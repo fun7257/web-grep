@@ -641,6 +641,29 @@ describe("search flow", () => {
     ).toBe(true);
   });
 
+  it("does not search when a time range is clicked after results exist", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(fileRow("src/a.ts")).toBeTruthy();
+    });
+    const searchesBefore = searchCallCount(fetchMock);
+    fireEvent.click(screen.getByRole("button", { name: "24h" }));
+    expect(searchCallCount(fetchMock)).toBe(searchesBefore);
+    clickSearch();
+    await waitFor(() => {
+      expect(searchCallCount(fetchMock)).toBe(searchesBefore + 1);
+    });
+    expect(lastSearchRequest(fetchMock).mtimeAfter).toBeGreaterThan(0);
+  });
+
   it("sends mtimeAfter when a time range is selected", async () => {
     let body = "";
     mockFetch((init) => {
@@ -1108,6 +1131,92 @@ describe("search flow", () => {
       .map((call) => requestUrl(call[0] as RequestInfo))
       .filter((url) => url.includes("/api/file"));
     expect(fileUrls.some((url) => /from=50(?:&|$)/.test(url))).toBe(true);
+  });
+
+  it("prepends earlier lines after a tree preview jump", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
+        /ok\.txt line 1/,
+      );
+    });
+    const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
+    fireEvent.change(goto, { target: { value: "50" } });
+    fireEvent.submit(goto.closest("form") as HTMLFormElement);
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
+        /ok\.txt line 50/,
+      );
+    });
+    const scroller = dialog.querySelector(".context-lines");
+    expect(scroller).toBeTruthy();
+    fireEvent.wheel(scroller as HTMLElement, { deltaY: -120 });
+    await waitFor(() => {
+      expect(dialog.textContent).toMatch(/ok\.txt line 1/);
+      expect(dialog.textContent).toMatch(/ok\.txt line 50/);
+    });
+    const fileUrls = fetchMock.mock.calls
+      .map((call) => requestUrl(call[0] as RequestInfo))
+      .filter((url) => url.includes("/api/file"));
+    expect(
+      fileUrls.some((url) => {
+        const from = new URL(url, "http://localhost").searchParams.get("from");
+        return from !== null && Number(from) < 50;
+      }),
+    ).toBe(true);
+  });
+
+  it("reopens a tree file from line 1 after a jump", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    const goto = await screen.findByLabelText("Go to line");
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line")).toBeTruthy();
+    });
+    fireEvent.change(goto, { target: { value: "50" } });
+    fireEvent.submit((goto as HTMLInputElement).closest("form") as HTMLFormElement);
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
+        /ok\.txt line 50/,
+      );
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Context" })).toBeNull();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    const again = await screen.findByRole("dialog", { name: "Context" });
+    await waitFor(() => {
+      expect(again.textContent).toMatch(/ok\.txt line 1/);
+    });
+    expect(again.querySelector(".preview-line.current")?.textContent ?? "").not.toMatch(
+      /ok\.txt line 50/,
+    );
+    const afterClose = fetchMock.mock.calls
+      .map((call) => requestUrl(call[0] as RequestInfo))
+      .filter((url) => url.includes("/api/file"));
+    expect(afterClose.filter((url) => url.includes("from=1")).length).toBeGreaterThan(
+      1,
+    );
   });
 
   it("shows an empty state when the tree file has no content", async () => {

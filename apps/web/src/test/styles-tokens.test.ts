@@ -80,6 +80,28 @@ describe("shipped stylesheet tokens", () => {
     expect(lightKey).not.toBe(darkKey);
   });
 
+  it("uses theme tokens for grouped result sticky and collapse chrome", () => {
+    const selectors = [
+      ".result-sticky-header",
+      ".result-sticky-header.is-pushing",
+      ".result-group-header.is-entering",
+    ];
+    for (const selector of selectors) {
+      const body = ruleBody(selector);
+      expect(body, selector).toMatch(/var\(--/);
+      expect(body, selector).not.toMatch(/rgb\(\s*0\s+0\s+0\s*\//);
+      expect(body, selector).not.toMatch(/rgb\(\s*126\s+168\s+255\s*\//);
+    }
+    const kfStart = css.indexOf("@keyframes file-swap-bar");
+    expect(kfStart).toBeGreaterThan(-1);
+    const kf = css.slice(kfStart, css.indexOf("@keyframes file-swap-name"));
+    expect(kf).toContain("var(--selected)");
+    expect(kf).toContain("var(--sticky-shadow)");
+    expect(kf).toContain("var(--swap-ring)");
+    expect(kf).not.toMatch(/rgb\(\s*0\s+0\s+0\s*\//);
+    expect(kf).not.toMatch(/rgb\(\s*126\s+168\s+255\s*\//);
+  });
+
   it("uses tone tokens instead of white overlays on chrome that shows in light theme", () => {
     const selectors = [
       ".q-x:hover",

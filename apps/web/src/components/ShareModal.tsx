@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { copyText } from "../copyText.ts";
 import { useLocale } from "../hooks/useLocale.ts";
+import { AppModal } from "./AppModal.tsx";
 import { IconCheck, IconCopy } from "./icons.tsx";
 
 export function ShareModal({
@@ -22,23 +23,8 @@ export function ShareModal({
   useEffect(() => {
     if (!open) {
       setCopied(null);
-      return;
     }
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [open, onClose]);
-
-  if (!open) {
-    return null;
-  }
+  }, [open]);
 
   const copy = (kind: "rg" | "link", value: string, notice: string): void => {
     void copyText(value);
@@ -47,54 +33,36 @@ export function ShareModal({
   };
 
   return (
-    <div
-      className="token-overlay"
-      role="dialog"
-      aria-modal="true"
-      aria-label={t("shareTitle")}
-      onClick={onClose}
+    <AppModal
+      open={open}
+      title={t("shareTitle")}
+      ariaLabel={t("shareTitle")}
+      boxClass="share-modal"
+      onClose={onClose}
     >
-      <div
-        className="share-modal"
-        onClick={(event) => {
-          event.stopPropagation();
-        }}
-      >
-        <div className="hotkey-header">
-          <h2>{t("shareTitle")}</h2>
-          <button
-            type="button"
-            className="hotkey-close"
-            onClick={onClose}
-            aria-label={t("close")}
-          >
-            ×
-          </button>
-        </div>
-        {rgCommand !== null ? (
-          <ShareRow
-            label={t("shareRgLabel")}
-            value={rgCommand}
-            copied={copied === "rg"}
-            copyLabel={t("shareRg")}
-            onCopy={() => {
-              copy("rg", rgCommand, t("copiedRg"));
-            }}
-          />
-        ) : null}
-        {webUrl !== null ? (
-          <ShareRow
-            label={t("shareLinkLabel")}
-            value={webUrl}
-            copied={copied === "link"}
-            copyLabel={t("shareLink")}
-            onCopy={() => {
-              copy("link", webUrl, t("copiedLink"));
-            }}
-          />
-        ) : null}
-      </div>
-    </div>
+      {rgCommand !== null ? (
+        <ShareRow
+          label={t("shareRgLabel")}
+          value={rgCommand}
+          copied={copied === "rg"}
+          copyLabel={t("shareRg")}
+          onCopy={() => {
+            copy("rg", rgCommand, t("copiedRg"));
+          }}
+        />
+      ) : null}
+      {webUrl !== null ? (
+        <ShareRow
+          label={t("shareLinkLabel")}
+          value={webUrl}
+          copied={copied === "link"}
+          copyLabel={t("shareLink")}
+          onCopy={() => {
+            copy("link", webUrl, t("copiedLink"));
+          }}
+        />
+      ) : null}
+    </AppModal>
   );
 }
 

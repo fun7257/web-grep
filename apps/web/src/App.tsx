@@ -445,10 +445,6 @@ function AppShell() {
           }
           setTimeRange(next);
           saveTimeRange(next);
-          const nextParts = partsFromFields(fields);
-          if (nextParts.length > 0) {
-            searchWithParts(nextParts, [], next, []);
-          }
         }}
         onLogout={() => {
           void token.logout().then(() => {
