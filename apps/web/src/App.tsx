@@ -15,7 +15,7 @@ import { HotkeyHelpModal } from "./components/HotkeyHelpModal.tsx";
 import { ResultList } from "./components/ResultList.tsx";
 import { SearchBar } from "./components/SearchBar.tsx";
 import { ShareModal } from "./components/ShareModal.tsx";
-import { StatusBar } from "./components/StatusBar.tsx";
+import { InfoCue, StatusBar, WarnBanners } from "./components/StatusBar.tsx";
 import { Toast } from "./components/Toast.tsx";
 import { AuthDialog } from "./components/AuthDialog.tsx";
 import { useHotkeys } from "./hooks/useHotkeys.ts";
@@ -81,11 +81,16 @@ function AppShell() {
   const [excludeGlobs, setExcludeGlobs] = useState("");
 
   const [toastMsg, setToastMsg] = useState<string | null>(null);
+  const [infoCue, setInfoCue] = useState<string | null>(null);
+  const [sharePendingCue, setSharePendingCue] = useState<string | null>(null);
+  const infoCueTimer = useRef(0);
   const [helpOpen, setHelpOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(
     null,
   );
+  const [browsePath, setBrowsePath] = useState<string | null>(null);
+  const [browseEpoch, setBrowseEpoch] = useState(0);
   const [timeRange, setTimeRange] = useState<TimeRange | null>(loadTimeRange);
   const [searchHistory, setSearchHistory] = useState(loadSearchHistory);
   const [nav, setNav] = useState<{ stack: SearchNavEntry[]; index: number }>({
@@ -186,8 +191,28 @@ function AppShell() {
   }
 
   const selectHit = useCallback((index: number) => {
+    setBrowsePath(null);
     setSelectedIndex(index);
   }, []);
+
+  const showInfoCue = useCallback((message: string) => {
+    window.clearTimeout(infoCueTimer.current);
+    setInfoCue(message);
+    infoCueTimer.current = window.setTimeout(() => {
+      setInfoCue(null);
+    }, 2800);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(infoCueTimer.current);
+    };
+  }, []);
+
+  const engineDown =
+    token.meta?.engine === "none" || search.error?.code === "ENGINE";
+  const searchLocked = token.hostForbidden || engineDown;
+  const authOpen = token.promptOpen && !token.hostForbidden;
 
   const searchWithParts = useCallback(
     (
@@ -273,8 +298,11 @@ function AppShell() {
     resetSearch();
     stackRef.current = null;
     pendingSelect.current = null;
+    setSharePendingCue(null);
+    setInfoCue(null);
     setShareOpen(false);
     setContextTarget(null);
+    setBrowsePath(null);
     setParts([]);
     setFields([newPart("")]);
     setSelectedIndex(0);
@@ -304,6 +332,12 @@ function AppShell() {
     setPicks(nextPicks);
     if (parsed.path !== undefined && parsed.line !== undefined) {
       pendingSelect.current = { path: parsed.path, line: parsed.line };
+      setSharePendingCue(
+        t("sharePendingSelect", {
+          path: parsed.path,
+          line: parsed.line,
+        }),
+      );
     }
     if (parsed.timeRange !== undefined) {
       setTimeRange(parsed.timeRange);
@@ -324,7 +358,7 @@ function AppShell() {
       nextPicks,
       nextExclude,
     );
-  }, [searchWithParts, token.hostForbidden, token.meta, token.promptOpen]);
+  }, [searchWithParts, t, token.hostForbidden, token.meta, token.promptOpen]);
 
   useEffect(() => {
     if (!bootstrapped.current || shareState === null) {
@@ -350,9 +384,11 @@ function AppShell() {
     );
     if (idx >= 0) {
       setSelectedIndex(idx);
+      setSharePendingCue(null);
     }
     if (search.status === "done" || search.status === "error") {
       pendingSelect.current = null;
+      setSharePendingCue(null);
     }
   }, [search.hits, search.status]);
 
@@ -386,12 +422,16 @@ function AppShell() {
   });
 
   return (
-    <div className="app">
+    <div
+      className={
+        authOpen || contextTarget !== null ? "app app-dimmed" : "app"
+      }
+    >
       <FileTree
         open={treeOpen}
         onToggle={toggleTree}
         rootLabel={token.meta?.rootLabel ?? t("treeTitle")}
-        activePath={selectedHit?.path ?? null}
+        activePath={browsePath ?? selectedHit?.path ?? null}
         picks={picks}
         style={
           treeOpen
@@ -414,7 +454,17 @@ function AppShell() {
           setPicks(next);
         }}
         onOpenFile={(path) => {
-          setContextTarget({ path, allowGotoLine: true });
+          if (selectedHit !== null) {
+            setContextTarget({ path, allowGotoLine: true });
+            return;
+          }
+          setBrowsePath(path);
+          setBrowseEpoch((n) => n + 1);
+        }}
+        onRemovePick={(pick) => {
+          setPicks((current) =>
+            current.filter((item) => item.path !== pick.path),
+          );
         }}
         onClear={() => {
           setPicks([]);
@@ -534,9 +584,17 @@ function AppShell() {
               item.timeRange,
             );
           }}
+          running={search.status === "running"}
+          searchLocked={searchLocked}
+          onCancel={cancelSearch}
+          onOptionFlush={() => {
+            showInfoCue(t("optionFlushed"));
+          }}
         />
         <div className="pane-head">
-          <span>{t("paneHits")}</span>
+          <span className="pane-head-title">
+            {search.status === "running" ? t("loading") : t("paneHits")}
+          </span>
           <div ref={setHitsHeadActions} className="pane-head-actions" />
           <StatusBar
             status={search.status}
@@ -548,6 +606,8 @@ function AppShell() {
             onCancel={cancelSearch}
           />
         </div>
+        <InfoCue message={infoCue ?? sharePendingCue} />
+        <WarnBanners done={search.done} />
         {search.hits.length === 0 ? (
           <EmptyState
             status={search.status}
@@ -555,6 +615,7 @@ function AppShell() {
             done={search.done}
             error={search.error}
             hostForbidden={token.hostForbidden}
+            engine={token.meta?.engine ?? null}
           />
         ) : (
           <ResultList
@@ -577,24 +638,29 @@ function AppShell() {
         className="preview-pane"
         ref={previewRef}
         tabIndex={-1}
-        aria-hidden={selectedHit === null}
+        aria-hidden={selectedHit === null && browsePath === null}
       >
         <FilePreview
           hit={selectedHit}
+          browsePath={browsePath}
+          browseEpoch={browseEpoch}
           terms={hlTerms}
           opts={hlOpts}
           {...(webUrl !== null || rgCommand !== null
             ? { onShare: () => setShareOpen(true) }
             : {})}
           onOpenContext={() => {
-            if (selectedHit === null) {
+            if (selectedHit !== null) {
+              setContextTarget({
+                path: selectedHit.path,
+                highlightLine: selectedHit.line,
+                matches: selectedHit.matches,
+              });
               return;
             }
-            setContextTarget({
-              path: selectedHit.path,
-              highlightLine: selectedHit.line,
-              matches: selectedHit.matches,
-            });
+            if (browsePath !== null) {
+              setContextTarget({ path: browsePath, allowGotoLine: true });
+            }
           }}
           onSearchSelected={searchSelected}
           onCopyNotice={(txt) => {

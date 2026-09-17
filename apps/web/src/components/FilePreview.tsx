@@ -8,11 +8,14 @@ import {
 } from "../formats/detect.ts";
 import { JSON_INDENT, mappedSelection } from "../formats/jsonPieces.ts";
 import { mappedMarkdownSelection } from "../formats/markdownPieces.ts";
+import { PREVIEW_CHUNK } from "../api/fileClient.ts";
 import { copyText } from "../copyText.ts";
 import { DEFAULT_HL_OPTS, type HlOpts } from "../highlight.ts";
+import { useFileWindow } from "../hooks/useFileWindow.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import { FormattedLine } from "./FormattedPreview.tsx";
 import {
+  IconBinary,
   IconCheck,
   IconCopy,
   IconExpand,
@@ -126,8 +129,11 @@ function mappedBodySelection(
   return visible;
 }
 
+/** Right-pane hit snippet / browse. Full-file virtualization lives in ContextModal. */
 export function FilePreview({
   hit,
+  browsePath = null,
+  browseEpoch = 0,
   terms = [],
   opts = DEFAULT_HL_OPTS,
   onShare,
@@ -136,6 +142,8 @@ export function FilePreview({
   onCopyNotice,
 }: {
   hit: SseHit | null;
+  browsePath?: string | null;
+  browseEpoch?: number;
   terms?: import("../highlight.ts").HlTermInput[];
   opts?: HlOpts;
   onShare?: () => void;
@@ -143,20 +151,165 @@ export function FilePreview({
   onSearchSelected?: (text: string) => void;
   onCopyNotice?: (msg: string) => void;
 }) {
-  if (hit === null) {
-    return <PreviewIdle />;
+  if (hit !== null) {
+    return (
+      <FilePreviewReady
+        key={`${hit.path}:${hit.line}`}
+        hit={hit}
+        terms={terms}
+        opts={opts}
+        {...(onShare !== undefined ? { onShare } : {})}
+        {...(onOpenContext !== undefined ? { onOpenContext } : {})}
+        {...(onSearchSelected !== undefined ? { onSearchSelected } : {})}
+        {...(onCopyNotice !== undefined ? { onCopyNotice } : {})}
+      />
+    );
+  }
+  if (browsePath !== null && browsePath !== "") {
+    return (
+      <FilePreviewBrowse
+        key={`${browsePath}:${browseEpoch}`}
+        path={browsePath}
+        {...(onOpenContext !== undefined ? { onOpenContext } : {})}
+        {...(onCopyNotice !== undefined ? { onCopyNotice } : {})}
+      />
+    );
+  }
+  return <PreviewIdle />;
+}
+
+function PreviewSkeleton() {
+  return (
+    <div className="preview-skel" aria-busy="true">
+      {Array.from({ length: 8 }, (_, index) => (
+        <div key={index} className="preview-skel-line">
+          <span className="skel-n" />
+          <span className="skel-t" style={{ width: `${46 + (index % 4) * 12}%` }} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function PreviewGapBody({
+  kind,
+}: {
+  kind: "binary" | "denied" | "empty";
+}) {
+  const { t } = useLocale();
+  if (kind === "binary") {
+    return (
+      <div className="preview-empty">
+        <IconBinary />
+        <p className="empty-title">{t("previewBinary")}</p>
+        <p className="empty-helper">{t("previewBinaryHelper")}</p>
+      </div>
+    );
+  }
+  if (kind === "denied") {
+    return (
+      <div className="preview-empty">
+        <IdleMark kind="nomatch" />
+        <p className="empty-title">{t("previewDenied")}</p>
+        <p className="empty-helper">{t("previewDeniedHelper")}</p>
+        <p className="empty-code">{t("previewDeniedCode")}</p>
+      </div>
+    );
   }
   return (
-    <FilePreviewReady
-      key={`${hit.path}:${hit.line}`}
-      hit={hit}
-      terms={terms}
-      opts={opts}
-      {...(onShare !== undefined ? { onShare } : {})}
-      {...(onOpenContext !== undefined ? { onOpenContext } : {})}
-      {...(onSearchSelected !== undefined ? { onSearchSelected } : {})}
-      {...(onCopyNotice !== undefined ? { onCopyNotice } : {})}
-    />
+    <div className="preview-empty">
+      <IdleMark kind="preview" />
+      <p className="empty-title">{t("previewFileEmpty")}</p>
+    </div>
+  );
+}
+
+function FilePreviewBrowse({
+  path,
+  onOpenContext,
+  onCopyNotice,
+}: {
+  path: string;
+  onOpenContext?: () => void;
+  onCopyNotice?: (msg: string) => void;
+}) {
+  const { t } = useLocale();
+  const {
+    lines,
+    error,
+    errorCode,
+    binary,
+    eof,
+    loading,
+    pathRef,
+    reset,
+    loadSlice,
+  } = useFileWindow(t);
+  pathRef.current = path;
+
+  useEffect(() => {
+    const ac = new AbortController();
+    reset();
+    void loadSlice(
+      { path, from: 1, count: PREVIEW_CHUNK },
+      { mode: "replace", signal: ac.signal },
+    );
+    return () => {
+      ac.abort();
+    };
+  }, [loadSlice, path, reset]);
+
+  const denied = errorCode === "DENIED";
+  const copyPath = (): void => {
+    void copyText(path);
+    onCopyNotice?.(`${t("copiedPath")}: ${path}`);
+  };
+
+  return (
+    <div className="preview preview-browse">
+      <header className="preview-header">
+        <span className="preview-path" title={path} onClick={copyPath}>
+          {path}
+        </span>
+        <div className="preview-tools">
+          {onOpenContext !== undefined ? (
+            <button
+              type="button"
+              className="preview-icon-btn"
+              title={t("previewContext")}
+              aria-label={t("previewContext")}
+              onClick={onOpenContext}
+            >
+              <IconExpand />
+            </button>
+          ) : null}
+        </div>
+      </header>
+      {denied ? (
+        <PreviewGapBody kind="denied" />
+      ) : binary ? (
+        <PreviewGapBody kind="binary" />
+      ) : loading ||
+        (lines.length === 0 && error === null && !eof) ? (
+        <PreviewSkeleton />
+      ) : error !== null && lines.length === 0 ? (
+        <div className="preview-empty">
+          <IdleMark kind="nomatch" />
+          <p className="empty-title danger">{error}</p>
+        </div>
+      ) : lines.length === 0 ? (
+        <PreviewGapBody kind="empty" />
+      ) : (
+        <div className="preview-hit preview-browse-body">
+          {lines.map((line) => (
+            <div key={line.n} className="preview-line">
+              <span className="preview-n">{line.n}</span>
+              <span className="preview-text">{line.text}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -165,7 +318,8 @@ function PreviewIdle() {
   return (
     <div className="preview preview-idle">
       <IdleMark kind="preview" />
-      <p>{t("previewEmpty")}</p>
+      <p className="empty-title">{t("previewEmpty")}</p>
+      <p className="empty-helper">{t("previewEmptyHelper")}</p>
     </div>
   );
 }

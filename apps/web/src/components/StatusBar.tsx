@@ -7,7 +7,7 @@ import type {
 import { useLocale } from "../hooks/useLocale.ts";
 import { useTheme } from "../hooks/useTheme.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
-import { IconMoon, IconSun } from "./icons.tsx";
+import { IconMoon, IconSun, IconWarn } from "./icons.tsx";
 
 export function ThemeToggle() {
   const { theme, toggle } = useTheme();
@@ -52,6 +52,40 @@ export function LocaleToggle() {
   );
 }
 
+export function InfoCue({ message }: { message: string | null }) {
+  if (message === null || message === "") {
+    return null;
+  }
+  return (
+    <div className="info-cue" role="status">
+      <span className="info-cue-label">{message}</span>
+    </div>
+  );
+}
+
+export function WarnBanners({ done }: { done: SseDone | null }) {
+  const { t } = useLocale();
+  if (done === null || (!done.truncated && !done.timedOut)) {
+    return null;
+  }
+  return (
+    <div className="warn-stack">
+      {done.truncated ? (
+        <div className="warn-banner">
+          <IconWarn />
+          <span className="warn-label">{t("truncatedBanner")}</span>
+        </div>
+      ) : null}
+      {done.timedOut ? (
+        <div className="warn-banner">
+          <IconWarn />
+          <span className="warn-label">{t("timedOutBanner")}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function StatusBar({
   status,
   done,
@@ -77,7 +111,7 @@ export function StatusBar({
   } else if (status === "running") {
     text =
       progress !== null
-        ? t("searchProgress", {
+        ? t("searchProgressMeta", {
             files: progress.files,
             matches: progress.matches,
           })
@@ -90,20 +124,11 @@ export function StatusBar({
         ? t("hostNotAllowed")
         : (error?.message ?? t("searchFailed"));
   } else if (status === "done" && done !== null) {
-    const parts = [
-      t("resultsStatus", {
-        matchCount: done.matchCount,
-        fileCount: done.fileCount,
-        elapsedMs: Math.round(done.elapsedMs),
-      }),
-    ];
-    if (done.truncated) {
-      parts.push(t("truncated"));
-    }
-    if (done.timedOut) {
-      parts.push(t("timedOut"));
-    }
-    text = parts.join(" · ");
+    text = t("resultsStatus", {
+      matchCount: done.matchCount,
+      fileCount: done.fileCount,
+      elapsedMs: Math.round(done.elapsedMs),
+    });
   }
 
   const isAlert = hostForbidden || status === "error";
@@ -118,18 +143,16 @@ export function StatusBar({
   return (
     <div className="status-bar" data-status={status}>
       <div
-        className="status-text"
+        className={
+          status === "running" ? "status-text progress-meta" : "status-text"
+        }
         role={isAlert ? "alert" : isStatus ? "status" : undefined}
         aria-live="polite"
       >
         {text}
       </div>
       {status === "running" && onCancel !== undefined ? (
-        <button
-          type="button"
-          className="status-cancel"
-          onClick={onCancel}
-        >
+        <button type="button" className="status-cancel" onClick={onCancel}>
           {t("cancel")}
         </button>
       ) : null}

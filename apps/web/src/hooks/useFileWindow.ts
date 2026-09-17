@@ -14,6 +14,7 @@ type FetchQuery = {
 export function useFileWindow(t: Translate) {
   const [lines, setLines] = useState<WindowLine[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [errorCode, setErrorCode] = useState<string | null>(null);
   const [binary, setBinary] = useState(false);
   const [eof, setEof] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -23,6 +24,7 @@ export function useFileWindow(t: Translate) {
   const reset = useCallback(() => {
     setLines([]);
     setError(null);
+    setErrorCode(null);
     setBinary(false);
     setEof(false);
     setLoading(false);
@@ -42,6 +44,7 @@ export function useFileWindow(t: Translate) {
       loadingRef.current = true;
       setLoading(true);
       setError(null);
+      setErrorCode(null);
       try {
         const win = await fetchFileWindow(
           { ...query, count: query.count ?? PREVIEW_CHUNK },
@@ -80,9 +83,13 @@ export function useFileWindow(t: Translate) {
         if (opts.signal?.aborted === true || pathRef.current !== openedPath) {
           return null;
         }
-        setError(
-          err instanceof SearchHttpError ? err.body.message : t("searchFailed"),
-        );
+        if (err instanceof SearchHttpError) {
+          setError(err.body.message);
+          setErrorCode(err.body.code);
+        } else {
+          setError(t("searchFailed"));
+          setErrorCode(null);
+        }
         return null;
       } finally {
         if (pathRef.current === openedPath) {
@@ -98,6 +105,7 @@ export function useFileWindow(t: Translate) {
     lines,
     setLines,
     error,
+    errorCode,
     binary,
     eof,
     loading,

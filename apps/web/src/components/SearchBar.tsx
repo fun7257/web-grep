@@ -15,6 +15,8 @@ import {
   IconX,
 } from "./icons.tsx";
 
+const MAX_AND_PARTS = 16;
+
 export function SearchBar({
   fields,
   onFieldsChange,
@@ -29,6 +31,10 @@ export function SearchBar({
   canGoForward = false,
   onGoBack,
   onGoForward,
+  running = false,
+  searchLocked = false,
+  onCancel,
+  onOptionFlush,
 }: {
   fields: QueryPart[];
   onFieldsChange: (fields: QueryPart[]) => void;
@@ -43,6 +49,10 @@ export function SearchBar({
   canGoForward?: boolean;
   onGoBack?: () => void;
   onGoForward?: () => void;
+  running?: boolean;
+  searchLocked?: boolean;
+  onCancel?: () => void;
+  onOptionFlush?: () => void;
 }) {
   const { t } = useLocale();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -52,9 +62,14 @@ export function SearchBar({
   const [histOpen, setHistOpen] = useState(false);
   const values = fields.length > 0 ? fields : [newPart("")];
   const extras = values.slice(1);
-  const canAdd = (values[values.length - 1]?.value ?? "").trim() !== "";
+  const canAdd =
+    values.length < MAX_AND_PARTS &&
+    (values[values.length - 1]?.value ?? "").trim() !== "";
 
   const sendSearch = (): void => {
+    if (searchLocked) {
+      return;
+    }
     const terms = values
       .map((part) => ({ ...part, value: part.value.trim() }))
       .filter((part) => part.value !== "");
@@ -77,11 +92,15 @@ export function SearchBar({
       i === index ? { ...item, ...patch } : item,
     );
     onFieldsChange(next);
+    if (searchLocked) {
+      return;
+    }
     const ready = next
       .map((part) => ({ ...part, value: part.value.trim() }))
       .filter((part) => part.value !== "");
     if (ready.length > 0) {
       onFlushSearch(ready);
+      onOptionFlush?.();
     }
   };
 
@@ -337,7 +356,7 @@ export function SearchBar({
           </div>
           {andOpen ? (
             <div
-              className="search-and-pop"
+              className="search-and-pop search-and-block"
               role="dialog"
               aria-label={t("queryConditions")}
             >
@@ -434,6 +453,9 @@ export function SearchBar({
                   <kbd className="search-kbd">Shift+Enter</kbd>
                   {t("queryAndHint")}
                 </p>
+                <p className="search-and-hint search-and-limit">
+                  {t("queryAndLimitHint")}
+                </p>
               </div>
             </div>
           ) : null}
@@ -465,8 +487,13 @@ export function SearchBar({
           >
             {t("queryClear")}
           </button>
-          <button type="button" className="search-go" onClick={sendSearch}>
-            {t("search")}
+          <button
+            type="button"
+            className={running ? "search-go cancel" : "search-go"}
+            disabled={searchLocked && !running}
+            onClick={running ? onCancel : sendSearch}
+          >
+            {running ? t("cancel") : t("search")}
           </button>
         </div>
       </form>

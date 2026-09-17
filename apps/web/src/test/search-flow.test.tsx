@@ -169,11 +169,11 @@ function mockFetch(
           password = "";
         }
       }
-      if (password === "") {
+      if (password === "" || password === "wrong") {
         return Promise.resolve(
-          jsonResponse(400, {
+          jsonResponse(401, {
             code: "INVALID_AUTH",
-            message: "password is required",
+            message: "invalid password",
           }),
         );
       }
@@ -239,7 +239,21 @@ function typeQuery(value: string): void {
 }
 
 function clickSearch(): void {
-  fireEvent.click(document.querySelector(".search-go") as HTMLButtonElement);
+  const go = document.querySelector(".search-go") as HTMLButtonElement;
+  if (go.classList.contains("cancel")) {
+    return;
+  }
+  fireEvent.click(go);
+}
+
+function treeName(name: string): HTMLElement {
+  const node = [...document.querySelectorAll(".tree-name")].find(
+    (el) => el.textContent === name,
+  );
+  if (node === undefined) {
+    throw new Error(`missing tree name ${name}`);
+  }
+  return node as HTMLElement;
 }
 
 function openFilters(): void {
@@ -523,11 +537,11 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("1 selected")).toBeTruthy();
     });
+    expect(treeName("ok.txt").closest("button")?.getAttribute("aria-pressed")).toBe(
+      "true",
+    );
     expect(
-      screen.getByText("ok.txt").closest("button")?.getAttribute("aria-pressed"),
-    ).toBe("true");
-    expect(
-      screen.getByText("skip.log").closest("button")?.getAttribute("aria-pressed"),
+      treeName("skip.log").closest("button")?.getAttribute("aria-pressed"),
     ).toBe("false");
   });
 
@@ -769,7 +783,9 @@ describe("search flow", () => {
     render(<App />);
     typeQuery("needle");
     clickSearch();
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const abortBtn = screen.getAllByRole("button", { name: "Cancel" })[0];
+    expect(abortBtn).toBeTruthy();
+    fireEvent.click(abortBtn as HTMLElement);
     await waitFor(() => {
       expect(screen.getByRole("status").textContent).toMatch(/Cancelled/);
     });
@@ -1070,9 +1086,10 @@ describe("search flow", () => {
     );
     expect(dialog.querySelector(".preview-find")).toBeNull();
     expect(screen.queryByLabelText("Go to line")).toBeNull();
+    expect(document.querySelector(".app-dimmed")).toBeTruthy();
   });
 
-  it("opens a tree file in the context modal from line 1", async () => {
+  it("opens a tree file in the preview pane from line 1", async () => {
     const fetchMock = mockFetch(
       () => sseResponse([sseEvent("done", donePayload())]),
       undefined,
@@ -1083,16 +1100,22 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
-    const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
-      expect(dialog.textContent).toMatch(/ok\.txt line 1/);
+      expect(
+        document.querySelector(".preview-browse .preview-line")?.textContent,
+      ).toMatch(/ok\.txt line 1/);
     });
+    expect(document.querySelector(".preview-browse mark")).toBeNull();
     const fileUrls = fetchMock.mock.calls
       .map((call) => requestUrl(call[0] as RequestInfo))
       .filter((url) => url.includes("/api/file"));
     expect(fileUrls.some((url) => url.includes("from=1"))).toBe(true);
-    expect(screen.getByLabelText("Go to line")).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "Context" })).toBeNull();
     expect(screen.getByText("0 selected")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    expect(screen.getByLabelText("Go to line")).toBeTruthy();
+    expect(dialog.querySelectorAll(".preview-line").length).toBeGreaterThan(0);
   });
 
   it("jumps to a line in the tree file preview", async () => {
@@ -1106,6 +1129,12 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    await waitFor(() => {
+      expect(
+        document.querySelector(".preview-browse .preview-line")?.textContent,
+      ).toMatch(/ok\.txt line 1/);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
@@ -1144,6 +1173,12 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    await waitFor(() => {
+      expect(
+        document.querySelector(".preview-browse .preview-line")?.textContent,
+      ).toMatch(/ok\.txt line 1/);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
@@ -1187,6 +1222,10 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    await waitFor(() => {
+      expect(document.querySelector(".preview-browse .preview-line")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     const goto = await screen.findByLabelText("Go to line");
     await waitFor(() => {
@@ -1204,6 +1243,12 @@ describe("search flow", () => {
       expect(screen.queryByRole("dialog", { name: "Context" })).toBeNull();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    await waitFor(() => {
+      expect(
+        document.querySelector(".preview-browse .preview-line")?.textContent,
+      ).toMatch(/ok\.txt line 1/);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const again = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(again.textContent).toMatch(/ok\.txt line 1/);
@@ -1239,6 +1284,10 @@ describe("search flow", () => {
       expect(screen.getByText("empty.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    await waitFor(() => {
+      expect(screen.getByText("This file is empty")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(dialog.querySelector(".context-empty")?.textContent).toBe(
@@ -1311,6 +1360,12 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    await waitFor(() => {
+      expect(
+        document.querySelector(".preview-browse .preview-line")?.textContent,
+      ).toMatch(/ok\.txt line 1/);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
@@ -1348,6 +1403,10 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    await waitFor(() => {
+      expect(document.querySelector(".preview-browse")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     await screen.findByRole("dialog", { name: "Context" });
     const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
     fireEvent.change(goto, { target: { value: "abc" } });
@@ -2594,6 +2653,317 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(pills()).toEqual(["9", "1", "8", "2"]);
     });
+  });
+
+  it("keeps AuthDialog open on INVALID_AUTH and dims the main panes", async () => {
+    mockFetch(
+      () =>
+        jsonResponse(401, {
+          code: "UNAUTHORIZED",
+          message: "missing or invalid session",
+        }),
+      undefined,
+      { authRequired: true },
+    );
+    render(<App />);
+    const dialog = await screen.findByRole("dialog");
+    expect(document.querySelector(".app-dimmed")).toBeTruthy();
+    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
+      target: { value: "wrong" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      expect(screen.getByText("Wrong password (INVALID_AUTH)")).toBeTruthy();
+    });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(
+      (dialog.querySelector('input[name="password"]') as HTMLInputElement)
+        .classList.contains("invalid"),
+    ).toBe(true);
+    expect(document.querySelector(".app-dimmed")).toBeTruthy();
+  });
+
+  it("turns Search into Cancel while running and shows progress meta", async () => {
+    mockFetch((init) => neverSettle(init));
+    render(<App />);
+    typeQuery("needle");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getAllByRole("button", { name: "Cancel" }).length).toBeGreaterThan(0);
+    });
+    expect(document.querySelector(".search-go.cancel")).toBeTruthy();
+    expect(document.querySelector(".status-cancel")).toBeTruthy();
+    expect(document.querySelector(".pane-head-title")?.textContent).toBe(
+      "Searching…",
+    );
+    const runningCancel = screen.getAllByRole("button", { name: "Cancel" })[0];
+    expect(runningCancel).toBeTruthy();
+    fireEvent.click(runningCancel as HTMLElement);
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toMatch(/Cancelled/);
+    });
+    expect(screen.getByText("CANCELLED")).toBeTruthy();
+  });
+
+  it("stacks truncated above timedOut warn banners", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({
+          matchCount: 1,
+          fileCount: 1,
+          truncated: true,
+          timedOut: true,
+        })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(document.querySelectorAll(".warn-banner")).toHaveLength(2);
+    });
+    const labels = [...document.querySelectorAll(".warn-label")].map(
+      (node) => node.textContent,
+    );
+    expect(labels[0]).toMatch(/truncated/i);
+    expect(labels[1]).toMatch(/Timed out/i);
+  });
+
+  it("shows BUSY and ENGINE empty-state codes", async () => {
+    mockFetch(() =>
+      jsonResponse(429, {
+        code: "BUSY",
+        message: "too many searches",
+      }),
+    );
+    render(<App />);
+    typeQuery("busyq");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByText("Search is busy, try again shortly")).toBeTruthy();
+    });
+    expect(screen.getByText("BUSY")).toBeTruthy();
+    cleanup();
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("error", { code: "ENGINE", message: "ripgrep failed" }),
+      ]),
+    );
+    render(<App />);
+    typeQuery("eng");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByText("Search engine unavailable")).toBeTruthy();
+    });
+    expect(screen.getByText("ENGINE")).toBeTruthy();
+    expect(screen.queryByText("ENGINE_UNSUPPORTED")).toBeNull();
+    expect(
+      (document.querySelector(".search-go") as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("maps leftover ENGINE_UNSUPPORTED into ENGINE empty-state copy", async () => {
+    mockFetch(() =>
+      jsonResponse(503, {
+        code: "ENGINE_UNSUPPORTED",
+        message: "regex not supported",
+      }),
+    );
+    render(<App />);
+    typeQuery("eng-unsup");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByText("Search engine unavailable")).toBeTruthy();
+    });
+    expect(
+      screen.getByText("The engine is not ready, so search is disabled"),
+    ).toBeTruthy();
+    expect(screen.getByText("ENGINE")).toBeTruthy();
+    expect(screen.queryByText("ENGINE_UNSUPPORTED")).toBeNull();
+    expect(document.querySelector(".empty-code")?.textContent).toBe("ENGINE");
+    expect(
+      (document.querySelector(".search-go") as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("shows AuthDialog busy copy while login is in flight", async () => {
+    mockFetch(
+      () =>
+        jsonResponse(401, {
+          code: "UNAUTHORIZED",
+          message: "missing or invalid session",
+        }),
+      undefined,
+      { authRequired: true },
+    );
+    const inner = globalThis.fetch as typeof fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if (requestUrl(input).includes("/api/auth/login")) {
+        return neverSettle(init);
+      }
+      return inner(input, init);
+    });
+    render(<App />);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
+      target: { value: "secret" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      expect(screen.getByText("Signing in…")).toBeTruthy();
+    });
+    expect(document.querySelector(".auth-spinner")).toBeTruthy();
+    expect(
+      (document.querySelector(".auth-submit") as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("retries the file tree after a load error", async () => {
+    let failTree = true;
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    const inner = globalThis.fetch as typeof fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if (requestUrl(input).includes("/api/tree") && failTree) {
+        return Promise.resolve(
+          jsonResponse(403, { code: "DENIED", message: "tree denied" }),
+        );
+      }
+      return inner(input, init);
+    });
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("tree denied")).toBeTruthy();
+    });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    failTree = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => {
+      expect(treeName("ok.txt")).toBeTruthy();
+    });
+  });
+
+  it("shows an option-flush info cue when modifiers re-search", async () => {
+    mockFetch(() =>
+      sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]),
+    );
+    render(<App />);
+    typeQuery("needle");
+    fireEvent.click(screen.getByRole("button", { name: "Aa" }));
+    await waitFor(() => {
+      expect(screen.getByText("Re-searched with the new options")).toBeTruthy();
+    });
+    expect(document.querySelector(".info-cue")).toBeTruthy();
+  });
+
+  it("shows a pending path:line cue when restoring a share URL", async () => {
+    window.history.replaceState({}, "", "/?q=hello&p=src%2Fb.ts&n=3");
+    mockFetch((init) => neverSettle(init));
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Will select src/b.ts:3")).toBeTruthy();
+    });
+    expect(document.querySelector(".info-cue")).toBeTruthy();
+  });
+
+  it("keeps the hit snippet and opens ContextModal for a tree file", async () => {
+    mockFetch(
+      () =>
+        sseResponse([
+          sseEvent("hit", HIT_A),
+          sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+        ]),
+      undefined,
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(
+        document.querySelector(".preview-pane .preview-line.current")
+          ?.textContent,
+      ).toMatch(/hello world/);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    expect(document.querySelector(".app-dimmed")).toBeTruthy();
+    expect(document.querySelector(".preview-browse")).toBeNull();
+    expect(
+      document.querySelector(".preview-pane .preview-line.current")
+        ?.textContent,
+    ).toMatch(/hello world/);
+    expect(dialog.querySelector(".preview-find")).toBeNull();
+  });
+
+  it("caps AND fields at 16 and shows the limit hint", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("term0");
+    for (let i = 1; i <= 15; i++) {
+      addFilterField();
+      const boxes = screen.getAllByRole("textbox", { name: "Add filter" });
+      fireEvent.change(boxes[boxes.length - 1] as HTMLInputElement, {
+        target: { value: `term${i}` },
+      });
+    }
+    expect(document.querySelectorAll(".search-and-item")).toHaveLength(15);
+    expect(
+      (document.querySelector(".search-and-more") as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      screen.getByText("Up to 16 terms · empty rows are dropped on submit"),
+    ).toBeTruthy();
+  });
+
+  it("shows binary and DENIED preview gap states when browsing a tree file", async () => {
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      (url) => {
+        const path = new URL(url, "http://localhost").searchParams.get("path");
+        if (path === "secret.bin") {
+          return jsonResponse(403, {
+            code: "DENIED",
+            message: "path is denied",
+          });
+        }
+        return jsonResponse(200, {
+          path: "data.bin",
+          startLine: 1,
+          lineCount: 0,
+          truncated: false,
+          binary: true,
+          eof: true,
+          lines: [],
+        });
+      },
+      {
+        treeEntries: [
+          { name: "data.bin", path: "data.bin", dir: false },
+          { name: "secret.bin", path: "secret.bin", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("data.bin")).toBeTruthy();
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Open file" })[0] as HTMLButtonElement);
+    await waitFor(() => {
+      expect(screen.getByText("Binary file, cannot preview")).toBeTruthy();
+    });
+    fireEvent.click(screen.getAllByRole("button", { name: "Open file" })[1] as HTMLButtonElement);
+    await waitFor(() => {
+      expect(screen.getByText("Path cannot be previewed")).toBeTruthy();
+    });
+    expect(screen.getByText("DENIED")).toBeTruthy();
   });
 });
 

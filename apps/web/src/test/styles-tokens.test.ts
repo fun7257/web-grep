@@ -23,6 +23,49 @@ describe("shipped stylesheet tokens", () => {
     expect(css).toContain('html[data-theme="light"]');
   });
 
+  it("ships v2 spacing, radius, and selection tokens", () => {
+    expect(css).toContain("--s05:");
+    expect(css).toContain("--s1:");
+    expect(css).toContain("--s4:");
+    expect(css).toContain("--r-chip:");
+    expect(css).toContain("--r-control:");
+    expect(css).toContain("--r-cta:");
+    expect(css).toContain("--fs-lg:");
+    expect(css).toContain("--selected-bar:");
+    const dark = css.slice(
+      css.indexOf('html[data-theme="dark"]'),
+      css.indexOf('html[data-theme="light"]'),
+    );
+    const light = css.slice(css.indexOf('html[data-theme="light"]'));
+    expect(dark).toContain("--chip-fill:");
+    expect(light).toContain("--chip-fill:");
+    expect(light).toMatch(/--line:\s*rgb\(28 30 36 \/ 10%\)/);
+    expect(ruleBody(".tree-pane")).toContain("flex: 0 0 var(--tree-w)");
+    expect(ruleBody(".tree-pane")).toContain("border-right: 1px solid var(--line)");
+    expect(ruleBody(".hits-pane")).toContain("border-right: 1px solid var(--line)");
+    expect(ruleBody(".result-log.selected")).toContain("var(--accent)");
+    expect(ruleBody(".exclude-chip")).toContain("var(--chip-fill)");
+    expect(ruleBody(".empty-title")).toContain("var(--fs-lg)");
+    expect(ruleBody(".empty-helper")).toContain("var(--fs-xs)");
+    expect(light).toContain("--warn-bg:");
+    expect(dark).toContain("--warn-bg:");
+    expect(ruleBody(".warn-banner")).toContain("var(--warn-bg)");
+    expect(ruleBody(".search-bar .search-go.cancel")).toContain("var(--danger)");
+    expect(css).toContain(".app.app-dimmed");
+    expect(css).toContain("--rail-w:");
+    expect(css).toContain("--modal-xl:");
+    expect(css).toContain("--splitter-hit:");
+    expect(dark).toContain("--info-bg:");
+    expect(light).toContain("--info-bg:");
+    expect(dark).toContain("--toast-bg:");
+    expect(light).toContain("--toast-bg:");
+    expect(ruleBody(".tree-pane.collapsed")).toContain("var(--rail-w)");
+    expect(css).toContain("width: min(var(--modal-xl), 92vw)");
+    expect(ruleBody(".splitter")).toContain("var(--splitter-hit)");
+    expect(ruleBody(".info-cue")).toContain("var(--info-bg)");
+    expect(ruleBody(".toast-pill")).toContain("var(--toast-bg)");
+  });
+
   it("gives results and preview different background tokens", () => {
     expect(ruleBody(".hits-pane")).toContain("background: var(--bg)");
     const previewIdx = css.lastIndexOf("\n.preview-pane {");
