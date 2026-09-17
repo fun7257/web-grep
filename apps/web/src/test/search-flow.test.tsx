@@ -783,7 +783,9 @@ describe("search flow", () => {
     render(<App />);
     typeQuery("needle");
     clickSearch();
-    fireEvent.click(screen.getAllByRole("button", { name: "Cancel" })[0]);
+    const abortBtn = screen.getAllByRole("button", { name: "Cancel" })[0];
+    expect(abortBtn).toBeTruthy();
+    fireEvent.click(abortBtn as HTMLElement);
     await waitFor(() => {
       expect(screen.getByRole("status").textContent).toMatch(/Cancelled/);
     });
@@ -2694,7 +2696,9 @@ describe("search flow", () => {
     expect(document.querySelector(".pane-head-title")?.textContent).toBe(
       "Searching…",
     );
-    fireEvent.click(screen.getAllByRole("button", { name: "Cancel" })[0]);
+    const runningCancel = screen.getAllByRole("button", { name: "Cancel" })[0];
+    expect(runningCancel).toBeTruthy();
+    fireEvent.click(runningCancel as HTMLElement);
     await waitFor(() => {
       expect(screen.getByRole("status").textContent).toMatch(/Cancelled/);
     });

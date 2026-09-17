@@ -1,4 +1,3 @@
-import { mapLegacyErrorCode } from "@web-grep/shared";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ContextModal,
@@ -211,8 +210,7 @@ function AppShell() {
   }, []);
 
   const engineDown =
-    token.meta?.engine === "none" ||
-    mapLegacyErrorCode(search.error?.code ?? "") === "ENGINE";
+    token.meta?.engine === "none" || search.error?.code === "ENGINE";
   const searchLocked = token.hostForbidden || engineDown;
   const authOpen = token.promptOpen && !token.hostForbidden;
 
@@ -617,7 +615,7 @@ function AppShell() {
             done={search.done}
             error={search.error}
             hostForbidden={token.hostForbidden}
-            engine={token.meta?.engine}
+            engine={token.meta?.engine ?? null}
           />
         ) : (
           <ResultList

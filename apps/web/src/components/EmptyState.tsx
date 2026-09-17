@@ -1,10 +1,10 @@
-import { mapLegacyErrorCode, type JsonError, type SseDone } from "@web-grep/shared";
+import { type JsonError, type SseDone } from "@web-grep/shared";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
 import { IdleMark } from "./icons.tsx";
 
 function isEngineError(code: string | undefined): boolean {
-  return code !== undefined && mapLegacyErrorCode(code) === "ENGINE";
+  return code === "ENGINE";
 }
 
 export function EmptyState({
