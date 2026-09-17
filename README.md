@@ -84,3 +84,7 @@ Primary config is `config.yaml` (see `config.example.yaml`). Path: `-config`, el
 ## Architecture
 
 React talks to Go over the same JSON/SSE contract as before (`POST /api/search` streams `rg --json`). The Go process sandboxes paths to `root`, then `os/exec`s ripgrep with `cwd` set to that root.
+
+## License
+
+[MIT](LICENSE)

@@ -197,35 +197,6 @@ func TestListHidesOldFilesAndEmptyDirs(t *testing.T) {
 	}
 }
 
-func TestListAgentRootIfPresent(t *testing.T) {
-	root := "/Users/fun/agent"
-	st, err := os.Stat(root)
-	if err != nil || !st.IsDir() {
-		t.Skip("agent root not present")
-	}
-	real, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	listing, err := List(real, "", false, Filter{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	names := map[string]struct{}{}
-	for _, e := range listing.Entries {
-		names[e.Name] = struct{}{}
-	}
-	if _, ok := names[".gitignore"]; !ok {
-		t.Fatalf("expected .gitignore in %v", listing.Entries)
-	}
-	if _, ok := names[".oxlintrc.json"]; !ok {
-		t.Fatalf("expected .oxlintrc.json in %v", listing.Entries)
-	}
-	if _, ok := names[".vite"]; ok {
-		t.Fatal(".vite should be skipped")
-	}
-}
-
 func TestListFiltersIncludeAndExcludeGlobs(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "src"), 0o755); err != nil {
