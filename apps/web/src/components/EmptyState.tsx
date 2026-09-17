@@ -14,6 +14,7 @@ export function EmptyState({
   error,
   hostForbidden,
   engine,
+  treeCollapsed = false,
 }: {
   status: SearchStatus;
   hitCount: number;
@@ -21,6 +22,7 @@ export function EmptyState({
   error: JsonError | null;
   hostForbidden: boolean;
   engine?: string | null;
+  treeCollapsed?: boolean;
 }) {
   const { t } = useLocale();
   const engineDown = engine === "none" || isEngineError(error?.code);
@@ -83,6 +85,15 @@ export function EmptyState({
         <p className="empty-title danger">
           {error?.message ?? t("searchFailed")}
         </p>
+      </div>
+    );
+  }
+  if (treeCollapsed) {
+    return (
+      <div className="empty-state empty-idle">
+        <IdleMark kind="hits" />
+        <p className="empty-title">{t("treeCollapsed")}</p>
+        <p className="empty-helper">{t("treeCollapsedHelper")}</p>
       </div>
     );
   }

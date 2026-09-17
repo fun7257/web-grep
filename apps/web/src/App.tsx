@@ -616,6 +616,7 @@ function AppShell() {
             error={search.error}
             hostForbidden={token.hostForbidden}
             engine={token.meta?.engine ?? null}
+            treeCollapsed={!treeOpen}
           />
         ) : (
           <ResultList

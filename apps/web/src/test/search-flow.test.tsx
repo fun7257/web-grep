@@ -2965,6 +2965,83 @@ describe("search flow", () => {
     });
     expect(screen.getByText("DENIED")).toBeTruthy();
   });
+
+  it("shows L-RAIL chrome and collapsed empty copy when the tree is closed", async () => {
+    localStorage.setItem("web-grep.treeOpen.v2", "0");
+    localStorage.setItem("web-grep.timeRange.v2", "today");
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    const rail = document.querySelector(".tree-pane.collapsed.rail");
+    expect(rail).toBeTruthy();
+    expect(rail?.querySelector(".brand-mark")).toBeTruthy();
+    expect(rail?.querySelector(".rail-expand")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
+    expect(document.querySelector(".rail-picked-badge")?.textContent).toMatch(
+      /0/,
+    );
+    expect(document.querySelector(".rail-time-btn")).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Toggle light/dark" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "中" })).toBeTruthy();
+    expect(screen.getByText("Sidebar collapsed")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Click ▶ to expand; open/closed state is stored in localStorage",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Expand sidebar" }));
+    await waitFor(() => {
+      expect(document.querySelector(".tree-pane.collapsed")).toBeNull();
+    });
+    expect(screen.getByText("Type a keyword to search")).toBeTruthy();
+    expect(localStorage.getItem("web-grep.treeOpen.v2")).toBe("1");
+  });
+
+  it("replaces no-match empty copy with the collapsed rail helper", async () => {
+    mockFetch(() =>
+      sseResponse([sseEvent("done", donePayload({ matchCount: 0 }))]),
+    );
+    render(<App />);
+    typeQuery("zzznotfoundxyz");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByText("No matches")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Hide" }));
+    await waitFor(() => {
+      expect(screen.getByText("Sidebar collapsed")).toBeTruthy();
+    });
+    expect(screen.queryByText("No matches")).toBeNull();
+    expect(document.querySelector(".tree-pane.collapsed.rail")).toBeTruthy();
+    expect(document.querySelector(".rail-expand")).toBeTruthy();
+  });
+
+  it("keeps logout on the collapsed rail after login", async () => {
+    localStorage.setItem("web-grep.treeOpen.v2", "0");
+    mockFetch(
+      () =>
+        jsonResponse(401, {
+          code: "UNAUTHORIZED",
+          message: "missing or invalid session",
+        }),
+      undefined,
+      { authRequired: true },
+    );
+    render(<App />);
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
+      target: { value: "secret1" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+    expect(document.querySelector(".tree-pane.collapsed.rail")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Log out" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeTruthy();
+    expect(document.querySelector(".rail-logout")).toBeTruthy();
+  });
 });
 
 function treeRequestUrls(fetchMock: ReturnType<typeof vi.fn>): string[] {

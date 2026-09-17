@@ -174,6 +174,14 @@ export function IconChevron({ open }: { open: boolean }) {
   );
 }
 
+export function IconRailExpand() {
+  return (
+    <svg className="icon" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 6l6 6-6 6" {...stroke} />
+    </svg>
+  );
+}
+
 export function IconHistory() {
   return (
     <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">

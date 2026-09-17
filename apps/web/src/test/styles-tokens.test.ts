@@ -60,6 +60,13 @@ describe("shipped stylesheet tokens", () => {
     expect(dark).toContain("--toast-bg:");
     expect(light).toContain("--toast-bg:");
     expect(ruleBody(".tree-pane.collapsed")).toContain("var(--rail-w)");
+    expect(ruleBody(".rail-expand")).toContain("var(--icon-hit)");
+    expect(ruleBody(".rail-picked-badge")).toContain("var(--chip-fill)");
+    expect(ruleBody(".rail-time-btn")).toContain("var(--selected)");
+    expect(ruleBody(".rail-stack")).toContain("flex-direction: column");
+    expect(ruleBody(".tree-pane.collapsed .tree-foot")).toContain(
+      "flex-direction: column",
+    );
     expect(css).toContain("width: min(var(--modal-xl), 92vw)");
     expect(ruleBody(".splitter")).toContain("var(--splitter-hit)");
     expect(ruleBody(".info-cue")).toContain("var(--info-bg)");
