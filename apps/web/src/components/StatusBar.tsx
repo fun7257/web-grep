@@ -7,6 +7,7 @@ import type {
 import { useLocale } from "../hooks/useLocale.ts";
 import { useTheme } from "../hooks/useTheme.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
+import { isRawEngineStderr } from "./EmptyState.tsx";
 import { IconMoon, IconSun, IconWarn } from "./icons.tsx";
 
 export function ThemeToggle() {
@@ -135,10 +136,13 @@ export function StatusBar({
   } else if (status === "cancelled") {
     text = t("cancelled");
   } else if (status === "error") {
-    text =
-      error?.code === "FORBIDDEN_HOST"
-        ? t("hostNotAllowed")
-        : (error?.message ?? t("searchFailed"));
+    if (error?.code === "FORBIDDEN_HOST") {
+      text = t("hostNotAllowed");
+    } else if (error?.code === "ENGINE" || isRawEngineStderr(error?.message)) {
+      text = t("engineUnavailable");
+    } else {
+      text = error?.message ?? t("searchFailed");
+    }
   } else if (status === "done" && done !== null) {
     text = t("resultsStatus", {
       matchCount: done.matchCount,

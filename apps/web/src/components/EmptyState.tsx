@@ -7,6 +7,19 @@ function isEngineError(code: string | undefined): boolean {
   return code === "ENGINE";
 }
 
+/** Raw rg/engine stderr must never be the empty-state title. */
+export function isRawEngineStderr(message: string | undefined): boolean {
+  return message !== undefined && /exit status\s+\d+/i.test(message);
+}
+
+function EngineStderr({ message }: { message: string }) {
+  return (
+    <details className="empty-detail">
+      <summary>{message}</summary>
+    </details>
+  );
+}
+
 export function EmptyState({
   status,
   hitCount,
@@ -25,7 +38,11 @@ export function EmptyState({
   treeCollapsed?: boolean;
 }) {
   const { t } = useLocale();
-  const engineDown = engine === "none" || isEngineError(error?.code);
+  const rawMessage = error?.message?.trim() ?? "";
+  const engineDown =
+    engine === "none" ||
+    isEngineError(error?.code) ||
+    isRawEngineStderr(rawMessage);
 
   if (hitCount > 0) {
     return null;
@@ -49,13 +66,21 @@ export function EmptyState({
       </div>
     );
   }
-  if (engineDown && (status === "error" || status === "idle" || engine === "none")) {
+  if (
+    engineDown &&
+    (status === "error" || status === "idle" || engine === "none")
+  ) {
+    const showStderr =
+      rawMessage !== "" &&
+      rawMessage !== t("engineUnavailable") &&
+      rawMessage !== t("engineUnavailableHelper");
     return (
       <div className="empty-state empty-idle">
         <IdleMark kind="nomatch" />
         <p className="empty-title danger">{t("engineUnavailable")}</p>
         <p className="empty-helper">{t("engineUnavailableHelper")}</p>
         <p className="empty-code">{t("errorCodeEngine")}</p>
+        {showStderr ? <EngineStderr message={rawMessage} /> : null}
       </div>
     );
   }
@@ -92,7 +117,7 @@ export function EmptyState({
       <div className="empty-state empty-idle">
         <IdleMark kind="nomatch" />
         <p className="empty-title danger">
-          {error?.message ?? t("searchFailed")}
+          {rawMessage !== "" ? rawMessage : t("searchFailed")}
         </p>
       </div>
     );

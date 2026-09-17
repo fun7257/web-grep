@@ -43,6 +43,7 @@ export const zhCN = {
   searchSelected: "搜索选中",
   previewEmpty: "选一条结果查看",
   previewEmptyHelper: "点击结果行即可在此预览命中上下文",
+  previewSharePending: "分享链接待选中 {path}:{line}",
   previewBinary: "二进制文件，无法预览",
   previewBinaryHelper: "此文件是二进制内容，无法在预览中打开",
   previewDenied: "路径不可预览",
@@ -137,7 +138,8 @@ export const zhCN = {
   copiedPath: "已复制相对路径",
   copiedLine: "已复制路径与行号",
   optionFlushed: "已按开关重搜",
-  sharePendingSelect: "将选中 {path}:{line}",
+  shareRestored: "已从分享链接恢复条件并自动搜索",
+  sharePendingSelect: "待选中 {path}:{line}",
   hotkeysTitle: "键盘快捷键速查",
   close: "关闭",
 } as const satisfies Record<MsgKey, string>;

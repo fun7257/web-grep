@@ -11,6 +11,21 @@ describe("i18n catalogs", () => {
     expect(catalogs["zh-CN"].engineUnavailable).toBe("搜索引擎不可用");
   });
 
+  it("ships S-URL-1 share-restore copy in zh-CN and en-US", () => {
+    expect(catalogs["zh-CN"].shareRestored).toBe(
+      "已从分享链接恢复条件并自动搜索",
+    );
+    expect(catalogs["zh-CN"].sharePendingSelect).toBe("待选中 {path}:{line}");
+    expect(catalogs["zh-CN"].previewSharePending).toBe(
+      "分享链接待选中 {path}:{line}",
+    );
+    expect(catalogs["en-US"].shareRestored).toContain("share link");
+    expect(catalogs["en-US"].sharePendingSelect).toBe(
+      "Pending select {path}:{line}",
+    );
+    expect(catalogs["en-US"].previewSharePending).toContain("{path}:{line}");
+  });
+
   it("ships L-RAIL collapsed empty copy in zh-CN and en-US", () => {
     expect(catalogs["zh-CN"].treeCollapsed).toBe("左栏已收起");
     expect(catalogs["zh-CN"].treeCollapsedHelper).toBe(

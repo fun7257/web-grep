@@ -82,7 +82,10 @@ function AppShell() {
 
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [infoCue, setInfoCue] = useState<string | null>(null);
-  const [sharePendingCue, setSharePendingCue] = useState<string | null>(null);
+  const [sharePending, setSharePending] = useState<{
+    path: string;
+    line: number;
+  } | null>(null);
   const infoCueTimer = useRef(0);
   const [helpOpen, setHelpOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -275,13 +278,19 @@ function AppShell() {
   );
 
   const submit = useCallback(() => {
+    if (searchLocked) {
+      return;
+    }
     const parsed = partsFromFields(fields);
     const fallback = stackRef.current?.parts ?? parts;
     searchWithParts(parsed.length > 0 ? parsed : fallback);
-  }, [fields, parts, searchWithParts]);
+  }, [fields, parts, searchLocked, searchWithParts]);
 
   const searchSelected = useCallback(
     (text: string) => {
+      if (searchLocked) {
+        return;
+      }
       const current = fields[0];
       searchWithParts([
         newPart(text, {
@@ -291,14 +300,14 @@ function AppShell() {
         }),
       ]);
     },
-    [fields, searchWithParts],
+    [fields, searchLocked, searchWithParts],
   );
 
   const clearAll = useCallback(() => {
     resetSearch();
     stackRef.current = null;
     pendingSelect.current = null;
-    setSharePendingCue(null);
+    setSharePending(null);
     setInfoCue(null);
     setShareOpen(false);
     setContextTarget(null);
@@ -330,14 +339,10 @@ function AppShell() {
     const nextPicks = parsed.picks ?? [];
     setExcludeGlobs(nextExclude);
     setPicks(nextPicks);
+    showInfoCue(t("shareRestored"));
     if (parsed.path !== undefined && parsed.line !== undefined) {
       pendingSelect.current = { path: parsed.path, line: parsed.line };
-      setSharePendingCue(
-        t("sharePendingSelect", {
-          path: parsed.path,
-          line: parsed.line,
-        }),
-      );
+      setSharePending({ path: parsed.path, line: parsed.line });
     }
     if (parsed.timeRange !== undefined) {
       setTimeRange(parsed.timeRange);
@@ -358,7 +363,14 @@ function AppShell() {
       nextPicks,
       nextExclude,
     );
-  }, [searchWithParts, t, token.hostForbidden, token.meta, token.promptOpen]);
+  }, [
+    searchWithParts,
+    showInfoCue,
+    t,
+    token.hostForbidden,
+    token.meta,
+    token.promptOpen,
+  ]);
 
   useEffect(() => {
     if (!bootstrapped.current || shareState === null) {
@@ -384,11 +396,11 @@ function AppShell() {
     );
     if (idx >= 0) {
       setSelectedIndex(idx);
-      setSharePendingCue(null);
+      setSharePending(null);
     }
     if (search.status === "done" || search.status === "error") {
       pendingSelect.current = null;
-      setSharePendingCue(null);
+      setSharePending(null);
     }
   }, [search.hits, search.status]);
 
@@ -606,7 +618,17 @@ function AppShell() {
             onCancel={cancelSearch}
           />
         </div>
-        <InfoCue message={infoCue ?? sharePendingCue} />
+        <InfoCue message={infoCue} />
+        <InfoCue
+          message={
+            sharePending !== null
+              ? t("sharePendingSelect", {
+                  path: sharePending.path,
+                  line: sharePending.line,
+                })
+              : null
+          }
+        />
         <WarnBanners done={search.done} />
         {search.hits.length === 0 ? (
           <EmptyState
@@ -645,6 +667,7 @@ function AppShell() {
           hit={selectedHit}
           browsePath={browsePath}
           browseEpoch={browseEpoch}
+          pendingSelect={sharePending}
           terms={hlTerms}
           opts={hlOpts}
           {...(webUrl !== null || rgCommand !== null

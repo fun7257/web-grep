@@ -1054,7 +1054,7 @@ html[data-theme="dark"] .icon,
   white-space: nowrap;
 }
 
-.search-bar .search-go:hover {
+.search-bar .search-go:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
@@ -2230,6 +2230,24 @@ html[data-theme="dark"] .icon,
   letter-spacing: 0.04em;
   color: var(--faint);
   text-transform: uppercase;
+}
+
+.empty-detail {
+  margin: 0;
+  max-width: 16rem;
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--faint);
+  line-height: 1.5;
+  pointer-events: auto;
+  text-align: left;
+}
+
+.empty-detail summary {
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  color: var(--faint);
+  font-weight: 400;
 }
 
 .empty-idle p:not(.empty-title):not(.empty-helper):not(.empty-code),
