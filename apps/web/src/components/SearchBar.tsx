@@ -1,4 +1,4 @@
-import type { FormEvent, KeyboardEvent, RefObject } from "react";
+import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchHistoryItem } from "../searchHistory.ts";
@@ -178,7 +178,7 @@ export function SearchBar({
   }, [andOpen, histOpen]);
 
   const onQueryKeyDown = (
-    event: KeyboardEvent<HTMLElement>,
+    event: ReactKeyboardEvent<HTMLElement>,
     index: number,
   ): void => {
     if (event.nativeEvent.isComposing) {
