@@ -28,7 +28,7 @@ export function EmptyState({
     return (
       <div className="empty-state empty-idle is-running">
         <IdleMark kind="hits" />
-        <p>{t("loading")}</p>
+        <p className="empty-title">{t("loading")}</p>
       </div>
     );
   }
@@ -36,7 +36,7 @@ export function EmptyState({
     return (
       <div className="empty-state empty-idle">
         <IdleMark kind="nomatch" />
-        <p>{t("cancelled")}</p>
+        <p className="empty-title">{t("cancelled")}</p>
       </div>
     );
   }
@@ -44,7 +44,7 @@ export function EmptyState({
     return (
       <div className="empty-state empty-idle">
         <IdleMark kind="nomatch" />
-        <p>
+        <p className="empty-title">
           {error?.code === "FORBIDDEN_HOST"
             ? t("hostNotAllowed")
             : (error?.message ?? t("searchFailed"))}
@@ -56,14 +56,16 @@ export function EmptyState({
     return (
       <div className="empty-state empty-idle">
         <IdleMark kind="nomatch" />
-        <p>{t("noResults")}</p>
+        <p className="empty-title">{t("noResults")}</p>
+        <p className="empty-helper">{t("noResultsHelper")}</p>
       </div>
     );
   }
   return (
     <div className="empty-state empty-idle">
       <IdleMark kind="hits" />
-      <p>{t("emptyHint")}</p>
+      <p className="empty-title">{t("emptyHint")}</p>
+      <p className="empty-helper">{t("emptyHintHelper")}</p>
     </div>
   );
 }

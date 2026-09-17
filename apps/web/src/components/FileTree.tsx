@@ -179,7 +179,9 @@ function TreeNode({
           <span className="tree-kind" aria-hidden="true">
             <FileIcon path={entry.path} isDir={entry.dir} open={expanded} />
           </span>
-          <span className="tree-name">{entry.name}</span>
+          <span className="tree-name" title={entry.name}>
+            {entry.name}
+          </span>
         </button>
         {!entry.dir ? (
           <button
@@ -437,34 +439,62 @@ export function FileTree({
                 <span>{t("treeClear")}</span>
               </button>
             </div>
-            <label className="filter-field">
-              <span className="filter-label">{t("excludeGlobLabel")}</span>
-              <input
-                ref={excludeInputRef}
-                type="text"
-                className="filter-input"
-                placeholder={t("excludeGlobs")}
-                value={excludeGlobs}
-                onChange={(event) => onExcludeGlobsChange?.(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key !== "Enter") {
-                    return;
+            <div className="exclude-row">
+              <span className="exclude-label">{t("excludeGlobLabel")}</span>
+              <div
+                className={
+                  excludeGlobs.trim() !== ""
+                    ? "exclude-chip has-value"
+                    : "exclude-chip"
+                }
+              >
+                <input
+                  ref={excludeInputRef}
+                  type="text"
+                  className="exclude-chip-input"
+                  placeholder={t("excludeGlobs")}
+                  value={excludeGlobs}
+                  aria-label={t("excludeGlobLabel")}
+                  onChange={(event) =>
+                    onExcludeGlobsChange?.(event.target.value)
                   }
-                  event.preventDefault();
-                  applyExclude(excludeGlobs);
-                  event.currentTarget.blur();
-                }}
-                onBlur={() => {
-                  applyExclude(excludeGlobs);
-                }}
-              />
-            </label>
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter") {
+                      return;
+                    }
+                    event.preventDefault();
+                    applyExclude(excludeGlobs);
+                    event.currentTarget.blur();
+                  }}
+                  onBlur={() => {
+                    applyExclude(excludeGlobs);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="exclude-chip-x"
+                  title={t("excludeClear")}
+                  aria-label={t("excludeClear")}
+                  disabled={excludeGlobs.trim() === ""}
+                  onClick={() => {
+                    onExcludeGlobsChange?.("");
+                    applyExclude("");
+                  }}
+                >
+                  <IconX />
+                </button>
+              </div>
+            </div>
             <div className="tree-time" title={t("timeRangeHint")}>
               <span className="tree-time-label">
                 <IconHistory />
                 {t("timeRange")}
               </span>
-              <div className="tree-time-seg" role="group" aria-label={t("timeRange")}>
+              <div
+                className="tree-time-seg seg"
+                role="group"
+                aria-label={t("timeRange")}
+              >
                 {TIME_RANGES.map((id) => (
                   <button
                     key={id}

@@ -165,7 +165,8 @@ function PreviewIdle() {
   return (
     <div className="preview preview-idle">
       <IdleMark kind="preview" />
-      <p>{t("previewEmpty")}</p>
+      <p className="empty-title">{t("previewEmpty")}</p>
+      <p className="empty-helper">{t("previewEmptyHelper")}</p>
     </div>
   );
 }

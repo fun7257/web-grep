@@ -536,7 +536,7 @@ function AppShell() {
           }}
         />
         <div className="pane-head">
-          <span>{t("paneHits")}</span>
+          <span className="pane-head-title">{t("paneHits")}</span>
           <div ref={setHitsHeadActions} className="pane-head-actions" />
           <StatusBar
             status={search.status}

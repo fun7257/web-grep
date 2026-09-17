@@ -375,11 +375,17 @@ export function FileIcon({
   const dot = path.lastIndexOf(".");
   const ext = dot !== -1 ? path.slice(dot + 1).toLowerCase() : "";
 
-  if (ext === "ts" || ext === "tsx") {
+  if (ext === "tsx") {
+    return <span className="ext-badge ext-tsx">TSX</span>;
+  }
+  if (ext === "ts") {
     return <span className="ext-badge ext-ts">TS</span>;
   }
   if (ext === "js" || ext === "jsx" || ext === "mjs") {
     return <span className="ext-badge ext-js">JS</span>;
+  }
+  if (ext === "yml" || ext === "yaml") {
+    return <span className="ext-badge ext-yml">YML</span>;
   }
   if (ext === "go") {
     return <span className="ext-badge ext-go">GO</span>;
