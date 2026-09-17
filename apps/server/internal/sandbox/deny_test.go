@@ -78,6 +78,24 @@ func TestFilterByGlobs(t *testing.T) {
 	}
 }
 
+func TestToRgGlobAnchorsLiterals(t *testing.T) {
+	if got := ToRgGlob("keep.log"); got != "/keep.log" {
+		t.Fatalf("literal: %q", got)
+	}
+	if got := ToRgGlob("src/keep.ts"); got != "src/keep.ts" {
+		t.Fatalf("path: %q", got)
+	}
+	if got := ToRgGlob("*.ts"); got != "*.ts" {
+		t.Fatalf("wildcard: %q", got)
+	}
+	if got := ToRgGlob("src/**"); got != "src/**" {
+		t.Fatalf("dir: %q", got)
+	}
+	if got := ToRgGlob("/already"); got != "/already" {
+		t.Fatalf("anchored: %q", got)
+	}
+}
+
 func TestDenylistRgGlobs(t *testing.T) {
 	globs := DenylistRgGlobs(false, false)
 	for _, g := range globs {

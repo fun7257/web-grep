@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -10,7 +11,10 @@ import (
 	"web-grep/internal/sandbox"
 )
 
-func ListNewerFiles(rootReal, rel string, after time.Time, hidden, follow, allowSecrets bool, exclude []string) ([]string, error) {
+func ListNewerFiles(ctx context.Context, rootReal, rel string, after time.Time, hidden, follow, allowSecrets bool, exclude []string) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	excluded := sandbox.NewGlobMatcher(exclude)
 	start := rootReal
 	if rel != "" && rel != "." {
@@ -18,6 +22,9 @@ func ListNewerFiles(rootReal, rel string, after time.Time, hidden, follow, allow
 	}
 	var out []string
 	err := filepath.WalkDir(start, func(p string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		if err != nil {
 			return nil
 		}
