@@ -58,7 +58,6 @@ export const MSG_KEYS = [
   "loginFailed",
   "rememberMe",
   "logout",
-  "literalEngineBanner",
   "engineNoneBanner",
   "loading",
   "searchProgress",

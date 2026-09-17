@@ -12,6 +12,7 @@ export {
   ErrorCodeSchema,
   type JsonError,
   JsonErrorSchema,
+  mapLegacyErrorCode,
 } from "./errors.ts";
 export {
   type FileQuery,

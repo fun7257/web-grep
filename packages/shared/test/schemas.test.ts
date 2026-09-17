@@ -7,7 +7,10 @@ import {
   FileQuerySchema,
   FileSliceQuerySchema,
   FileWindowResponseSchema,
+  JsonErrorSchema,
   LIMITS,
+  mapLegacyErrorCode,
+  MetaResponseSchema,
   SearchRequestSchema,
   SseMetaSchema,
   TreeListingSchema,
@@ -138,8 +141,54 @@ describe("SseMetaSchema", () => {
     expect(
       SseMetaSchema.safeParse({
         searchId: "not-a-uuid",
+        engine: "rg",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("accepts engine none and rejects literal", () => {
+    expect(
+      SseMetaSchema.safeParse({
+        searchId: "550e8400-e29b-41d4-a716-446655440000",
+        engine: "none",
+      }).success,
+    ).toBe(true);
+    expect(
+      SseMetaSchema.safeParse({
+        searchId: "550e8400-e29b-41d4-a716-446655440000",
         engine: "literal",
       }).success,
+    ).toBe(false);
+  });
+});
+
+describe("MetaResponseSchema", () => {
+  const base = {
+    rgVersion: "14.1.0",
+    rootLabel: "project",
+    root: "/tmp/project",
+    followSymlinks: false,
+    limits: {
+      maxResults: 10_000,
+      maxResultsHard: 50_000,
+      timeoutMs: 30_000,
+      previewBytes: 1_048_576,
+      previewLines: 201,
+      queryMaxChars: 512,
+    },
+    defaultLocale: "zh-CN",
+    authRequired: false,
+  };
+
+  it("accepts engine rg or none and rejects literal", () => {
+    expect(
+      MetaResponseSchema.safeParse({ ...base, engine: "rg" }).success,
+    ).toBe(true);
+    expect(
+      MetaResponseSchema.safeParse({ ...base, engine: "none" }).success,
+    ).toBe(true);
+    expect(
+      MetaResponseSchema.safeParse({ ...base, engine: "literal" }).success,
     ).toBe(false);
   });
 });
@@ -209,5 +258,16 @@ describe("TreeListingSchema", () => {
 describe("ErrorCodeSchema", () => {
   it("rejects TIMEOUT", () => {
     expect(ErrorCodeSchema.safeParse("TIMEOUT").success).toBe(false);
+  });
+
+  it("does not advertise ENGINE_UNSUPPORTED; clients map it to ENGINE", () => {
+    expect(ErrorCodeSchema.safeParse("ENGINE_UNSUPPORTED").success).toBe(false);
+    expect(mapLegacyErrorCode("ENGINE_UNSUPPORTED")).toBe("ENGINE");
+    expect(mapLegacyErrorCode("ENGINE")).toBe("ENGINE");
+    const mapped = JsonErrorSchema.parse({
+      code: "ENGINE_UNSUPPORTED",
+      message: "ripgrep is not available",
+    });
+    expect(mapped.code).toBe("ENGINE");
   });
 });

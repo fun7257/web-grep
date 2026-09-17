@@ -48,13 +48,14 @@ HTTP JSON（SSE 尚未开始时）：
 | `INVALID_PATH` | 400/404 | 路径越界、不存在 |
 | `INVALID_GLOB` | 400 | glob 含 `!`、`--`、绝对路径、`..` |
 | `DENIED` | 403 | 命中密钥/黑名单（如 `.env`） |
-| `BUSY` | 429 | 超过 2 路并发搜索 |
+| `BUSY` | 429 | 超过并发上限。默认 8 路（`max_concurrent` / `WEB_GREP_MAX_CONCURRENT`，`MaxConcurrentDefault=8`） |
 | `ENGINE` | 503 | 没有可用的 `rg` |
-| `ENGINE_UNSUPPORTED` | 400 | 当前引擎不支持该模式（如无 rg 时用正则） |
 | `UNAUTHORIZED` | 401 | 未登录或会话无效 |
 | `INVALID_AUTH` | 400/401 | 密码不合法或错误 |
 | `FORBIDDEN_HOST` | 403 | Host/Origin 不在允许名单 |
 | `INTERNAL` | 500 | 未分类失败 |
+
+`ENGINE_UNSUPPORTED` **不是**当前契约码（Go 不导出）。若客户端仍收到该码，按 `ENGINE` 处理。
 
 `TIMEOUT` **不是**错误码。搜索超时走 SSE `done.timedOut=true`。
 
@@ -68,7 +69,7 @@ HTTP JSON（SSE 尚未开始时）：
 { "ok": true, "engine": "rg" }
 ```
 
-`engine`：`rg` | `literal` | `none`。
+`engine`：`rg` | `none`。
 
 ### `GET /api/auth/status`（公开）
 
@@ -114,7 +115,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 | event | data | 次数 |
 | --- | --- | --- |
-| `meta` | `{ searchId, engine }` | 恰好 1，最先 |
+| `meta` | `{ searchId, engine }`（`engine`：`rg` \| `none`） | 恰好 1，最先 |
 | `progress` | `{ files, matches }` | 0–N，搜索过程中 |
 | `hit` | `{ path, line, text, matches[{start,end}] }` | 0–N |
 | `done` | `{ elapsedMs, matchCount, fileCount, truncated, timedOut, cancelled }` | 与 `error` 互斥，恰好一个终态 |

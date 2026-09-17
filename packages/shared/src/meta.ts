@@ -1,7 +1,7 @@
 import * as z from "zod";
 
 export const MetaResponseSchema = z.object({
-  engine: z.enum(["rg", "literal", "none"]),
+  engine: z.enum(["rg", "none"]),
   rgVersion: z.string().nullable(),
   rootLabel: z.string(),
   root: z.string(),

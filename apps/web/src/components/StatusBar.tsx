@@ -111,7 +111,7 @@ export function StatusBar({
     !isAlert &&
     (status === "running" || status === "cancelled" || status === "done");
 
-  if (text === "" && meta?.engine !== "literal" && meta?.engine !== "none") {
+  if (text === "" && meta?.engine !== "none") {
     return null;
   }
 
@@ -132,9 +132,6 @@ export function StatusBar({
         >
           {t("cancel")}
         </button>
-      ) : null}
-      {meta?.engine === "literal" ? (
-        <div className="status-banner">{t("literalEngineBanner")}</div>
       ) : null}
       {meta?.engine === "none" ? (
         <div className="status-banner">{t("engineNoneBanner")}</div>
