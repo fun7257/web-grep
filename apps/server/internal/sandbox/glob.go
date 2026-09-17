@@ -76,6 +76,24 @@ func userGlobRegexp(pat string) *regexp.Regexp {
 	return globToRegexp(trimmed)
 }
 
+// ToRgGlob converts a user glob to a ripgrep --glob pattern with the
+// same semantics as FilterByGlobs: a slash-free literal is an exact
+// root-relative path (tree pick), not a basename match in any directory.
+func ToRgGlob(g string) string {
+	trimmed := trimGlob(g)
+	if trimmed == "" {
+		return trimmed
+	}
+	if trimmed[0] == '/' {
+		return trimmed
+	}
+	core := trimTrailingSlashes(trimmed)
+	if !containsSlash(core) && !hasGlobMeta(core) {
+		return "/" + trimmed
+	}
+	return trimmed
+}
+
 func hasGlobMeta(pat string) bool {
 	for i := 0; i < len(pat); i++ {
 		switch pat[i] {

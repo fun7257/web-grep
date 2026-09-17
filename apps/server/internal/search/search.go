@@ -88,7 +88,7 @@ func (s *Service) Cancel(id string) {
 	s.mu.Lock()
 	c, ok := s.inflight[id]
 	s.mu.Unlock()
-	if ok {
+	if ok && c != nil {
 		c()
 	}
 }
@@ -137,17 +137,9 @@ func (s *Service) Preflight(req Request) Preflight {
 		and = append(and, clean)
 	}
 	id := newUUID()
-	maxC := s.Cfg.MaxConcurrent
-	if maxC <= 0 {
-		maxC = config.MaxConcurrentDefault
-	}
-	s.mu.Lock()
-	if len(s.inflight) >= maxC {
-		s.mu.Unlock()
+	if !s.acquireSlot(id) {
 		return Preflight{Status: 429, Code: "BUSY", Message: "too many concurrent searches"}
 	}
-	s.inflight[id] = func() {}
-	s.mu.Unlock()
 	rel := resolved.Rel
 	if rel == "" {
 		rel = "."
@@ -170,6 +162,40 @@ func (s *Service) Preflight(req Request) Preflight {
 		MaxResults:  maxResults,
 	}
 }
+
+func (s *Service) maxConcurrentLocked() int {
+	maxC := s.Cfg.MaxConcurrent
+	if maxC <= 0 {
+		return config.MaxConcurrentDefault
+	}
+	return maxC
+}
+
+func (s *Service) acquireSlot(id string) bool {
+	if id == "" {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.inflight) >= s.maxConcurrentLocked() {
+		return false
+	}
+	s.inflight[id] = nopCancel
+	return true
+}
+
+func (s *Service) bindCancel(id string, cancel context.CancelFunc) {
+	if id == "" || cancel == nil {
+		return
+	}
+	s.mu.Lock()
+	if _, ok := s.inflight[id]; ok {
+		s.inflight[id] = cancel
+	}
+	s.mu.Unlock()
+}
+
+func nopCancel() {}
 
 func (s *Service) SetCfg(cfg config.Config) {
 	s.mu.Lock()
@@ -194,6 +220,12 @@ type Stream interface {
 }
 
 func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
+	// Slot is acquired in Preflight. Release on every exit path (success,
+	// cancel, timeout, error, and the early returns below). HTTP also
+	// defers Release; delete is idempotent.
+	if pre.SearchID != "" {
+		defer s.Release(pre.SearchID)
+	}
 	var ctx context.Context
 	var cancel context.CancelFunc
 	if s.Cfg.TimeoutMs > 0 {
@@ -201,13 +233,8 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	} else {
 		ctx, cancel = context.WithCancel(parent)
 	}
-	s.mu.Lock()
-	s.inflight[pre.SearchID] = cancel
-	s.mu.Unlock()
-	defer func() {
-		cancel()
-		s.Release(pre.SearchID)
-	}()
+	defer cancel()
+	s.bindCancel(pre.SearchID, cancel)
 
 	started := time.Now()
 	terminal := false
@@ -275,28 +302,6 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		return
 	}
 
-	listed, listErr := ListNewerFiles(
-		s.Cfg.RootReal,
-		pre.RelativeDir,
-		pre.Request.MtimeAfter,
-		pre.Request.Hidden,
-		s.Cfg.FollowSymlinks,
-		s.Cfg.AllowSecrets,
-		pre.GlobExclude,
-	)
-	if listErr != nil {
-		logx.Error("file list failed", map[string]any{"searchId": pre.SearchID, "err": listErr.Error()})
-		sendError(listErr.Error())
-		return
-	}
-	listed = sandbox.FilterByGlobs(listed, pre.GlobInclude, nil)
-	if len(pre.GlobAnd) > 0 {
-		listed = sandbox.FilterByGlobs(listed, pre.GlobAnd, nil)
-	}
-	if len(listed) == 0 {
-		sendDone(false, false, false, 0, 0)
-		return
-	}
 	in := rg.Input{
 		RootReal:       s.Cfg.RootReal,
 		RelativeDir:    pre.RelativeDir,
@@ -311,13 +316,47 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		SearchZip:      s.Cfg.SearchZip,
 		Threads:        s.Cfg.Threads,
 		AndTerms:       pre.Request.AndTerms,
-		LimitToList:    true,
-		FileList:       listed,
 	}
-	_ = stream.Event("progress", map[string]any{
-		"files":   len(listed),
-		"matches": 0,
-	})
+	// mtimeAfter is the only reason to WalkDir + LimitToList. Otherwise
+	// let rg recurse from the search root (or RelativeDir) with globs.
+	if NeedsMtimeFileList(pre.Request.MtimeAfter) {
+		listed, listErr := listNewerFiles(
+			ctx,
+			s.Cfg.RootReal,
+			pre.RelativeDir,
+			pre.Request.MtimeAfter,
+			pre.Request.Hidden,
+			s.Cfg.FollowSymlinks,
+			s.Cfg.AllowSecrets,
+			pre.GlobExclude,
+		)
+		if listErr != nil {
+			if ctx.Err() == nil {
+				logx.Error("file list failed", map[string]any{"searchId": pre.SearchID, "err": listErr.Error()})
+				sendError(listErr.Error())
+				return
+			}
+		} else {
+			listed = sandbox.FilterByGlobs(listed, pre.GlobInclude, nil)
+			if len(pre.GlobAnd) > 0 {
+				listed = sandbox.FilterByGlobs(listed, pre.GlobAnd, nil)
+			}
+			if len(listed) == 0 {
+				sendDone(false, false, false, 0, 0)
+				return
+			}
+			in.LimitToList = true
+			in.FileList = listed
+			_ = stream.Event("progress", map[string]any{
+				"files":   len(listed),
+				"matches": 0,
+			})
+		}
+	} else {
+		in.GlobInclude = pre.GlobInclude
+		in.GlobAnd = pre.GlobAnd
+		in.GlobExclude = pre.GlobExclude
+	}
 
 	matchCount := 0
 	files := map[string]struct{}{}
@@ -325,33 +364,50 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	searchCtx, stopSearch := context.WithCancel(ctx)
 	defer stopSearch()
 
+	acceptHit := func(path string) bool {
+		if in.LimitToList {
+			return true
+		}
+		kept := sandbox.FilterByGlobs([]string{path}, pre.GlobInclude, pre.GlobExclude)
+		if len(pre.GlobAnd) > 0 {
+			kept = sandbox.FilterByGlobs(kept, pre.GlobAnd, nil)
+		}
+		return len(kept) == 1
+	}
+
 	lastProg := time.Now()
-	err := s.Engine.Search(searchCtx, in, func(m rg.Match) error {
-		if truncated || searchCtx.Err() != nil || stream.Aborted() {
-			return errStop
-		}
-		hit, ok := rg.ToRelativeHit(s.Cfg.RootReal, s.Cfg.AllowSecrets, m)
-		if !ok {
+	var err error
+	if ctx.Err() == nil {
+		err = s.Engine.Search(searchCtx, in, func(m rg.Match) error {
+			if truncated || searchCtx.Err() != nil || stream.Aborted() {
+				return errStop
+			}
+			hit, ok := rg.ToRelativeHit(s.Cfg.RootReal, s.Cfg.AllowSecrets, m)
+			if !ok {
+				return nil
+			}
+			if !acceptHit(hit.Path) {
+				return nil
+			}
+			if err := stream.Event("hit", hit); err != nil {
+				return err
+			}
+			matchCount++
+			files[hit.Path] = struct{}{}
+			if pre.MaxResults > 0 && matchCount >= pre.MaxResults {
+				truncated = true
+				stopSearch()
+				return errStop
+			}
 			return nil
-		}
-		if err := stream.Event("hit", hit); err != nil {
-			return err
-		}
-		matchCount++
-		files[hit.Path] = struct{}{}
-		if pre.MaxResults > 0 && matchCount >= pre.MaxResults {
-			truncated = true
-			stopSearch()
-			return errStop
-		}
-		return nil
-	}, func(files int) {
-		if time.Since(lastProg) < 200*time.Millisecond {
-			return
-		}
-		lastProg = time.Now()
-		_ = stream.Event("progress", map[string]any{"files": files, "matches": matchCount})
-	})
+		}, func(files int) {
+			if time.Since(lastProg) < 200*time.Millisecond {
+				return
+			}
+			lastProg = time.Now()
+			_ = stream.Event("progress", map[string]any{"files": files, "matches": matchCount})
+		})
+	}
 	_ = stream.Flush()
 
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
@@ -382,6 +438,16 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 }
 
 var errStop = errors.New("stop")
+
+// listNewerFiles is the WalkDir listing used when mtimeAfter is set.
+// Tests replace this to assert the no-mtime path skips the walk.
+var listNewerFiles = ListNewerFiles
+
+// NeedsMtimeFileList is true when the request must list files by mtime
+// before invoking rg. Zero / omitted mtimeAfter skips WalkDir.
+func NeedsMtimeFileList(after time.Time) bool {
+	return !after.IsZero()
+}
 
 func newUUID() string {
 	var b [16]byte

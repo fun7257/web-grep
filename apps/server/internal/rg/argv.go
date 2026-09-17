@@ -31,6 +31,7 @@ type Input struct {
 	Threads        int
 	FileList       []string
 	LimitToList    bool
+	GlobAnd        []string
 	AndTerms       []AndTerm
 }
 
@@ -73,13 +74,18 @@ func BuildArgv(in Input) ([]string, error) {
 	}
 	if !in.LimitToList {
 		argv = append(argv, "--glob", "!.git/**")
-		for _, g := range in.GlobInclude {
-			argv = append(argv, "--glob", g)
+		includes := in.GlobInclude
+		if len(includes) == 0 {
+			includes = in.GlobAnd
+		}
+		for _, g := range includes {
+			argv = append(argv, "--glob", sandbox.ToRgGlob(g))
 		}
 		for _, g := range in.GlobExclude {
-			argv = append(argv, "--glob", "!"+g)
+			argv = append(argv, "--glob", "!"+sandbox.ToRgGlob(g))
 		}
-		for _, g := range sandbox.DenylistRgGlobs(in.AllowSecrets, len(in.GlobInclude) > 0) {
+		hasUserInclude := len(in.GlobInclude) > 0 || len(in.GlobAnd) > 0
+		for _, g := range sandbox.DenylistRgGlobs(in.AllowSecrets, hasUserInclude) {
 			argv = append(argv, "--glob", g)
 		}
 	}

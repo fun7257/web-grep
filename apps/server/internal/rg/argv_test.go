@@ -2,6 +2,7 @@ package rg
 
 import (
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -111,6 +112,44 @@ func TestBuildFilterArgvUsesPerTermModifiers(t *testing.T) {
 	want := []string{"--no-config", "-s", "--", "H.llo"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %v want %v", got, want)
+	}
+}
+
+func TestBuildArgvAnchorsLiteralUserGlobs(t *testing.T) {
+	argv, err := BuildArgv(Input{
+		RootReal:    "/tmp/root",
+		RelativeDir: ".",
+		Query:       "needle",
+		GlobInclude: []string{"keep.log"},
+		GlobExclude: []string{"skip.log"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "--glob /keep.log") {
+		t.Fatalf("literal include should be rooted: %v", argv)
+	}
+	if !strings.Contains(joined, "--glob !/skip.log") {
+		t.Fatalf("literal exclude should be rooted: %v", argv)
+	}
+	if slices.Contains(argv, "keep.log") {
+		t.Fatalf("unanchored keep.log would match nested files: %v", argv)
+	}
+}
+
+func TestBuildArgvUsesGlobAndWhenIncludeEmpty(t *testing.T) {
+	argv, err := BuildArgv(Input{
+		RootReal:    "/tmp/root",
+		RelativeDir: ".",
+		Query:       "needle",
+		GlobAnd:     []string{"*.ts"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(argv, "*.ts") {
+		t.Fatalf("globAnd should become --glob when include is empty: %v", argv)
 	}
 }
 

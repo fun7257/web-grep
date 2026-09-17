@@ -245,14 +245,11 @@ func TestSearchDefaultsMatchUI(t *testing.T) {
 	if got.Regex || got.CaseSensitive || !got.Hidden {
 		t.Fatalf("defaults: regex=%v case=%v hidden=%v", got.Regex, got.CaseSensitive, got.Hidden)
 	}
-	if !got.LimitToList {
-		t.Fatal("every search should pass an explicit file list")
+	if got.LimitToList {
+		t.Fatal("no mtimeAfter should skip WalkDir and let rg search the root")
 	}
-	if !slices.Contains(got.FileList, "ok.txt") {
-		t.Fatalf("expected ok.txt in file list: %v", got.FileList)
-	}
-	if slices.Contains(got.FileList, ".env") {
-		t.Fatalf("denied .env leaked into file list: %v", got.FileList)
+	if len(got.FileList) != 0 {
+		t.Fatalf("expected empty file list without mtime: %v", got.FileList)
 	}
 }
 
@@ -348,16 +345,17 @@ func TestSearchSelectedPayloadAppliesModifiersAndGlobs(t *testing.T) {
 	if !got.Regex || !got.CaseSensitive || !got.WordMatch {
 		t.Fatalf("modifiers: regex=%v case=%v word=%v", got.Regex, got.CaseSensitive, got.WordMatch)
 	}
-	if !got.LimitToList {
-		t.Fatal("expected pre-filtered file list")
+	if got.LimitToList {
+		t.Fatal("no mtimeAfter should skip WalkDir")
 	}
-	if !slices.Contains(got.FileList, "src/keep.ts") || !slices.Contains(got.FileList, "src/wrongcase.ts") {
-		t.Fatalf("missing ts picks: %v", got.FileList)
+	if !slices.Contains(got.GlobInclude, "src/**") {
+		t.Fatalf("globInclude: %v", got.GlobInclude)
 	}
-	for _, leak := range []string{"src/skip.js", "src/keep.test.ts", "other.ts", "ok.txt"} {
-		if slices.Contains(got.FileList, leak) {
-			t.Fatalf("%s leaked into file list: %v", leak, got.FileList)
-		}
+	if !slices.Contains(got.GlobAnd, "*.ts") {
+		t.Fatalf("globAnd: %v", got.GlobAnd)
+	}
+	if !slices.Contains(got.GlobExclude, "*.test.ts") {
+		t.Fatalf("globExclude: %v", got.GlobExclude)
 	}
 }
 
@@ -384,14 +382,14 @@ func TestSearchGlobAndIntersectsInclude(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	if !got.LimitToList {
-		t.Fatal("expected pre-filtered file list")
+	if got.LimitToList {
+		t.Fatal("no mtimeAfter should skip WalkDir")
 	}
-	if !slices.Contains(got.FileList, "src/a.ts") {
-		t.Fatalf("missing src/a.ts: %v", got.FileList)
+	if !slices.Contains(got.GlobInclude, "src/**") {
+		t.Fatalf("globInclude: %v", got.GlobInclude)
 	}
-	if slices.Contains(got.FileList, "src/b.js") || slices.Contains(got.FileList, "other.ts") {
-		t.Fatalf("globAnd leaked: %v", got.FileList)
+	if !slices.Contains(got.GlobAnd, "*.ts") {
+		t.Fatalf("globAnd: %v", got.GlobAnd)
 	}
 }
 
@@ -418,14 +416,14 @@ func TestSearchGlobIncludeWithoutMtime(t *testing.T) {
 	if rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
-	if !got.LimitToList {
-		t.Fatal("selected files must be applied in Go, not only rg --glob")
+	if got.LimitToList {
+		t.Fatal("no mtimeAfter should skip WalkDir; literals go to rg as anchored globs")
 	}
-	if !slices.Contains(got.FileList, "keep.log") {
-		t.Fatalf("missing keep.log: %v", got.FileList)
+	if !slices.Contains(got.GlobInclude, "keep.log") {
+		t.Fatalf("globInclude: %v", got.GlobInclude)
 	}
-	if slices.Contains(got.FileList, "skip.log") || slices.Contains(got.FileList, "dir/keep.log") {
-		t.Fatalf("literal pick leaked: %v", got.FileList)
+	if len(got.FileList) != 0 {
+		t.Fatalf("should not pre-list files: %v", got.FileList)
 	}
 }
 
@@ -483,6 +481,80 @@ func TestThirdSearchIsBusy(t *testing.T) {
 	}
 	close(release)
 	wg.Wait()
+	if s.Search.Inflight() != 0 {
+		t.Fatalf("slots leaked after BUSY burst: %d", s.Search.Inflight())
+	}
+	ok := do(t, h, "POST", "http://127.0.0.1:8787/api/search", `{"query":"hello"}`, nil)
+	if ok.Code == 429 {
+		t.Fatal("BUSY stuck after slots were released")
+	}
+	if ok.Code != 200 {
+		t.Fatal(ok.Code, ok.Body.String())
+	}
+}
+
+func TestSearchCancelReleasesSlot(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	eng := blockingEngine{started: started, release: release}
+	s, _ := testServer(t, eng)
+	h := s.Handler()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	req := httptest.NewRequest("POST", "http://127.0.0.1:8787/api/search", strings.NewReader(`{"query":"hello"}`))
+	req.Host = "127.0.0.1:8787"
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		h.ServeHTTP(rec, req)
+	}()
+	waitStarted(t, started, 1)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not return after cancel")
+	}
+	if s.Search.Inflight() != 0 {
+		t.Fatalf("slot leaked after cancel: %d", s.Search.Inflight())
+	}
+	close(release)
+	ok := do(t, h, "POST", "http://127.0.0.1:8787/api/search", `{"query":"hello"}`, nil)
+	if ok.Code == 429 {
+		t.Fatal("BUSY after cancelled search released its slot")
+	}
+	if ok.Code != 200 {
+		t.Fatal(ok.Code, ok.Body.String())
+	}
+}
+
+func TestSearchErrorReleasesSlot(t *testing.T) {
+	s, _ := testServer(t, errEngine{err: fmt.Errorf("rg crashed")})
+	h := s.Handler()
+	rec := do(t, h, "POST", "http://127.0.0.1:8787/api/search", `{"query":"hello"}`, nil)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "event: error") {
+		t.Fatalf("expected engine error: %s", rec.Body.String())
+	}
+	if s.Search.Inflight() != 0 {
+		t.Fatalf("slot leaked after error: %d", s.Search.Inflight())
+	}
+	ok := do(t, h, "POST", "http://127.0.0.1:8787/api/search", `{"query":"hello"}`, nil)
+	if ok.Code == 429 {
+		t.Fatal("BUSY after error should have released the slot")
+	}
+}
+
+type errEngine struct{ err error }
+
+func (e errEngine) Kind() string { return "rg" }
+func (e errEngine) Search(context.Context, rg.Input, func(rg.Match) error, func(int)) error {
+	return e.err
 }
 
 type captureEngine struct {
@@ -699,6 +771,41 @@ func TestLiveRipgrepMtimeAndGlobInclude(t *testing.T) {
 	}
 	if strings.Contains(out, "skip.txt") {
 		t.Fatalf("selected glob must not search skip.txt: %s", out)
+	}
+}
+
+func TestLiveRipgrepLiteralGlobDoesNotMatchNested(t *testing.T) {
+	bin := rg.Detect("")
+	if bin == "" {
+		t.Skip("rg not available")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep.log"), []byte("hello-needle keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dir", "keep.log"), []byte("hello-needle nested\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, _ = filepath.EvalSymlinks(root)
+	cfg := config.Config{
+		RootReal: root, RootLabel: "t", Host: "127.0.0.1", Port: 8787,
+		MaxResults: 10000, TimeoutMs: 5000, NoIgnore: true,
+	}
+	s := &Server{Cfg: cfg, Search: search.New(cfg, rg.Engine{Bin: bin}, "rg", nil), Engine: "rg"}
+	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
+		`{"query":"hello-needle","globInclude":["keep.log"]}`, nil)
+	if rec.Code != 200 {
+		t.Fatal(rec.Body.String())
+	}
+	out := rec.Body.String()
+	if !strings.Contains(out, `"path":"keep.log"`) {
+		t.Fatalf("expected root keep.log: %s", out)
+	}
+	if strings.Contains(out, "dir/keep.log") {
+		t.Fatalf("literal pick must not match nested keep.log: %s", out)
 	}
 }
 

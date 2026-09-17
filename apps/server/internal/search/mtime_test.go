@@ -1,6 +1,8 @@
 package search
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -34,7 +36,7 @@ func TestListNewerFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := ListNewerFiles(root, ".", time.Now().Add(-2*time.Hour), true, false, false, nil)
+	got, err := ListNewerFiles(context.Background(), root, ".", time.Now().Add(-2*time.Hour), true, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +50,7 @@ func TestListNewerFiles(t *testing.T) {
 		t.Fatalf("hidden should be included when hidden=true: %v", got)
 	}
 
-	noHidden, err := ListNewerFiles(root, ".", time.Now().Add(-2*time.Hour), false, false, false, nil)
+	noHidden, err := ListNewerFiles(context.Background(), root, ".", time.Now().Add(-2*time.Hour), false, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +58,7 @@ func TestListNewerFiles(t *testing.T) {
 		t.Fatalf("hidden leaked: %v", noHidden)
 	}
 
-	all, err := ListNewerFiles(root, ".", time.Time{}, true, false, false, nil)
+	all, err := ListNewerFiles(context.Background(), root, ".", time.Time{}, true, false, false, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +66,7 @@ func TestListNewerFiles(t *testing.T) {
 		t.Fatalf("zero cutoff should list all files: %v", all)
 	}
 
-	excluded, err := ListNewerFiles(root, ".", time.Now().Add(-2*time.Hour), true, false, false, []string{"new.log"})
+	excluded, err := ListNewerFiles(context.Background(), root, ".", time.Now().Add(-2*time.Hour), true, false, false, []string{"new.log"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,5 +75,21 @@ func TestListNewerFiles(t *testing.T) {
 	}
 	if slices.Contains(excluded, "old.log") {
 		t.Fatalf("mtime should still drop old.log: %v", excluded)
+	}
+}
+
+func TestListNewerFilesHonorsCancel(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.log"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := ListNewerFiles(ctx, root, ".", time.Now().Add(-time.Hour), true, false, false, nil)
+	if err == nil {
+		t.Fatal("expected canceled walk")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got %v", err)
 	}
 }
