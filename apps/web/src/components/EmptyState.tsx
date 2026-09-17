@@ -30,6 +30,15 @@ export function EmptyState({
   if (hitCount > 0) {
     return null;
   }
+  if (treeCollapsed) {
+    return (
+      <div className="empty-state empty-idle">
+        <IdleMark kind="rail" />
+        <p className="empty-title">{t("treeCollapsed")}</p>
+        <p className="empty-helper">{t("treeCollapsedHelper")}</p>
+      </div>
+    );
+  }
   if (hostForbidden || error?.code === "FORBIDDEN_HOST") {
     return (
       <div className="empty-state empty-idle">
@@ -85,15 +94,6 @@ export function EmptyState({
         <p className="empty-title danger">
           {error?.message ?? t("searchFailed")}
         </p>
-      </div>
-    );
-  }
-  if (treeCollapsed) {
-    return (
-      <div className="empty-state empty-idle">
-        <IdleMark kind="hits" />
-        <p className="empty-title">{t("treeCollapsed")}</p>
-        <p className="empty-helper">{t("treeCollapsedHelper")}</p>
       </div>
     );
   }

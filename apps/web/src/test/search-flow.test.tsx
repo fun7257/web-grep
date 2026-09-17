@@ -2987,11 +2987,12 @@ describe("search flow", () => {
     expect(document.querySelector(".rail-picked-badge")?.textContent).toMatch(
       /0/,
     );
-    expect(document.querySelector(".rail-time-btn")).toBeTruthy();
+    expect(document.querySelector(".rail-time-btn.is-active")).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Toggle light/dark" }),
     ).toBeTruthy();
-    expect(screen.getByRole("button", { name: "中" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "中 / EN" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Log out" })).toBeTruthy();
     expect(screen.getByText("Sidebar collapsed")).toBeTruthy();
     expect(
       screen.getByText(
@@ -3023,6 +3024,33 @@ describe("search flow", () => {
     expect(screen.queryByText("No matches")).toBeNull();
     expect(document.querySelector(".tree-pane.collapsed.rail")).toBeTruthy();
     expect(document.querySelector(".rail-expand")).toBeTruthy();
+    expect(document.querySelector(".rail-time-btn")).toBeTruthy();
+    expect(document.querySelector(".rail-logout")).toBeTruthy();
+  });
+
+  it("shows collapsed empty copy for a no-match share URL when the rail starts closed", async () => {
+    localStorage.setItem("web-grep.treeOpen.v2", "0");
+    window.history.replaceState({}, "", "/?q=zzznotfoundxyz");
+    mockFetch(() =>
+      sseResponse([sseEvent("done", donePayload({ matchCount: 0 }))]),
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("Sidebar collapsed")).toBeTruthy();
+    });
+    expect(screen.queryByText("No matches")).toBeNull();
+    expect(
+      screen.getByText(
+        "Click ▶ to expand; open/closed state is stored in localStorage",
+      ),
+    ).toBeTruthy();
+    expect(document.querySelector(".tree-pane.collapsed.rail")).toBeTruthy();
+    expect(document.querySelector(".brand-mark")).toBeTruthy();
+    expect(document.querySelector(".rail-expand")).toBeTruthy();
+    expect(document.querySelector(".rail-picked-badge")).toBeTruthy();
+    expect(document.querySelector(".rail-time-btn")).toBeTruthy();
+    expect(document.querySelector(".locale-cycle")).toBeTruthy();
+    expect(document.querySelector(".rail-logout")).toBeTruthy();
   });
 
   it("keeps logout on the collapsed rail after login", async () => {

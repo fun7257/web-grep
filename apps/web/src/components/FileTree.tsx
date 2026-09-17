@@ -655,31 +655,36 @@ export function FileTree({
               <span className="dot" />
               {n > 99 ? "99+" : n}
             </button>
-            {timeRange !== null ? (
-              <button
-                type="button"
-                className="rail-time-btn"
-                onClick={onToggle}
-                title={`${t("timeRange")}: ${t(timeRangeMsgKey(timeRange))}`}
-              >
-                <IconHistory />
-              </button>
-            ) : null}
+            <button
+              type="button"
+              className={
+                timeRange !== null ? "rail-time-btn is-active" : "rail-time-btn"
+              }
+              onClick={onToggle}
+              title={
+                timeRange !== null
+                  ? `${t("timeRange")}: ${t(timeRangeMsgKey(timeRange))}`
+                  : t("timeRange")
+              }
+            >
+              <IconHistory />
+            </button>
           </div>
           <div className="tree-foot">
             <ThemeToggle />
-            <LocaleToggle />
-            {canLogout && onLogout !== undefined ? (
-              <button
-                type="button"
-                className="rail-logout"
-                onClick={onLogout}
-                title={t("logout")}
-                aria-label={t("logout")}
-              >
-                <IconLogout />
-              </button>
-            ) : null}
+            <LocaleToggle compact />
+            <button
+              type="button"
+              className="rail-logout"
+              disabled={!canLogout || onLogout === undefined}
+              onClick={() => {
+                onLogout?.();
+              }}
+              title={t("logout")}
+              aria-label={t("logout")}
+            >
+              <IconLogout />
+            </button>
           </div>
         </>
       )}

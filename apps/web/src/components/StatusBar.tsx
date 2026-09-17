@@ -25,8 +25,24 @@ export function ThemeToggle() {
   );
 }
 
-export function LocaleToggle() {
+export function LocaleToggle({ compact = false }: { compact?: boolean }) {
   const { locale, setLocale, t } = useLocale();
+  if (compact) {
+    const next = locale === "zh-CN" ? "en-US" : "zh-CN";
+    return (
+      <button
+        type="button"
+        className="locale-cycle"
+        aria-label={`${t("localeZh")} / ${t("localeEn")}`}
+        title={`${t("localeZh")} / ${t("localeEn")}`}
+        onClick={() => {
+          setLocale(next);
+        }}
+      >
+        {locale === "zh-CN" ? t("localeZh") : t("localeEn")}
+      </button>
+    );
+  }
   return (
     <div className="locale-toggle">
       <button
