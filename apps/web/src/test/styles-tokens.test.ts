@@ -143,8 +143,13 @@ describe("shipped stylesheet tokens", () => {
     expect(mods).toContain("width: var(--and-mods-w)");
     expect(mods).toContain("min-width: var(--and-mods-w)");
     expect(mods).toContain("height: var(--and-row-h)");
-    expect(mods).toContain("background: var(--elev)");
+    expect(mods).toContain("background: transparent");
+    expect(mods).not.toContain("border: 1px");
     expect(ruleBody(".search-and-mods .mod-btn")).toContain("min-width: 22px");
+    expect(css).not.toContain(".search-and-item:first-child .search-and-join");
+    expect(css).not.toContain(
+      ".search-and-item:first-child .search-and-line:first-of-type",
+    );
     const line = ruleBody(".search-and-line");
     expect(line).toContain("dashed");
     expect(line).not.toContain("background: rgb(");

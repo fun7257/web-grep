@@ -176,6 +176,13 @@ export function splitAndTerms(
   return { query: list[0] ?? "", andTerms: list.slice(1) };
 }
 
+/** Funnel / rail badge: extra AND slots with a non-empty trimmed value. */
+export function countNonEmptyAndTerms(
+  parts: ReadonlyArray<Pick<QueryPart, "value">>,
+): number {
+  return parts.slice(1).filter((part) => part.value.trim() !== "").length;
+}
+
 export function compileParts(
   parts: QueryPart[],
   forceRegex = false,

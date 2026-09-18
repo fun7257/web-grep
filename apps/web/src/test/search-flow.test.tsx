@@ -3008,6 +3008,46 @@ describe("search flow", () => {
     expect(document.querySelector(".search-add-count")).toBeNull();
   });
 
+  it("shows badge 2 for two filled extras plus one empty draft row", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    addFilterField();
+    const first = await screen.findByRole("textbox", { name: "Add filter" });
+    fireEvent.change(first, { target: { value: "alpha" } });
+    fireEvent.click(
+      document.querySelector(".search-and-more") as HTMLButtonElement,
+    );
+    const boxes = screen.getAllByRole("textbox", {
+      name: "Add filter",
+    }) as HTMLInputElement[];
+    fireEvent.change(boxes[1] as HTMLInputElement, { target: { value: "beta" } });
+    fireEvent.click(
+      document.querySelector(".search-and-more") as HTMLButtonElement,
+    );
+    const three = screen.getAllByRole("textbox", {
+      name: "Add filter",
+    }) as HTMLInputElement[];
+    expect(three).toHaveLength(3);
+    expect(three[2]?.value).toBe("");
+    expect(document.querySelector(".search-add-count")?.textContent).toBe("2");
+    expect(document.querySelectorAll(".search-and-join")).toHaveLength(2);
+    expect(
+      document
+        .querySelector(".search-and-item")
+        ?.querySelector(".search-and-join"),
+    ).toBeNull();
+    expect(document.querySelector(".search-and-pop .q-chip")).toBeNull();
+    expect(document.querySelectorAll(".search-and-clear")).toHaveLength(2);
+    expect(document.querySelectorAll(".search-field-remove")).toHaveLength(3);
+    expect(
+      document.querySelectorAll(".search-and-row .search-and-field"),
+    ).toHaveLength(3);
+    expect(
+      document.querySelectorAll(".search-and-row .search-and-mods"),
+    ).toHaveLength(3);
+  });
+
   it("focuses the first empty AND input when the panel opens", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
@@ -3111,6 +3151,11 @@ describe("search flow", () => {
     ).toBeTruthy();
     expect(document.querySelector(".search-and-mods .mod-btn")).toBeTruthy();
     expect(document.querySelector(".search-and-clear")).toBeTruthy();
+    expect(document.querySelector(".search-and-join")).toBeNull();
+    expect(document.querySelector(".search-and-pop .q-chip")).toBeNull();
+    expect(
+      extra.closest(".search-and-row")?.querySelectorAll(".search-field-remove"),
+    ).toHaveLength(1);
     expect(
       document.querySelector(".search-and-pop")?.classList.contains(
         "search-and-block",

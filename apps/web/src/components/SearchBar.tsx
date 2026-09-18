@@ -8,7 +8,7 @@ import { measureAndPanelWidth } from "../andPanelLayout.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchHistoryItem } from "../searchHistory.ts";
 import type { QueryPart } from "../searchStack.ts";
-import { newPart } from "../searchStack.ts";
+import { countNonEmptyAndTerms, newPart } from "../searchStack.ts";
 import type { TimeRange } from "../timeRange.ts";
 import {
   IconAnd,
@@ -70,7 +70,7 @@ export function SearchBar({
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const values = fields.length > 0 ? fields : [newPart("")];
   const extras = values.slice(1);
-  const extraCount = extras.filter((part) => part.value.trim() !== "").length;
+  const extraCount = countNonEmptyAndTerms(values);
   const firstEmptyExtra = extras.findIndex((part) => part.value.trim() === "");
   const canAdd =
     values.length < MAX_AND_PARTS &&
@@ -456,14 +456,16 @@ export function SearchBar({
                   const index = extraIndex + 1;
                   return (
                     <div key={part.id} className="search-and-item">
-                      <div className="search-and-join" aria-hidden="true">
-                        <span className="search-and-line" />
-                        <span className="search-and-badge">
-                          <IconAnd />
-                          {t("opAnd")}
-                        </span>
-                        <span className="search-and-line" />
-                      </div>
+                      {extraIndex > 0 ? (
+                        <div className="search-and-join" aria-hidden="true">
+                          <span className="search-and-line" />
+                          <span className="search-and-badge">
+                            <IconAnd />
+                            {t("opAnd")}
+                          </span>
+                          <span className="search-and-line" />
+                        </div>
+                      ) : null}
                       <div className="search-and-row">
                         <div
                           className="search-and-field"
@@ -493,7 +495,7 @@ export function SearchBar({
                               onQueryKeyDown(event, index);
                             }}
                           />
-                          {part.value !== "" ? (
+                          {part.value.trim() !== "" ? (
                             <button
                               type="button"
                               className="search-and-clear"
