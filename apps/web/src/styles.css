@@ -24,6 +24,10 @@
   --tree-w: 260px;
   --tree-row-h: 28px;
   --search-h: 40px;
+  --and-panel-w: 480px;
+  --and-panel-min: 420px;
+  --and-panel-max: 520px;
+  --and-mods-w: 96px;
   --icon-hit: 32px;
   --selected-bar: 3px;
   --rail-w: 56px;
@@ -274,8 +278,11 @@ html[data-theme="dark"] .icon,
   pointer-events: none;
   position: fixed;
   inset: 0;
-  background:
-    radial-gradient(ellipse 70% 50% at 8% -10%, var(--glow), transparent 55%);
+  background: radial-gradient(
+    ellipse 70% 50% at 8% -10%,
+    var(--glow),
+    transparent 55%
+  );
   z-index: 0;
 }
 
@@ -632,14 +639,17 @@ html[data-theme="dark"] .icon,
   --filter-remove-gap: 0.35rem;
   position: absolute;
   left: 0;
-  right: 0;
+  right: auto;
   top: calc(100% + 4px);
   z-index: 41;
   display: flex;
   flex-direction: column;
-  max-height: min(52vh, 22rem);
-  padding: 0.5rem 0.55rem 0.55rem;
-  background: var(--bg);
+  width: min(var(--and-panel-w), var(--and-panel-max));
+  min-width: min(var(--and-panel-min), calc(100vw - 2rem));
+  max-width: min(var(--and-panel-max), calc(100vw - 2rem));
+  max-height: min(70vh, 32rem);
+  padding: 0.55rem 0.6rem 0.6rem;
+  background: var(--elev);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
   box-shadow: var(--shadow);
@@ -662,23 +672,94 @@ html[data-theme="dark"] .icon,
 }
 
 .search-and-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--and-mods-w) var(--filter-remove);
   align-items: center;
   gap: var(--filter-remove-gap);
 }
 
-.search-and-pop .search-field {
-  flex: 1;
-  width: auto;
+.search-and-field {
+  display: flex;
+  align-items: center;
   min-width: 0;
   height: 36px;
-  box-shadow: none;
-  border-color: var(--line-strong);
+  padding: 0 0.35rem 0 0.65rem;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-cta);
 }
 
-.search-and-join,
-.search-and-foot {
-  margin-right: calc(var(--filter-remove) + var(--filter-remove-gap));
+.search-and-field:focus-within {
+  border-color: rgb(126 168 255 / 35%);
+  box-shadow: 0 0 0 3px var(--glow);
+}
+
+.search-and-field input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  margin: 0;
+  background: transparent;
+  border: 0;
+  padding: 0.2rem 0.15rem 0.2rem 0;
+  text-align: left;
+  font-size: var(--fs-md);
+  line-height: 22px;
+  height: 22px;
+  color: var(--text);
+  outline: none;
+  appearance: none;
+  overflow-x: auto;
+  text-overflow: clip;
+  white-space: nowrap;
+}
+
+.search-and-field input::placeholder {
+  color: var(--faint);
+}
+
+.search-and-clear {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: var(--faint);
+}
+
+.search-and-clear .icon {
+  width: 11px;
+  height: 11px;
+}
+
+.search-and-clear:hover {
+  color: var(--text);
+  background: var(--hover) !important;
+}
+
+.search-and-mods {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--and-mods-w);
+  min-width: var(--and-mods-w);
+  height: 36px;
+  padding: 0 4px;
+  background: var(--bg);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-control);
+}
+
+.search-and-mods .search-field-mods {
+  width: 100%;
+  justify-content: space-between;
+  padding: 0;
+  background: transparent;
 }
 
 .search-and-join {
@@ -688,6 +769,12 @@ html[data-theme="dark"] .icon,
   gap: 0.1rem;
   height: auto;
   padding: 0.1rem 0;
+  margin-right: calc(
+    var(--and-mods-w) +
+    var(--filter-remove) +
+    2 *
+    var(--filter-remove-gap)
+  );
   color: var(--accent);
 }
 
@@ -700,10 +787,11 @@ html[data-theme="dark"] .icon,
 }
 
 .search-and-line {
-  width: 1.5px;
-  height: 6px;
+  width: 0;
+  height: 8px;
   flex: none;
-  background: rgb(147 182 255 / 40%);
+  background: none;
+  border-left: 1.5px dashed color-mix(in srgb, var(--accent) 45%, transparent);
 }
 
 .search-and-badge {
@@ -3308,8 +3396,6 @@ html[data-theme="light"] .search-drop-backdrop {
   flex: none;
   color: var(--muted);
 }
-
-
 
 .result-group-path {
   flex: 1;

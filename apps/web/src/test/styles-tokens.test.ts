@@ -105,6 +105,47 @@ describe("shipped stylesheet tokens", () => {
     expect(lightPreview).not.toBe(lightBg);
   });
 
+  it("sizes the S-AND filter panel as a wide scheme A card under the search field", () => {
+    expect(css).toContain("--and-panel-w:");
+    expect(css).toContain("--and-panel-min:");
+    expect(css).toContain("--and-panel-max:");
+    expect(css).toContain("--and-mods-w:");
+    const root = css.slice(0, css.indexOf('html[data-theme="dark"]'));
+    expect(root).toMatch(/--and-panel-w:\s*480px/);
+    expect(root).toMatch(/--and-panel-min:\s*420px/);
+    expect(root).toMatch(/--and-panel-max:\s*520px/);
+    expect(root).toMatch(/--and-mods-w:\s*96px/);
+    const panel = ruleBody(".search-and-pop");
+    expect(panel).toContain(
+      "width: min(var(--and-panel-w), var(--and-panel-max))",
+    );
+    expect(panel).toContain(
+      "min-width: min(var(--and-panel-min), calc(100vw - 2rem))",
+    );
+    expect(panel).toContain(
+      "max-width: min(var(--and-panel-max), calc(100vw - 2rem))",
+    );
+    expect(panel).toContain("background: var(--elev)");
+    expect(panel).not.toContain("right: 0");
+    const row = ruleBody(".search-and-row");
+    expect(row).toContain(
+      "minmax(0, 1fr) var(--and-mods-w) var(--filter-remove)",
+    );
+    const field = ruleBody(".search-and-field");
+    expect(field).toContain("min-width: 0");
+    expect(field).toContain("background: var(--bg)");
+    const input = ruleBody(".search-and-field input");
+    expect(input).toContain("min-width: 0");
+    expect(input).not.toContain("text-overflow: ellipsis");
+    expect(input).toContain("text-overflow: clip");
+    const mods = ruleBody(".search-and-mods");
+    expect(mods).toContain("width: var(--and-mods-w)");
+    expect(mods).toContain("min-width: var(--and-mods-w)");
+    const line = ruleBody(".search-and-line");
+    expect(line).toContain("dashed");
+    expect(line).not.toContain("background: rgb(");
+  });
+
   it("uses a theme token for Search hover so light ink stays readable", () => {
     const body = ruleBody(".search-bar .search-go:hover:not(:disabled)");
     expect(body).toContain("var(--accent-hover)");

@@ -1,4 +1,8 @@
-import type { FormEvent, KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
+import type {
+  FormEvent,
+  KeyboardEvent as ReactKeyboardEvent,
+  RefObject,
+} from "react";
 import { useEffect, useRef, useState } from "react";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchHistoryItem } from "../searchHistory.ts";
@@ -57,11 +61,13 @@ export function SearchBar({
   const { t } = useLocale();
   const rootRef = useRef<HTMLDivElement>(null);
   const extraRefs = useRef<Array<HTMLInputElement | null>>([]);
-  const pendingFocus = useRef(false);
+  const pendingFocus = useRef<"open" | "add" | null>(null);
   const [andOpen, setAndOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
   const values = fields.length > 0 ? fields : [newPart("")];
   const extras = values.slice(1);
+  const extraCount = extras.filter((part) => part.value.trim() !== "").length;
+  const firstEmptyExtra = extras.findIndex((part) => part.value.trim() === "");
   const canAdd =
     values.length < MAX_AND_PARTS &&
     (values[values.length - 1]?.value ?? "").trim() !== "";
@@ -108,7 +114,7 @@ export function SearchBar({
     if (!canAdd) {
       return;
     }
-    pendingFocus.current = true;
+    pendingFocus.current = "add";
     setHistOpen(false);
     setAndOpen(true);
     onFieldsChange([...values, newPart("")]);
@@ -118,7 +124,12 @@ export function SearchBar({
 
   const toggleAnd = (): void => {
     setHistOpen(false);
-    setAndOpen((open) => !open);
+    setAndOpen((open) => {
+      if (!open) {
+        pendingFocus.current = "open";
+      }
+      return !open;
+    });
   };
 
   const toggleHist = (): void => {
@@ -141,11 +152,16 @@ export function SearchBar({
     if (!andOpen || !pendingFocus.current) {
       return;
     }
-    pendingFocus.current = false;
-    const node = extraRefs.current[Math.max(0, extras.length - 1)];
+    const mode = pendingFocus.current;
+    pendingFocus.current = null;
+    const index = mode === "add" ? extras.length - 1 : firstEmptyExtra;
+    if (index < 0) {
+      return;
+    }
+    const node = extraRefs.current[index];
     node?.focus();
     node?.scrollIntoView({ block: "nearest" });
-  }, [andOpen, extras.length]);
+  }, [andOpen, extras.length, firstEmptyExtra]);
 
   const handleSubmit = (event: FormEvent): void => {
     event.preventDefault();
@@ -190,9 +206,20 @@ export function SearchBar({
         setHistOpen(false);
       }
     };
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.isComposing || event.key !== "Escape") {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      setAndOpen(false);
+      setHistOpen(false);
+    };
     window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKeyDown, true);
     return () => {
       window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKeyDown, true);
     };
   }, [andOpen, histOpen]);
 
@@ -204,26 +231,38 @@ export function SearchBar({
       return;
     }
     const part = values[index];
-    if (part !== undefined && event.altKey && (event.key === "c" || event.key === "C")) {
+    if (
+      part !== undefined &&
+      event.altKey &&
+      (event.key === "c" || event.key === "C")
+    ) {
       event.preventDefault();
       setFieldMods(index, { caseSensitive: !part.caseSensitive });
       return;
     }
-    if (part !== undefined && event.altKey && (event.key === "w" || event.key === "W")) {
+    if (
+      part !== undefined &&
+      event.altKey &&
+      (event.key === "w" || event.key === "W")
+    ) {
       event.preventDefault();
       setFieldMods(index, { wordMatch: !part.wordMatch });
       return;
     }
-    if (part !== undefined && event.altKey && (event.key === "r" || event.key === "R")) {
+    if (
+      part !== undefined &&
+      event.altKey &&
+      (event.key === "r" || event.key === "R")
+    ) {
       event.preventDefault();
       setFieldMods(index, { regex: !part.regex });
       return;
     }
     if (event.key === "Escape" && (andOpen || histOpen)) {
       event.preventDefault();
+      event.stopPropagation();
       setAndOpen(false);
       setHistOpen(false);
-      queryRef.current?.focus();
       return;
     }
     if (event.key !== "Enter") {
@@ -312,7 +351,9 @@ export function SearchBar({
                   ))}
                 </div>
               ) : (
-                <p className="search-history-empty">{t("searchHistoryEmpty")}</p>
+                <p className="search-history-empty">
+                  {t("searchHistoryEmpty")}
+                </p>
               )}
             </div>
           ) : null}
@@ -375,14 +416,11 @@ export function SearchBar({
                       </div>
                       <div className="search-and-row">
                         <div
-                          className="search-field"
+                          className="search-and-field"
                           onClick={() => {
                             extraRefs.current[extraIndex]?.focus();
                           }}
                         >
-                          <span className="search-icon">
-                            <IconSearch />
-                          </span>
                           <input
                             ref={(node) => {
                               extraRefs.current[extraIndex] = node;
@@ -402,6 +440,22 @@ export function SearchBar({
                               onQueryKeyDown(event, index);
                             }}
                           />
+                          {part.value !== "" ? (
+                            <button
+                              type="button"
+                              className="search-and-clear"
+                              aria-label={t("queryClear")}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setField(index, "");
+                              }}
+                            >
+                              <IconX />
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="search-and-mods">
                           <FieldMods
                             part={part}
                             onToggle={(patch) => {
@@ -464,7 +518,7 @@ export function SearchBar({
         <button
           type="button"
           className={
-            andOpen || extras.length > 0
+            andOpen || extraCount > 0
               ? "search-add-field is-on"
               : "search-add-field"
           }
@@ -477,7 +531,9 @@ export function SearchBar({
           }}
         >
           <IconAnd />
-          <span className="search-add-count">{extras.length}</span>
+          {extraCount > 0 ? (
+            <span className="search-add-count">{extraCount}</span>
+          ) : null}
         </button>
         <div className="search-actions">
           <button

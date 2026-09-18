@@ -2275,6 +2275,9 @@ describe("search flow", () => {
     });
     expect(document.querySelector(".search-and-pop")).toBeNull();
     expect(document.querySelector(".search-add-count")?.textContent).toBe("1");
+    expect(
+      document.querySelector(".search-add-field")?.classList.contains("is-on"),
+    ).toBe(true);
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
       "hello world",
     );
@@ -2337,7 +2340,7 @@ describe("search flow", () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     expect(document.querySelector(".search-and-pop")).toBeNull();
-    expect(document.querySelector(".search-add-count")?.textContent).toBe("0");
+    expect(document.querySelector(".search-add-count")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Filters" }));
     expect(document.querySelector(".search-and-pop")).toBeTruthy();
     expect(document.querySelector(".search-drop-backdrop")).toBeTruthy();
@@ -2988,6 +2991,128 @@ describe("search flow", () => {
         ?.textContent,
     ).toMatch(/hello world/);
     expect(dialog.querySelector(".preview-find")).toBeNull();
+  });
+
+  it("counts only non-empty AND terms on the filter badge", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    addFilterField();
+    const extra = await screen.findByRole("textbox", { name: "Add filter" });
+    expect(document.querySelector(".search-add-count")).toBeNull();
+    fireEvent.change(extra, { target: { value: "   " } });
+    expect(document.querySelector(".search-add-count")).toBeNull();
+    fireEvent.change(extra, { target: { value: "world" } });
+    expect(document.querySelector(".search-add-count")?.textContent).toBe("1");
+    fireEvent.change(extra, { target: { value: "" } });
+    expect(document.querySelector(".search-add-count")).toBeNull();
+  });
+
+  it("focuses the first empty AND input when the panel opens", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    addFilterField();
+    const first = await screen.findByRole("textbox", { name: "Add filter" });
+    fireEvent.change(first, { target: { value: "filled" } });
+    fireEvent.click(
+      document.querySelector(".search-and-more") as HTMLButtonElement,
+    );
+    const boxes = screen.getAllByRole("textbox", { name: "Add filter" });
+    expect(boxes).toHaveLength(2);
+    fireEvent.mouseDown(
+      document.querySelector(".search-drop-backdrop") as Element,
+    );
+    expect(document.querySelector(".search-and-pop")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    const reopened = screen.getAllByRole("textbox", {
+      name: "Add filter",
+    }) as HTMLInputElement[];
+    expect(reopened[1]?.value).toBe("");
+    expect(document.activeElement).toBe(reopened[1]);
+  });
+
+  it("keeps unsubmitted AND drafts after Escape and click-outside", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    addFilterField();
+    const extra = await screen.findByRole("textbox", { name: "Add filter" });
+    fireEvent.change(extra, { target: { value: "draft-term" } });
+    fireEvent.keyDown(extra, { key: "Escape" });
+    expect(document.querySelector(".search-and-pop")).toBeNull();
+    expect(document.querySelector(".search-add-count")?.textContent).toBe("1");
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    expect(
+      (screen.getByRole("textbox", { name: "Add filter" }) as HTMLInputElement)
+        .value,
+    ).toBe("draft-term");
+    fireEvent.mouseDown(
+      document.querySelector(".search-drop-backdrop") as Element,
+    );
+    expect(document.querySelector(".search-and-pop")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    expect(
+      (screen.getByRole("textbox", { name: "Add filter" }) as HTMLInputElement)
+        .value,
+    ).toBe("draft-term");
+  });
+
+  it("submits the panel Search with the main query and non-empty andTerms", async () => {
+    const fetchMock = mockFetch(() =>
+      sseResponse([sseEvent("done", donePayload())]),
+    );
+    render(<App />);
+    typeQuery("hello");
+    addFilterField();
+    const extra = await screen.findByRole("textbox", { name: "Add filter" });
+    fireEvent.change(extra, { target: { value: "world" } });
+    fireEvent.click(
+      document.querySelector(".search-and-more") as HTMLButtonElement,
+    );
+    expect(document.querySelectorAll(".search-and-item")).toHaveLength(2);
+    fireEvent.click(
+      document.querySelector(".search-and-go") as HTMLButtonElement,
+    );
+    await waitFor(() => {
+      const body = lastSearchRequest(fetchMock);
+      expect(body.query).toBe("hello");
+      expect(body.andTerms).toEqual([
+        {
+          query: "world",
+          regex: false,
+          caseSensitive: false,
+          wordMatch: false,
+        },
+      ]);
+    });
+    expect(document.querySelector(".search-and-pop")).toBeNull();
+  });
+
+  it("keeps long AND filter text readable in the scheme A row", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    addFilterField();
+    const extra = (await screen.findByRole("textbox", {
+      name: "Add filter",
+    })) as HTMLInputElement;
+    const long = `filter-${"x".repeat(160)}-end`;
+    fireEvent.change(extra, { target: { value: long } });
+    expect(extra.value).toBe(long);
+    expect(extra.closest(".search-and-field")).toBeTruthy();
+    expect(
+      extra.closest(".search-and-row")?.querySelector(".search-icon"),
+    ).toBeNull();
+    expect(document.querySelector(".search-and-pop .search-icon")).toBeNull();
+    expect(document.querySelector(".search-and-mods")).toBeTruthy();
+    expect(document.querySelector(".search-and-clear")).toBeTruthy();
+    expect(getComputedStyle(extra).textOverflow).not.toBe("ellipsis");
+    expect(
+      document.querySelector(".search-and-pop")?.classList.contains(
+        "search-and-block",
+      ),
+    ).toBe(true);
   });
 
   it("caps AND fields at 16 and shows the limit hint", async () => {
