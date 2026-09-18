@@ -3100,19 +3100,127 @@ describe("search flow", () => {
     const long = `filter-${"x".repeat(160)}-end`;
     fireEvent.change(extra, { target: { value: long } });
     expect(extra.value).toBe(long);
+    expect(extra.title).toBe(long);
     expect(extra.closest(".search-and-field")).toBeTruthy();
     expect(
       extra.closest(".search-and-row")?.querySelector(".search-icon"),
     ).toBeNull();
     expect(document.querySelector(".search-and-pop .search-icon")).toBeNull();
-    expect(document.querySelector(".search-and-mods")).toBeTruthy();
+    expect(
+      document.querySelector(".search-and-mods .search-field-mods"),
+    ).toBeTruthy();
+    expect(document.querySelector(".search-and-mods .mod-btn")).toBeTruthy();
     expect(document.querySelector(".search-and-clear")).toBeTruthy();
-    expect(getComputedStyle(extra).textOverflow).not.toBe("ellipsis");
     expect(
       document.querySelector(".search-and-pop")?.classList.contains(
         "search-and-block",
       ),
     ).toBe(true);
+  });
+
+  it("anchors the AND panel from the query field to the funnel inside the hits pane", async () => {
+    const rect = (
+      left: number,
+      width: number,
+      top = 8,
+      height = 40,
+    ): DOMRect =>
+      ({
+        x: left,
+        y: top,
+        left,
+        right: left + width,
+        top,
+        bottom: top + height,
+        width,
+        height,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+    const spy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains("hits-pane")) {
+          return rect(0, 360, 0, 640);
+        }
+        if (this.classList.contains("search-field")) {
+          return rect(80, 180);
+        }
+        if (this.classList.contains("search-add-field")) {
+          return rect(268, 40);
+        }
+        return rect(0, 0);
+      });
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    addFilterField();
+    const panel = await waitFor(() => {
+      const node = document.querySelector(
+        ".search-and-pop",
+      ) as HTMLElement | null;
+      if (node === null || !node.classList.contains("is-anchored")) {
+        throw new Error("panel not anchored");
+      }
+      return node;
+    });
+    expect(panel.style.width).toBe("228px");
+    expect(panel.style.maxWidth).toBe("228px");
+    expect(80 + 228).toBeLessThanOrEqual(360);
+    spy.mockRestore();
+  });
+
+  it("clips a measured AND panel to the hits column instead of overflowing the preview", async () => {
+    const rect = (
+      left: number,
+      width: number,
+      top = 8,
+      height = 40,
+    ): DOMRect =>
+      ({
+        x: left,
+        y: top,
+        left,
+        right: left + width,
+        top,
+        bottom: top + height,
+        width,
+        height,
+        toJSON() {
+          return {};
+        },
+      }) as DOMRect;
+    const spy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: HTMLElement) {
+        if (this.classList.contains("hits-pane")) {
+          return rect(0, 300, 0, 640);
+        }
+        if (this.classList.contains("search-field")) {
+          return rect(80, 200);
+        }
+        if (this.classList.contains("search-add-field")) {
+          return rect(400, 40);
+        }
+        return rect(0, 0);
+      });
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    addFilterField();
+    const panel = await waitFor(() => {
+      const node = document.querySelector(
+        ".search-and-pop",
+      ) as HTMLElement | null;
+      if (node === null || !node.classList.contains("is-anchored")) {
+        throw new Error("panel not anchored");
+      }
+      return node;
+    });
+    expect(panel.style.width).toBe("220px");
+    expect(80 + 220).toBeLessThanOrEqual(300);
+    spy.mockRestore();
   });
 
   it("caps AND fields at 16 and shows the limit hint", async () => {

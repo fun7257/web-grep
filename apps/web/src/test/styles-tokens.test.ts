@@ -105,45 +105,58 @@ describe("shipped stylesheet tokens", () => {
     expect(lightPreview).not.toBe(lightBg);
   });
 
-  it("sizes the S-AND filter panel as a wide scheme A card under the search field", () => {
-    expect(css).toContain("--and-panel-w:");
-    expect(css).toContain("--and-panel-min:");
-    expect(css).toContain("--and-panel-max:");
+  it("anchors the S-AND filter panel to the search field and funnel, not a fixed card", () => {
     expect(css).toContain("--and-mods-w:");
+    expect(css).toContain("--and-row-h:");
+    expect(css).toContain("--and-row-gap:");
+    expect(css).toContain("--and-mods-gap:");
+    expect(css).not.toContain("--and-panel-w:");
+    expect(css).not.toContain("--and-panel-min:");
+    expect(css).not.toContain("--and-panel-max:");
     const root = css.slice(0, css.indexOf('html[data-theme="dark"]'));
-    expect(root).toMatch(/--and-panel-w:\s*480px/);
-    expect(root).toMatch(/--and-panel-min:\s*420px/);
-    expect(root).toMatch(/--and-panel-max:\s*520px/);
-    expect(root).toMatch(/--and-mods-w:\s*96px/);
+    expect(root).toMatch(/--and-row-h:\s*40px/);
+    expect(root).toMatch(/--and-row-gap:\s*10px/);
+    expect(root).toMatch(/--and-mods-gap:\s*12px/);
+    expect(root).toMatch(/--and-mods-w:\s*72px/);
     const panel = ruleBody(".search-and-pop");
-    expect(panel).toContain(
-      "width: min(var(--and-panel-w), var(--and-panel-max))",
-    );
-    expect(panel).toContain(
-      "min-width: min(var(--and-panel-min), calc(100vw - 2rem))",
-    );
-    expect(panel).toContain(
-      "max-width: min(var(--and-panel-max), calc(100vw - 2rem))",
-    );
+    expect(panel).toContain("width: calc(100% + var(--s1) + var(--search-h))");
+    expect(panel).toContain("min-width: 0");
+    expect(panel).toContain("overflow-x: hidden");
     expect(panel).toContain("background: var(--elev)");
+    expect(ruleBody(".hits-pane")).toContain("overflow: hidden");
     expect(panel).not.toContain("right: 0");
+    expect(panel).not.toMatch(/480px|508px|520px/);
     const row = ruleBody(".search-and-row");
     expect(row).toContain(
       "minmax(0, 1fr) var(--and-mods-w) var(--filter-remove)",
     );
+    expect(row).toContain("column-gap: var(--and-mods-gap)");
     const field = ruleBody(".search-and-field");
     expect(field).toContain("min-width: 0");
+    expect(field).toContain("height: var(--and-row-h)");
     expect(field).toContain("background: var(--bg)");
     const input = ruleBody(".search-and-field input");
     expect(input).toContain("min-width: 0");
-    expect(input).not.toContain("text-overflow: ellipsis");
-    expect(input).toContain("text-overflow: clip");
+    expect(input).toContain("text-overflow: ellipsis");
+    expect(input).not.toContain("text-overflow: clip");
     const mods = ruleBody(".search-and-mods");
     expect(mods).toContain("width: var(--and-mods-w)");
     expect(mods).toContain("min-width: var(--and-mods-w)");
+    expect(mods).toContain("height: var(--and-row-h)");
+    expect(mods).toContain("background: var(--elev)");
+    expect(ruleBody(".search-and-mods .mod-btn")).toContain("min-width: 22px");
     const line = ruleBody(".search-and-line");
     expect(line).toContain("dashed");
     expect(line).not.toContain("background: rgb(");
+    const light = css.slice(css.indexOf('html[data-theme="light"]'));
+    expect(light).toContain('html[data-theme="light"] .search-and-badge');
+    expect(light).toContain(
+      'html[data-theme="light"] .search-and-more:disabled',
+    );
+    expect(ruleBody(".search-and-more:disabled")).toContain("var(--chip-fill)");
+    expect(ruleBody(".search-and-go:hover:not(:disabled)")).toContain(
+      "var(--accent-hover)",
+    );
   });
 
   it("uses a theme token for Search hover so light ink stays readable", () => {
