@@ -714,13 +714,13 @@ html[data-theme="dark"] .icon,
 
 .search-and-field:focus-within {
   border-color: var(--accent);
-  box-shadow: 0 0 0 0.5px var(--accent);
+  box-shadow: none;
   outline: none;
 }
 
 .search-and-field.is-focused {
   border-color: var(--accent);
-  box-shadow: 0 0 0 0.5px var(--accent);
+  box-shadow: none;
   outline: none;
 }
 
@@ -738,10 +738,23 @@ html[data-theme="dark"] .icon,
   height: 22px;
   color: var(--text);
   outline: none;
+  box-shadow: none;
   appearance: none;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.search-and-field input:focus {
+  outline: none;
+  box-shadow: none;
+  border: 0;
+}
+
+.search-and-field input:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border: 0;
 }
 
 .search-and-field:focus-within input {
@@ -3010,6 +3023,16 @@ html[data-theme="light"] .search-and-more:disabled {
 
 html[data-theme="light"] .search-and-field {
   border-color: var(--line-strong);
+}
+
+html[data-theme="light"] .search-and-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: none;
+}
+
+html[data-theme="light"] .search-and-field.is-focused {
+  border-color: var(--accent);
+  box-shadow: none;
 }
 
 html[data-theme="light"] .search-and-hint {
