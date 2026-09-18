@@ -70,6 +70,12 @@ describe("shipped stylesheet tokens", () => {
     expect(ruleBody(".rail-expand")).toContain("var(--icon-hit)");
     expect(ruleBody(".rail-picked-badge")).toContain("var(--chip-fill)");
     expect(ruleBody(".rail-time-btn.is-active")).toContain("var(--selected)");
+    expect(ruleBody(".tree-row.picked")).toContain("var(--selected)");
+    expect(ruleBody(".tree-row.picked")).not.toMatch(
+      /var\(--(hover|chip-fill|bg-subtle)\)/,
+    );
+    expect(ruleBody(".tree-row.picked:hover")).toContain("var(--selected)");
+    expect(ruleBody(".tree-pick")).toContain("margin-left: auto");
     expect(ruleBody(".locale-cycle")).toContain("var(--icon-hit)");
     expect(ruleBody(".rail-stack")).toContain("flex-direction: column");
     expect(ruleBody(".tree-pane.collapsed .tree-foot")).toContain(

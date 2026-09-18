@@ -1812,6 +1812,10 @@ html[data-theme="dark"] .icon,
   background: var(--selected);
 }
 
+.tree-row.picked:hover {
+  background: var(--selected);
+}
+
 .tree-row.current {
   background: rgb(126 168 255 / 10%);
 }
@@ -1833,6 +1837,20 @@ html[data-theme="dark"] .icon,
   border: 0;
   padding: 0 0.22rem 0 0.08rem;
   border-radius: 6px;
+  color: inherit;
+}
+
+.tree-pick {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
   color: inherit;
 }
 

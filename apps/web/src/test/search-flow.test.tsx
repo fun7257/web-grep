@@ -551,6 +551,66 @@ describe("search flow", () => {
     ).toBe("false");
   });
 
+  it("counts a folder pick as one in the header and chips", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [
+          { name: "packages", path: "packages", dir: true },
+          { name: "ok.txt", path: "ok.txt", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(treeName("packages")).toBeTruthy();
+    });
+    const row = treeName("packages").closest(".tree-row");
+    expect(row).toBeTruthy();
+    const name = row?.querySelector(".tree-name");
+    const check = row?.querySelector(".tree-check");
+    const kind = row?.querySelector(".tree-kind");
+    expect(name && check && kind).toBeTruthy();
+    expect(
+      Boolean(
+        name &&
+          check &&
+          (name.compareDocumentPosition(check) &
+            Node.DOCUMENT_POSITION_FOLLOWING) !==
+            0,
+      ),
+    ).toBe(true);
+    expect(
+      Boolean(
+        kind &&
+          name &&
+          (kind.compareDocumentPosition(name) &
+            Node.DOCUMENT_POSITION_FOLLOWING) !==
+            0,
+      ),
+    ).toBe(true);
+    fireEvent.click(treeName("packages"));
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    expect(document.querySelectorAll(".pick-chip")).toHaveLength(1);
+    expect(document.querySelector(".pick-chip-name")?.textContent).toBe(
+      "packages",
+    );
+    expect(row?.classList.contains("picked")).toBe(true);
+    expect(row?.querySelector(".tree-check")?.classList.contains("on")).toBe(
+      true,
+    );
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 40);
+    });
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    expect(
+      fetchMock.mock.calls.every(
+        (call) => !requestUrl(call[0] as RequestInfo).includes("/api/count"),
+      ),
+    ).toBe(true);
+  });
+
   it("typed exclude sends globExclude and does not include selected files", async () => {
     let body = "";
     mockFetch(
