@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   compileParts,
+  countNonEmptyAndTerms,
   findMtimePredicate,
   formatQueryInput,
   joinAbs,
@@ -273,5 +274,21 @@ describe("toRgShareCommand", () => {
 
   it("joins a posix root with a relative hit path", () => {
     expect(joinAbs("/tmp/project/", "src/a.ts")).toBe("/tmp/project/src/a.ts");
+  });
+});
+
+describe("countNonEmptyAndTerms", () => {
+  it("counts only extra parts with a non-empty trimmed value", () => {
+    expect(countNonEmptyAndTerms([])).toBe(0);
+    expect(countNonEmptyAndTerms([newPart("hello")])).toBe(0);
+    expect(
+      countNonEmptyAndTerms([
+        newPart("hello"),
+        newPart("filled"),
+        newPart("also"),
+        newPart(""),
+        newPart("   "),
+      ]),
+    ).toBe(2);
   });
 });
