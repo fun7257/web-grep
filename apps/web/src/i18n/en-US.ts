@@ -127,7 +127,7 @@ export const enUS = {
   kbdSearch: "⏎",
   treePicked: "{n} selected",
   treeClear: "Clear conditions",
-  treeOpenFile: "Open file",
+
   timeRange: "Time",
   timeRangeHint:
     "Only files modified in this window, not log-line time. Click again to clear.",

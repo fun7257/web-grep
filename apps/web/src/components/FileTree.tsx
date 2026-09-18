@@ -17,7 +17,6 @@ import {
   IconCheck,
   IconChevron,
   IconDash,
-  IconExpand,
   IconHistory,
   IconLock,
   IconLogout,
@@ -190,21 +189,6 @@ function TreeNode({
             {entry.name}
           </span>
         </button>
-        {!entry.dir ? (
-          <button
-            type="button"
-            className="tree-open-file"
-            title={t("treeOpenFile")}
-            aria-label={t("treeOpenFile")}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              onOpenFile?.(entry.path);
-            }}
-          >
-            <IconExpand />
-          </button>
-        ) : null}
         <button
           type="button"
           className="tree-pick"

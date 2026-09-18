@@ -1250,7 +1250,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    fireEvent.click(screen.getByRole("button", { name: "ok.txt" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
@@ -1290,7 +1290,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    fireEvent.click(screen.getByRole("button", { name: "ok.txt" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
@@ -1334,7 +1334,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    fireEvent.click(screen.getByRole("button", { name: "ok.txt" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     const goto = await screen.findByLabelText("Go to line");
     await waitFor(() => {
@@ -1351,7 +1351,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Context" })).toBeNull();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    fireEvent.click(screen.getByRole("button", { name: "ok.txt" }));
     const again = await screen.findByRole("dialog", { name: "Context" });
     expect(document.querySelector(".preview-browse")).toBeNull();
     expect(document.querySelector(".preview-idle")).toBeTruthy();
@@ -1388,7 +1388,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("empty.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    fireEvent.click(screen.getByRole("button", { name: "empty.txt" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     expect(document.querySelector(".preview-browse")).toBeNull();
     expect(document.querySelector(".preview-idle")).toBeTruthy();
@@ -1462,7 +1462,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    fireEvent.click(screen.getByRole("button", { name: "ok.txt" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
@@ -1500,7 +1500,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    fireEvent.click(screen.getByRole("button", { name: "ok.txt" }));
     await screen.findByRole("dialog", { name: "Context" });
     expect(document.querySelector(".preview-browse")).toBeNull();
     expect(document.querySelector(".preview-idle")).toBeTruthy();
@@ -3085,7 +3085,7 @@ describe("search flow", () => {
           ?.textContent,
       ).toMatch(/hello world/);
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    fireEvent.click(screen.getByRole("button", { name: "ok.txt" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     expect(document.querySelector(".app-dimmed")).toBeTruthy();
     expect(document.querySelector(".preview-browse")).toBeNull();
@@ -3426,7 +3426,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("data.bin")).toBeTruthy();
     });
-    fireEvent.click(screen.getAllByRole("button", { name: "Open file" })[0] as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "data.bin" }));
     const binaryDialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(binaryDialog.textContent).toMatch(/Binary file, cannot preview/);
@@ -3437,7 +3437,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog", { name: "Context" })).toBeNull();
     });
-    fireEvent.click(screen.getAllByRole("button", { name: "Open file" })[1] as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "secret.bin" }));
     const deniedDialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(deniedDialog.textContent).toMatch(/path is denied/);

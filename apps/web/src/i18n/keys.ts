@@ -123,7 +123,7 @@ export const MSG_KEYS = [
   "kbdSearch",
   "treePicked",
   "treeClear",
-  "treeOpenFile",
+
   "timeRange",
   "timeRangeHint",
   "timeRangeToday",

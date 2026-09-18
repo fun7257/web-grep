@@ -1958,36 +1958,6 @@ html[data-theme="dark"] .icon,
   padding-left: 4px;
 }
 
-.tree-open-file {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  margin-left: 0.1rem;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted);
-  opacity: 0;
-}
-
-.tree-row:hover .tree-open-file,
-.tree-row:focus-within .tree-open-file {
-  opacity: 0.7;
-}
-
-.tree-open-file:hover {
-  color: var(--accent);
-  background: var(--selected);
-}
-
-.tree-open-file .icon {
-  width: 13px;
-  height: 13px;
-}
-
 .tree-muted {
   color: var(--muted);
   font-size: var(--fs-sm);

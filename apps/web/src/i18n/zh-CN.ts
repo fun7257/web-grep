@@ -9,7 +9,7 @@ export const zhCN = {
   queryAddField: "添加过滤",
   queryAddFieldShort: "添加",
   queryAndHint: "添加过滤",
-  queryAndHintShort: "加行",
+  queryAndHintShort: "加过滤",
   queryAndLimitHint: "最多 16 项 · 空项提交时丢弃",
   queryAddAnother: "再加一层过滤",
   queryRemoveField: "删除过滤",
@@ -125,7 +125,7 @@ export const zhCN = {
   kbdSearch: "⏎",
   treePicked: "已选 {n}",
   treeClear: "清空条件",
-  treeOpenFile: "打开文件",
+
   timeRange: "时间",
   timeRangeHint: "只搜这段时间内改过的文件，不是日志行时间。再点一次取消。",
   timeRangeToday: "今天",
