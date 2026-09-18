@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { SearchHttpError } from "../api/searchClient.ts";
-import { fetchFileCount, fetchTree, type TreeEntry } from "../api/treeClient.ts";
+import { fetchTree, type TreeEntry } from "../api/treeClient.ts";
 import { formatSearchCount } from "../searchCount.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import {
@@ -9,7 +9,7 @@ import {
   timeRangeMsgKey,
   type TimeRange,
 } from "../timeRange.ts";
-import { matchesAnyGlob, parseGlobs } from "../globs.ts";
+import { parseGlobs } from "../globs.ts";
 import { pickMark, type TreePick } from "../treePicks.ts";
 import {
   BrandMark,
@@ -131,6 +131,7 @@ function TreeNode({
   const current = !entry.dir && activePath === entry.path;
   const hidden = entry.name.startsWith(".");
   const checked = mark === "on" || mark === "covered";
+  const pressed = mark === "partial" ? "mixed" : checked;
   const rowClass = [
     "tree-row",
     checked || mark === "partial" ? "picked" : "",
@@ -140,6 +141,14 @@ function TreeNode({
   ]
     .filter((item) => item !== "")
     .join(" ");
+
+  const toggleThisPick = (): void => {
+    const covering =
+      mark === "on" && entry.dir && children !== null
+        ? children
+        : coveringListed;
+    onTogglePick(entry, entry.dir ? children : parentListed, covering);
+  };
 
   return (
     <div className="tree-node">
@@ -163,26 +172,9 @@ function TreeNode({
         <button
           type="button"
           className="tree-select"
-          aria-pressed={mark === "partial" ? "mixed" : checked}
-          onClick={() => {
-            const covering =
-              mark === "on" && entry.dir && children !== null
-                ? children
-                : coveringListed;
-            onTogglePick(
-              entry,
-              entry.dir ? children : parentListed,
-              covering,
-            );
-          }}
+          aria-pressed={pressed}
+          onClick={toggleThisPick}
         >
-          <span className={mark === "off" ? "tree-check" : "tree-check on"}>
-            {mark === "partial" ? (
-              <IconDash />
-            ) : checked ? (
-              <IconCheck />
-            ) : null}
-          </span>
           <span className="tree-kind" aria-hidden="true">
             <FileIcon path={entry.path} isDir={entry.dir} open={expanded} />
           </span>
@@ -205,6 +197,20 @@ function TreeNode({
             <IconExpand />
           </button>
         ) : null}
+        <button
+          type="button"
+          className="tree-pick"
+          aria-pressed={pressed}
+          onClick={toggleThisPick}
+        >
+          <span className={mark === "off" ? "tree-check" : "tree-check on"}>
+            {mark === "partial" ? (
+              <IconDash />
+            ) : checked ? (
+              <IconCheck />
+            ) : null}
+          </span>
+        </button>
       </div>
       {entry.dir && expanded ? (
         <div className="tree-children">
@@ -306,8 +312,7 @@ export function FileTree({
   const [root, setRoot] = useState<TreeEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
-  const [fileCount, setFileCount] = useState(0);
-  const n = fileCount;
+  const n = picks.length;
   const canClear =
     picks.length > 0 || excludeGlobs.trim() !== "" || timeRange !== null;
   const label = rootLabel || t("treeTitle");
@@ -335,38 +340,6 @@ export function FileTree({
   }, [excludeGlobs]);
 
   const excludeList = parseGlobs(excludeFilter);
-
-  useEffect(() => {
-    const exclude = parseGlobs(excludeFilter);
-    const files = picks.filter(
-      (item) => !item.dir && !matchesAnyGlob(item.path, exclude),
-    );
-    const dirs = picks.filter((item) => item.dir);
-    if (dirs.length === 0) {
-      setFileCount(files.length);
-      return;
-    }
-    const ac = new AbortController();
-    void Promise.all(
-      dirs.map((item) =>
-        fetchFileCount(item.path, ac.signal, mtimeAfter, exclude),
-      ),
-    )
-      .then((counts) => {
-        setFileCount(
-          files.length + counts.reduce((sum, count) => sum + count, 0),
-        );
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === "AbortError") {
-          return;
-        }
-        setFileCount(picks.length);
-      });
-    return () => {
-      ac.abort();
-    };
-  }, [excludeFilter, mtimeAfter, picks]);
 
   useEffect(() => {
     if (!sessionReady) {
