@@ -713,14 +713,14 @@ html[data-theme="dark"] .icon,
 }
 
 .search-and-field:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 0.5px var(--accent);
+  border: 1.5px solid var(--accent);
+  box-shadow: none;
   outline: none;
 }
 
 .search-and-field.is-focused {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 0.5px var(--accent);
+  border: 1.5px solid var(--accent);
+  box-shadow: none;
   outline: none;
 }
 
@@ -3010,6 +3010,16 @@ html[data-theme="light"] .search-and-more:disabled {
 
 html[data-theme="light"] .search-and-field {
   border-color: var(--line-strong);
+}
+
+html[data-theme="light"] .search-and-field:focus-within {
+  border: 1.5px solid var(--accent);
+  box-shadow: none;
+}
+
+html[data-theme="light"] .search-and-field.is-focused {
+  border: 1.5px solid var(--accent);
+  box-shadow: none;
 }
 
 html[data-theme="light"] .search-and-hint {

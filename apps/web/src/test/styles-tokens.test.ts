@@ -188,11 +188,33 @@ describe("shipped stylesheet tokens", () => {
     expect(field).toContain("min-width: 0");
     expect(field).toContain("height: var(--and-row-h)");
     expect(field).toContain("background: var(--bg)");
+    expect(field).toContain("border: 1px solid var(--line-strong)");
     const focus = ruleBody(".search-and-field:focus-within");
-    expect(focus).toContain("border-color: var(--accent)");
-    expect(focus).toContain("0 0 0 0.5px var(--accent)");
+    expect(focus).toContain("border: 1.5px solid var(--accent)");
+    expect(focus).toMatch(/box-shadow:\s*none/);
+    expect(focus).not.toContain("0 0 0 0.5px");
     expect(focus).not.toContain("var(--glow)");
     expect(focus).not.toContain("3px");
+    const focused = ruleBody(".search-and-field.is-focused");
+    expect(focused).toContain("border: 1.5px solid var(--accent)");
+    expect(focused).toMatch(/box-shadow:\s*none/);
+    expect(focused).not.toContain("0 0 0 0.5px");
+    expect(focused).not.toContain("var(--glow)");
+    expect(focused).not.toContain("3px");
+    expect(ruleBody('html[data-theme="light"] .search-and-field')).toContain(
+      "border-color: var(--line-strong)",
+    );
+    const lightFocus = ruleBody(
+      'html[data-theme="light"] .search-and-field:focus-within',
+    );
+    expect(lightFocus).toContain("border: 1.5px solid var(--accent)");
+    expect(lightFocus).toMatch(/box-shadow:\s*none/);
+    expect(lightFocus).not.toContain("0 0 0 0.5px");
+    const lightFocused = ruleBody(
+      'html[data-theme="light"] .search-and-field.is-focused',
+    );
+    expect(lightFocused).toContain("border: 1.5px solid var(--accent)");
+    expect(lightFocused).toMatch(/box-shadow:\s*none/);
     const input = ruleBody(".search-and-field input");
     expect(input).toContain("min-width: 0");
     expect(input).toContain("text-overflow: ellipsis");
