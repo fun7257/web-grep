@@ -9,7 +9,7 @@ export const zhCN = {
   queryAddField: "添加过滤",
   queryAddFieldShort: "添加",
   queryAndHint: "添加过滤",
-  queryAndHintShort: "加过滤",
+  queryAndHintShort: "加行",
   queryAndLimitHint: "最多 16 项 · 空项提交时丢弃",
   queryAddAnother: "再加一层过滤",
   queryRemoveField: "删除过滤",

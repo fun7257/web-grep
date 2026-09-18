@@ -30,7 +30,7 @@ describe("i18n catalogs", () => {
     expect(catalogs["zh-CN"].queryFilterPlaceholder).toBe("过滤…");
     expect(catalogs["en-US"].queryFilterPlaceholder).toBe("Filter…");
     expect(catalogs["zh-CN"].queryAddFieldShort).toBe("添加");
-    expect(catalogs["zh-CN"].queryAndHintShort).toBe("加过滤");
+    expect(catalogs["zh-CN"].queryAndHintShort).toBe("加行");
     expect(catalogs["en-US"].queryAddFieldShort).toBe("Add");
     expect(catalogs["en-US"].queryAndHintShort).toBe("to add");
   });
