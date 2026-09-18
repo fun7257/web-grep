@@ -534,18 +534,26 @@ export function SearchBar({
                 })}
               </div>
               <div className="search-and-foot">
+                <p
+                  className="search-and-hint"
+                  title={`Shift+Enter ${t("queryAndHint")} · ${t("queryAndLimitHint")}`}
+                >
+                  Shift+Enter {t("queryAndHintShort")}
+                </p>
                 <div className="search-and-actions">
                   <button
                     type="button"
                     className="search-and-more"
                     disabled={!canAdd}
+                    aria-label={t("queryAddField")}
+                    title={t("queryAddField")}
                     onClick={(event) => {
                       event.preventDefault();
                       addField();
                     }}
                   >
                     <IconPlus />
-                    {t("queryAddField")}
+                    {t("queryAddFieldShort")}
                   </button>
                   <button
                     type="button"
@@ -559,13 +567,6 @@ export function SearchBar({
                     {t("search")}
                   </button>
                 </div>
-                <p className="search-and-hint">
-                  <kbd className="search-kbd">Shift+Enter</kbd>
-                  {t("queryAndHint")}
-                </p>
-                <p className="search-and-hint search-and-limit">
-                  {t("queryAndLimitHint")}
-                </p>
               </div>
             </div>
           ) : null}

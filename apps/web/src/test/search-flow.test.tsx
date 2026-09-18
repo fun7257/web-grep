@@ -2435,6 +2435,30 @@ describe("search flow", () => {
     expect(document.querySelector(".search-and-pop")).toBeNull();
   });
 
+  it("puts the Shift+Enter hint left of a compact add/search pair", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    const foot = document.querySelector(".search-and-foot") as HTMLElement;
+    const hint = foot.querySelector(".search-and-hint") as HTMLElement;
+    const actions = foot.querySelector(".search-and-actions") as HTMLElement;
+    const add = document.querySelector(
+      ".search-and-more",
+    ) as HTMLButtonElement;
+    expect(foot.firstElementChild).toBe(hint);
+    expect(hint.nextElementSibling).toBe(actions);
+    expect(foot.querySelector(".search-and-limit")).toBeNull();
+    expect(hint.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "Shift+Enter to add",
+    );
+    expect(hint.title).toContain("Shift+Enter to add a filter");
+    expect(hint.title).toContain("Up to 16");
+    expect(add.getAttribute("aria-label")).toBe("Add filter");
+    expect(add.getAttribute("title")).toBe("Add filter");
+    expect(add.textContent?.replace(/\s+/g, " ").trim()).toBe("Add");
+    expect(actions.querySelector(".search-and-go")).toBeTruthy();
+  });
+
   it("ignores empty AND fields when searching", async () => {
     const fetchMock = mockFetch(() =>
       sseResponse([sseEvent("done", donePayload())]),
@@ -3362,9 +3386,12 @@ describe("search flow", () => {
     expect(
       (document.querySelector(".search-and-more") as HTMLButtonElement).disabled,
     ).toBe(true);
-    expect(
-      screen.getByText("Up to 16 terms · empty rows are dropped on submit"),
-    ).toBeTruthy();
+    const hint = document.querySelector(".search-and-hint") as HTMLElement;
+    expect(hint.title).toContain("Up to 16 terms");
+    expect(hint.title).toContain("empty rows are dropped on submit");
+    expect(hint.textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "Shift+Enter to add",
+    );
   });
 
   it("shows binary and DENIED preview gap states when browsing a tree file", async () => {

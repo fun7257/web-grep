@@ -29,6 +29,10 @@ describe("i18n catalogs", () => {
   it("ships S-AND filter placeholder copy in zh-CN and en-US", () => {
     expect(catalogs["zh-CN"].queryFilterPlaceholder).toBe("过滤…");
     expect(catalogs["en-US"].queryFilterPlaceholder).toBe("Filter…");
+    expect(catalogs["zh-CN"].queryAddFieldShort).toBe("添加");
+    expect(catalogs["zh-CN"].queryAndHintShort).toBe("加行");
+    expect(catalogs["en-US"].queryAddFieldShort).toBe("Add");
+    expect(catalogs["en-US"].queryAndHintShort).toBe("to add");
   });
 
   it("ships L-RAIL collapsed empty copy in zh-CN and en-US", () => {
