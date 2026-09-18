@@ -26,6 +26,11 @@ describe("i18n catalogs", () => {
     expect(catalogs["en-US"].previewSharePending).toContain("{path}:{line}");
   });
 
+  it("ships S-AND filter placeholder copy in zh-CN and en-US", () => {
+    expect(catalogs["zh-CN"].queryFilterPlaceholder).toBe("过滤…");
+    expect(catalogs["en-US"].queryFilterPlaceholder).toBe("Filter…");
+  });
+
   it("ships L-RAIL collapsed empty copy in zh-CN and en-US", () => {
     expect(catalogs["zh-CN"].treeCollapsed).toBe("左栏已收起");
     expect(catalogs["zh-CN"].treeCollapsedHelper).toBe(

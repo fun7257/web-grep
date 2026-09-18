@@ -4,7 +4,7 @@ export const enUS = {
   appTitle: "Web Grep",
   appTagline: "Search a folder like a document",
   queryPlaceholder: "Search in files",
-  queryFilterPlaceholder: "Filter results",
+  queryFilterPlaceholder: "Filter…",
   queryAdd: "Enter to search",
   queryAddField: "Add filter",
   queryAndHint: "to add a filter",

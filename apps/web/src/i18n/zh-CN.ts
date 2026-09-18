@@ -4,7 +4,7 @@ export const zhCN = {
   appTitle: "Web Grep",
   appTagline: "在目录里搜内容，像搜文档一样",
   queryPlaceholder: "搜索文件内容",
-  queryFilterPlaceholder: "过滤结果",
+  queryFilterPlaceholder: "过滤…",
   queryAdd: "Enter 搜索",
   queryAddField: "添加过滤",
   queryAndHint: "添加过滤",
