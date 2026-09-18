@@ -177,14 +177,22 @@ describe("shipped stylesheet tokens", () => {
     expect(panel).not.toContain("right: 0");
     expect(panel).not.toMatch(/480px|508px|520px/);
     const row = ruleBody(".search-and-row");
-    expect(row).toContain(
-      "minmax(0, 1fr) var(--and-mods-w) var(--filter-remove)",
-    );
+    expect(row).toContain("minmax(0, 1fr) var(--and-mods-w)");
+    expect(row).toContain("calc(var(--filter-remove) + 6px)");
     expect(row).toContain("column-gap: var(--and-mods-gap)");
+    expect(row).toContain("background: transparent");
+    expect(ruleBody(".search-and-row:focus-within")).toContain(
+      "background: transparent",
+    );
     const field = ruleBody(".search-and-field");
     expect(field).toContain("min-width: 0");
     expect(field).toContain("height: var(--and-row-h)");
     expect(field).toContain("background: var(--bg)");
+    const focus = ruleBody(".search-and-field:focus-within");
+    expect(focus).toContain("border-color: var(--accent)");
+    expect(focus).toContain("0 0 0 0.5px var(--accent)");
+    expect(focus).not.toContain("var(--glow)");
+    expect(focus).not.toContain("3px");
     const input = ruleBody(".search-and-field input");
     expect(input).toContain("min-width: 0");
     expect(input).toContain("text-overflow: ellipsis");
@@ -200,9 +208,33 @@ describe("shipped stylesheet tokens", () => {
     expect(css).not.toContain(
       ".search-and-item:first-child .search-and-line:first-of-type",
     );
+    const join = ruleBody(".search-and-join");
+    expect(join).toContain("flex-direction: row");
+    expect(join).not.toContain("flex-direction: column");
+    expect(join).not.toContain("margin-right: calc(");
     const line = ruleBody(".search-and-line");
-    expect(line).toContain("dashed");
-    expect(line).not.toContain("background: rgb(");
+    expect(line).toMatch(/border-top:\s*1px dashed var\(--line-strong\)/);
+    expect(line).toContain("border-left: none");
+    expect(line).not.toContain("border-left: 1.5px");
+    expect(line).not.toContain("var(--accent)");
+    expect(ruleBody(".search-field-remove")).toContain("margin: 0 0 0 6px");
+    const foot = ruleBody(".search-and-foot");
+    expect(foot).toContain("justify-content: space-between");
+    expect(foot).toContain("flex-direction: row");
+    expect(foot).not.toContain("flex-direction: column");
+    const hint = ruleBody(".search-and-hint");
+    expect(hint).toContain("flex: 1 1 auto");
+    expect(hint).toContain("text-align: left");
+    const actions = ruleBody(".search-and-actions");
+    expect(actions).toContain("flex: none");
+    expect(actions).toContain("gap: 8px");
+    const more = ruleBody(".search-and-more");
+    expect(more).toMatch(/flex:\s*none/);
+    expect(more).toContain("width: auto");
+    expect(more).toContain("height: 32px");
+    expect(more).not.toMatch(/flex:\s*1/);
+    expect(ruleBody(".search-and-go")).toContain("height: 32px");
+    expect(ruleBody(".search-and-go")).toContain("flex: none");
     const light = css.slice(css.indexOf('html[data-theme="light"]'));
     expect(light).toContain('html[data-theme="light"] .search-and-badge');
     expect(light).toContain(
