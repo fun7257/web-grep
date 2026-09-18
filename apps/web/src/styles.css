@@ -4258,13 +4258,22 @@ html[data-theme="light"] .token-prompt {
   place-items: center;
   width: 16px;
   height: 16px;
+  padding: 0;
+  border: 0;
   border-radius: 4px;
+  background: transparent;
   color: var(--faint);
+  flex: none;
+}
+
+.pick-chip-x:hover {
+  color: var(--text);
+  background: var(--hover);
 }
 
 .pick-chip-x .icon {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
 }
 
 .preview-empty {
