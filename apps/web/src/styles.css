@@ -303,7 +303,6 @@ html[data-theme="dark"] .icon,
   flex: 0 0 var(--tree-w);
   min-width: var(--tree-w);
   background: var(--bg-subtle);
-  border-right: 1px solid var(--line);
   overflow: hidden;
   transition:
     width 0.2s var(--ease),
@@ -315,13 +314,14 @@ html[data-theme="dark"] .icon,
   flex: 0 0 var(--rail-w);
   width: var(--rail-w);
   min-width: var(--rail-w);
+  /* No tree splitter while collapsed — rail owns this seam. */
+  border-right: 1px solid var(--line);
 }
 
 .hits-pane {
   position: relative;
   flex: 0 0 560px;
   min-width: 560px;
-  border-right: 1px solid var(--line);
   background: var(--bg);
   overflow: hidden;
 }
@@ -2897,15 +2897,16 @@ html[data-theme="light"] .token-overlay {
   min-width: 0;
 }
 
-/* Splitter dividers — token hit target, visual 1px line */
+/* Splitter owns the idle seam: 6px hit overlay, 1px --line stroke. */
 .splitter {
   width: var(--splitter-hit);
   cursor: col-resize;
   background: transparent;
-  border-left: 0;
-  margin-left: -3px;
+  border: 0;
+  margin: 0 calc(var(--splitter-hit) / -2);
   z-index: 5;
   flex: none;
+  align-self: stretch;
   position: relative;
   transition: background var(--duration) var(--ease);
 }
@@ -2917,7 +2918,7 @@ html[data-theme="light"] .token-overlay {
   bottom: 0;
   left: 50%;
   width: 1px;
-  background: transparent;
+  background: var(--line);
   transform: translateX(-50%);
   pointer-events: none;
 }
@@ -2929,7 +2930,7 @@ html[data-theme="light"] .token-overlay {
 
 .splitter:hover::before,
 .splitter:active::before {
-  width: 2px;
+  width: 3px;
   background: var(--accent);
 }
 

@@ -41,10 +41,10 @@ describe("shipped stylesheet tokens", () => {
     expect(light).toContain("--chip-fill:");
     expect(light).toMatch(/--line:\s*rgb\(28 30 36 \/ 10%\)/);
     expect(ruleBody(".tree-pane")).toContain("flex: 0 0 var(--tree-w)");
-    expect(ruleBody(".tree-pane")).toContain(
-      "border-right: 1px solid var(--line)",
-    );
-    expect(ruleBody(".hits-pane")).toContain(
+    expect(ruleBody(".tree-pane")).not.toContain("border-right:");
+    expect(ruleBody(".hits-pane")).not.toContain("border-right:");
+    expect(ruleBody(".hits-pane")).not.toContain("border-left:");
+    expect(ruleBody(".tree-pane.collapsed")).toContain(
       "border-right: 1px solid var(--line)",
     );
     expect(ruleBody(".result-log.selected")).toContain("var(--accent)");
@@ -61,7 +61,7 @@ describe("shipped stylesheet tokens", () => {
     expect(css).toContain(".app.app-dimmed");
     expect(css).toContain("--rail-w:");
     expect(css).toContain("--modal-xl:");
-    expect(css).toContain("--splitter-hit:");
+    expect(css).toMatch(/--splitter-hit:\s*6px/);
     expect(dark).toContain("--info-bg:");
     expect(light).toContain("--info-bg:");
     expect(dark).toContain("--toast-bg:");
@@ -89,9 +89,46 @@ describe("shipped stylesheet tokens", () => {
       "flex-direction: column",
     );
     expect(css).toContain("width: min(var(--modal-xl), 92vw)");
-    expect(ruleBody(".splitter")).toContain("var(--splitter-hit)");
+    expect(ruleBody(".splitter")).toContain("width: var(--splitter-hit)");
     expect(ruleBody(".info-cue")).toContain("var(--info-bg)");
     expect(ruleBody(".toast-pill")).toContain("var(--toast-bg)");
+  });
+
+  it("gives each pane seam a single overlay owner (PANE-SEAMS / baseline 46)", () => {
+    const tree = ruleBody(".tree-pane");
+    const hits = ruleBody(".hits-pane");
+    const previewIdx = css.lastIndexOf("\n.preview-pane {");
+    expect(previewIdx).toBeGreaterThan(-1);
+    const preview = css.slice(
+      css.indexOf("{", previewIdx) + 1,
+      css.indexOf("}", previewIdx),
+    );
+    const splitter = ruleBody(".splitter");
+    const stroke = ruleBody(".splitter::before");
+    const hoverIdx = css.indexOf(".splitter:hover::before");
+    expect(hoverIdx).toBeGreaterThan(-1);
+    const hoverStroke = css.slice(
+      css.indexOf("{", hoverIdx) + 1,
+      css.indexOf("}", hoverIdx),
+    );
+
+    expect(tree).toContain("background: var(--bg-subtle)");
+    expect(tree).not.toMatch(/border-(right|left):/);
+    expect(hits).toContain("background: var(--bg)");
+    expect(hits).not.toMatch(/border-(right|left):/);
+    expect(preview).toContain("background: var(--bg-preview)");
+    expect(preview).not.toMatch(/border-(right|left):/);
+
+    expect(splitter).toContain("width: var(--splitter-hit)");
+    expect(splitter).toContain("margin: 0 calc(var(--splitter-hit) / -2)");
+    expect(splitter).toContain("background: transparent");
+    expect(splitter).toMatch(/border:\s*0/);
+    expect(splitter).not.toMatch(/border-(left|right):/);
+
+    expect(stroke).toContain("width: 1px");
+    expect(stroke).toContain("background: var(--line)");
+    expect(hoverStroke).toContain("width: 3px");
+    expect(hoverStroke).toContain("background: var(--accent)");
   });
 
   it("gives results and preview different background tokens", () => {
