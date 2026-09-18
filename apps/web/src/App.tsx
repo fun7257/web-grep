@@ -93,7 +93,6 @@ function AppShell() {
     null,
   );
   const [browsePath, setBrowsePath] = useState<string | null>(null);
-  const [browseEpoch, setBrowseEpoch] = useState(0);
   const [timeRange, setTimeRange] = useState<TimeRange | null>(loadTimeRange);
   const [searchHistory, setSearchHistory] = useState(loadSearchHistory);
   const [nav, setNav] = useState<{ stack: SearchNavEntry[]; index: number }>({
@@ -466,12 +465,7 @@ function AppShell() {
           setPicks(next);
         }}
         onOpenFile={(path) => {
-          if (selectedHit !== null) {
-            setContextTarget({ path, allowGotoLine: true });
-            return;
-          }
-          setBrowsePath(path);
-          setBrowseEpoch((n) => n + 1);
+          setContextTarget({ path, allowGotoLine: true });
         }}
         onRemovePick={(pick) => {
           setPicks((current) =>
@@ -666,7 +660,6 @@ function AppShell() {
         <FilePreview
           hit={selectedHit}
           browsePath={browsePath}
-          browseEpoch={browseEpoch}
           pendingSelect={sharePending}
           terms={hlTerms}
           opts={hlOpts}

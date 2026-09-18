@@ -172,8 +172,16 @@ function TreeNode({
         <button
           type="button"
           className="tree-select"
-          aria-pressed={pressed}
-          onClick={toggleThisPick}
+          {...(entry.dir || onOpenFile === undefined
+            ? { "aria-pressed": pressed }
+            : {})}
+          onClick={() => {
+            if (!entry.dir && onOpenFile !== undefined) {
+              onOpenFile(entry.path);
+              return;
+            }
+            toggleThisPick();
+          }}
         >
           <span className="tree-kind" aria-hidden="true">
             <FileIcon path={entry.path} isDir={entry.dir} open={expanded} />
