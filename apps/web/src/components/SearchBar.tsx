@@ -3,7 +3,8 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   RefObject,
 } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { measureAndPanelWidth } from "../andPanelLayout.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchHistoryItem } from "../searchHistory.ts";
 import type { QueryPart } from "../searchStack.ts";
@@ -60,10 +61,13 @@ export function SearchBar({
 }) {
   const { t } = useLocale();
   const rootRef = useRef<HTMLDivElement>(null);
+  const fieldRef = useRef<HTMLDivElement>(null);
+  const filterBtnRef = useRef<HTMLButtonElement>(null);
   const extraRefs = useRef<Array<HTMLInputElement | null>>([]);
   const pendingFocus = useRef<"open" | "add" | null>(null);
   const [andOpen, setAndOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
+  const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const values = fields.length > 0 ? fields : [newPart("")];
   const extras = values.slice(1);
   const extraCount = extras.filter((part) => part.value.trim() !== "").length;
@@ -147,6 +151,38 @@ export function SearchBar({
       setAndOpen(false);
     }
   };
+
+  useLayoutEffect(() => {
+    if (!andOpen) {
+      return;
+    }
+    const field = fieldRef.current;
+    const funnel = filterBtnRef.current;
+    const clip =
+      rootRef.current?.closest(".hits-pane") ?? rootRef.current ?? null;
+    if (field === null || funnel === null || clip === null) {
+      return;
+    }
+    const apply = (): void => {
+      const width = measureAndPanelWidth(
+        field.getBoundingClientRect(),
+        funnel.getBoundingClientRect(),
+        clip.getBoundingClientRect(),
+      );
+      setPanelWidth(width > 0 ? width : null);
+    };
+    apply();
+    const observer =
+      typeof ResizeObserver === "function" ? new ResizeObserver(apply) : null;
+    observer?.observe(field);
+    observer?.observe(funnel);
+    observer?.observe(clip);
+    window.addEventListener("resize", apply);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", apply);
+    };
+  }, [andOpen]);
 
   useEffect(() => {
     if (!andOpen || !pendingFocus.current) {
@@ -361,6 +397,7 @@ export function SearchBar({
         <div className="search-field-wrap">
           <div
             className="search-field"
+            ref={fieldRef}
             onClick={() => {
               queryRef.current?.focus();
             }}
@@ -397,9 +434,22 @@ export function SearchBar({
           </div>
           {andOpen ? (
             <div
-              className="search-and-pop search-and-block"
+              className={
+                panelWidth !== null
+                  ? "search-and-pop search-and-block is-anchored"
+                  : "search-and-pop search-and-block"
+              }
               role="dialog"
               aria-label={t("queryConditions")}
+              style={
+                panelWidth !== null
+                  ? {
+                      width: `${panelWidth}px`,
+                      maxWidth: `${panelWidth}px`,
+                      minWidth: 0,
+                    }
+                  : undefined
+              }
             >
               <div className="search-and-list">
                 {extras.map((part, extraIndex) => {
@@ -428,6 +478,9 @@ export function SearchBar({
                             type="text"
                             aria-label={t("queryAddField")}
                             placeholder={t("queryFilterPlaceholder")}
+                            title={
+                              part.value.trim() !== "" ? part.value : undefined
+                            }
                             autoComplete="off"
                             autoCorrect="off"
                             autoCapitalize="off"
@@ -517,6 +570,7 @@ export function SearchBar({
         </div>
         <button
           type="button"
+          ref={filterBtnRef}
           className={
             andOpen || extraCount > 0
               ? "search-add-field is-on"

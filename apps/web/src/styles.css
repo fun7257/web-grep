@@ -24,10 +24,10 @@
   --tree-w: 260px;
   --tree-row-h: 28px;
   --search-h: 40px;
-  --and-panel-w: 480px;
-  --and-panel-min: 420px;
-  --and-panel-max: 520px;
-  --and-mods-w: 96px;
+  --and-row-h: 40px;
+  --and-row-gap: 10px;
+  --and-mods-gap: 12px;
+  --and-mods-w: 72px;
   --icon-hit: 32px;
   --selected-bar: 3px;
   --rail-w: 56px;
@@ -636,7 +636,6 @@ html[data-theme="dark"] .icon,
 
 .search-and-pop {
   --filter-remove: 28px;
-  --filter-remove-gap: 0.35rem;
   position: absolute;
   left: 0;
   right: auto;
@@ -644,11 +643,13 @@ html[data-theme="dark"] .icon,
   z-index: 41;
   display: flex;
   flex-direction: column;
-  width: min(var(--and-panel-w), var(--and-panel-max));
-  min-width: min(var(--and-panel-min), calc(100vw - 2rem));
-  max-width: min(var(--and-panel-max), calc(100vw - 2rem));
+  box-sizing: border-box;
+  width: calc(100% + var(--s1) + var(--search-h));
+  min-width: 0;
+  max-width: calc(100% + var(--s1) + var(--search-h));
   max-height: min(70vh, 32rem);
-  padding: 0.55rem 0.6rem 0.6rem;
+  padding: 0.7rem 0.75rem 0.75rem;
+  overflow-x: hidden;
   background: var(--elev);
   border: 1px solid var(--line-strong);
   border-radius: 12px;
@@ -656,7 +657,14 @@ html[data-theme="dark"] .icon,
   animation: pop-in var(--duration) var(--ease) both;
 }
 
+.search-and-pop.is-anchored {
+  max-width: none;
+}
+
 .search-and-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--and-row-gap);
   min-height: 0;
   overflow-x: hidden;
   overflow-y: auto;
@@ -668,29 +676,29 @@ html[data-theme="dark"] .icon,
 .search-and-item {
   display: flex;
   flex-direction: column;
-  gap: 0.2rem;
+  gap: 0.35rem;
 }
 
 .search-and-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) var(--and-mods-w) var(--filter-remove);
   align-items: center;
-  gap: var(--filter-remove-gap);
+  column-gap: var(--and-mods-gap);
 }
 
 .search-and-field {
   display: flex;
   align-items: center;
   min-width: 0;
-  height: 36px;
-  padding: 0 0.35rem 0 0.65rem;
+  height: var(--and-row-h);
+  padding: 0 0.4rem 0 0.75rem;
   background: var(--bg);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-cta);
 }
 
 .search-and-field:focus-within {
-  border-color: rgb(126 168 255 / 35%);
+  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   box-shadow: 0 0 0 3px var(--glow);
 }
 
@@ -701,7 +709,7 @@ html[data-theme="dark"] .icon,
   margin: 0;
   background: transparent;
   border: 0;
-  padding: 0.2rem 0.15rem 0.2rem 0;
+  padding: 0.25rem 0.2rem 0.25rem 0;
   text-align: left;
   font-size: var(--fs-md);
   line-height: 22px;
@@ -709,9 +717,14 @@ html[data-theme="dark"] .icon,
   color: var(--text);
   outline: none;
   appearance: none;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.search-and-field:focus-within input {
   overflow-x: auto;
   text-overflow: clip;
-  white-space: nowrap;
 }
 
 .search-and-field input::placeholder {
@@ -748,32 +761,41 @@ html[data-theme="dark"] .icon,
   justify-content: center;
   width: var(--and-mods-w);
   min-width: var(--and-mods-w);
-  height: 36px;
-  padding: 0 4px;
-  background: var(--bg);
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-control);
+  height: var(--and-row-h);
+  padding: 0 0.08rem 0 0.12rem;
+  background: var(--elev);
+  border: 1px solid var(--line);
+  border-radius: var(--r-cta);
 }
 
 .search-and-mods .search-field-mods {
   width: 100%;
   justify-content: space-between;
+  gap: 1px;
   padding: 0;
   background: transparent;
+  align-self: center;
+}
+
+.search-and-mods .mod-btn {
+  min-width: 22px;
+  width: 22px;
+  height: 26px;
+  padding: 0 !important;
 }
 
 .search-and-join {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.1rem;
+  gap: 0.15rem;
   height: auto;
-  padding: 0.1rem 0;
+  padding: 0.15rem 0;
   margin-right: calc(
     var(--and-mods-w) +
     var(--filter-remove) +
     2 *
-    var(--filter-remove-gap)
+    var(--and-mods-gap)
   );
   color: var(--accent);
 }
@@ -788,7 +810,7 @@ html[data-theme="dark"] .icon,
 
 .search-and-line {
   width: 0;
-  height: 8px;
+  height: 10px;
   flex: none;
   background: none;
   border-left: 1.5px dashed color-mix(in srgb, var(--accent) 45%, transparent);
@@ -802,7 +824,7 @@ html[data-theme="dark"] .icon,
   padding: 0 0.5rem 0 0.32rem;
   border-radius: 999px;
   background: var(--selected);
-  border: 1px solid rgb(147 182 255 / 28%);
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
   color: var(--accent);
   font-size: 11px;
   font-weight: 600;
@@ -817,9 +839,9 @@ html[data-theme="dark"] .icon,
 .search-and-foot {
   display: flex;
   flex-direction: column;
-  gap: 0.35rem;
-  margin-top: 0.55rem;
-  padding: 0.5rem 0 0;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+  padding: 0.6rem 0 0;
   border-top: 1px solid var(--line);
 }
 
@@ -853,15 +875,15 @@ html[data-theme="dark"] .icon,
 
 .search-and-more:hover {
   color: var(--accent);
-  border-color: rgb(147 182 255 / 40%) !important;
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent) !important;
   background: var(--selected) !important;
 }
 
 .search-and-more:disabled {
-  color: var(--faint);
-  border-color: var(--line) !important;
-  background: transparent !important;
-  opacity: 0.55;
+  color: var(--muted);
+  border-color: var(--line-strong) !important;
+  background: var(--chip-fill) !important;
+  opacity: 0.78;
 }
 
 .search-and-go {
@@ -876,8 +898,9 @@ html[data-theme="dark"] .icon,
   font-weight: 650;
 }
 
-.search-and-go:hover {
-  filter: brightness(1.06);
+.search-and-go:hover:not(:disabled) {
+  background: var(--accent-hover) !important;
+  filter: none;
 }
 
 .search-and-hint {
@@ -2926,6 +2949,28 @@ html[data-theme="light"] .token-overlay {
 
 html[data-theme="light"] .search-drop-backdrop {
   background: rgb(28 30 36 / 8%);
+}
+
+html[data-theme="light"] .search-and-badge {
+  background: var(--selected);
+  border-color: color-mix(in srgb, var(--accent) 38%, transparent);
+  color: var(--accent);
+}
+
+html[data-theme="light"] .search-and-more:disabled {
+  color: var(--muted);
+  border-color: var(--line-strong) !important;
+  background: var(--chip-fill) !important;
+  opacity: 0.88;
+}
+
+html[data-theme="light"] .search-and-field,
+html[data-theme="light"] .search-and-mods {
+  border-color: var(--line-strong);
+}
+
+html[data-theme="light"] .search-and-hint {
+  color: var(--muted);
 }
 
 .search-dropdown {
