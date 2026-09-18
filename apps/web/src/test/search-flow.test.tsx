@@ -262,6 +262,19 @@ function treeName(name: string): HTMLElement {
   return node as HTMLElement;
 }
 
+function treePickButton(name: string): HTMLElement {
+  const row = treeName(name).closest(".tree-row");
+  const btn = row?.querySelector(".tree-pick");
+  if (btn === null || btn === undefined) {
+    throw new Error(`missing tree pick ${name}`);
+  }
+  return btn as HTMLElement;
+}
+
+function clickTreePick(name: string): void {
+  fireEvent.click(treePickButton(name));
+}
+
 function openFilters(): void {
   fireEvent.click(screen.getByRole("button", { name: "Filters" }));
 }
@@ -359,7 +372,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("ok.txt"));
+    clickTreePick("ok.txt");
     expect(screen.getByText("1 selected")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "7d" }));
     await waitFor(() => {
@@ -393,7 +406,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("ok.txt"));
+    clickTreePick("ok.txt");
     expect(screen.getByText("1 selected")).toBeTruthy();
     typeQuery("needle");
     clickSearch();
@@ -425,7 +438,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("ok.txt"));
+    clickTreePick("ok.txt");
     typeQuery("needle");
     clickSearch();
     await waitFor(() => {
@@ -534,8 +547,8 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("ok.txt"));
-    fireEvent.click(screen.getByText("skip.log"));
+    clickTreePick("ok.txt");
+    clickTreePick("skip.log");
     expect(screen.getByText("2 selected")).toBeTruthy();
     const exclude = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
     fireEvent.change(exclude, { target: { value: "*.log" } });
@@ -543,12 +556,10 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("1 selected")).toBeTruthy();
     });
-    expect(treeName("ok.txt").closest("button")?.getAttribute("aria-pressed")).toBe(
-      "true",
+    expect(treePickButton("ok.txt").getAttribute("aria-pressed")).toBe("true");
+    expect(treePickButton("skip.log").getAttribute("aria-pressed")).toBe(
+      "false",
     );
-    expect(
-      treeName("skip.log").closest("button")?.getAttribute("aria-pressed"),
-    ).toBe("false");
   });
 
   it("counts a folder pick as one in the header and chips", async () => {
@@ -627,7 +638,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(treeName("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(treeName("ok.txt"));
+    clickTreePick("ok.txt");
     expect(screen.getByText("1 selected")).toBeTruthy();
     expect(document.querySelector(".pick-chip-name")?.textContent).toBe(
       "ok.txt",
@@ -658,7 +669,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("skip.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("skip.txt"));
+    clickTreePick("skip.txt");
     fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
       target: { value: "*.log" },
     });
@@ -695,7 +706,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("ok.txt"));
+    clickTreePick("ok.txt");
     typeQuery("needle");
     clickSearch();
     await waitFor(() => {
@@ -718,7 +729,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("ok.txt"));
+    clickTreePick("ok.txt");
     const exclude = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
     fireEvent.change(exclude, { target: { value: "*.log" } });
     fireEvent.blur(exclude);
@@ -1195,7 +1206,7 @@ describe("search flow", () => {
     expect(document.querySelector(".app-dimmed")).toBeTruthy();
   });
 
-  it("opens a tree file in the preview pane from line 1", async () => {
+  it("opens an idle tree file name in ContextModal and leaves the right pane empty", async () => {
     const fetchMock = mockFetch(
       () => sseResponse([sseEvent("done", donePayload())]),
       undefined,
@@ -1203,23 +1214,28 @@ describe("search flow", () => {
     );
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText("ok.txt")).toBeTruthy();
+      expect(treeName("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+    expect(document.querySelector(".empty-idle")).toBeTruthy();
+    expect(document.querySelector(".preview-idle")).toBeTruthy();
+    expect(screen.getByText("0 selected")).toBeTruthy();
+    const searchesBefore = searchCallCount(fetchMock);
+    fireEvent.click(treeName("ok.txt"));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
-      expect(
-        document.querySelector(".preview-browse .preview-line")?.textContent,
-      ).toMatch(/ok\.txt line 1/);
+      expect(dialog.textContent).toMatch(/ok\.txt line 1/);
     });
-    expect(document.querySelector(".preview-browse mark")).toBeNull();
+    expect(document.querySelector(".app-dimmed")).toBeTruthy();
+    expect(document.querySelector(".preview-browse")).toBeNull();
+    expect(document.querySelector(".preview-idle")).toBeTruthy();
+    expect(screen.getByText("Select a result to preview")).toBeTruthy();
+    expect(screen.getByText("0 selected")).toBeTruthy();
+    expect(document.querySelector(".pick-chip")).toBeNull();
+    expect(searchCallCount(fetchMock)).toBe(searchesBefore);
     const fileUrls = fetchMock.mock.calls
       .map((call) => requestUrl(call[0] as RequestInfo))
       .filter((url) => url.includes("/api/file"));
     expect(fileUrls.some((url) => url.includes("from=1"))).toBe(true);
-    expect(screen.queryByRole("dialog", { name: "Context" })).toBeNull();
-    expect(screen.getByText("0 selected")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Context" }));
-    const dialog = await screen.findByRole("dialog", { name: "Context" });
     expect(screen.getByLabelText("Go to line")).toBeTruthy();
     expect(dialog.querySelectorAll(".preview-line").length).toBeGreaterThan(0);
   });
@@ -1235,18 +1251,14 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
-    await waitFor(() => {
-      expect(
-        document.querySelector(".preview-browse .preview-line")?.textContent,
-      ).toMatch(/ok\.txt line 1/);
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
         /ok\.txt line 1/,
       );
     });
+    expect(document.querySelector(".preview-browse")).toBeNull();
+    expect(document.querySelector(".preview-idle")).toBeTruthy();
     const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
     fireEvent.change(goto, { target: { value: "5" } });
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
@@ -1279,18 +1291,13 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
-    await waitFor(() => {
-      expect(
-        document.querySelector(".preview-browse .preview-line")?.textContent,
-      ).toMatch(/ok\.txt line 1/);
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
         /ok\.txt line 1/,
       );
     });
+    expect(document.querySelector(".preview-browse")).toBeNull();
     const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
     fireEvent.change(goto, { target: { value: "50" } });
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
@@ -1328,10 +1335,6 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
-    await waitFor(() => {
-      expect(document.querySelector(".preview-browse .preview-line")).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     const goto = await screen.findByLabelText("Go to line");
     await waitFor(() => {
@@ -1349,13 +1352,9 @@ describe("search flow", () => {
       expect(screen.queryByRole("dialog", { name: "Context" })).toBeNull();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
-    await waitFor(() => {
-      expect(
-        document.querySelector(".preview-browse .preview-line")?.textContent,
-      ).toMatch(/ok\.txt line 1/);
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const again = await screen.findByRole("dialog", { name: "Context" });
+    expect(document.querySelector(".preview-browse")).toBeNull();
+    expect(document.querySelector(".preview-idle")).toBeTruthy();
     await waitFor(() => {
       expect(again.textContent).toMatch(/ok\.txt line 1/);
     });
@@ -1390,11 +1389,9 @@ describe("search flow", () => {
       expect(screen.getByText("empty.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
-    await waitFor(() => {
-      expect(screen.getByText("This file is empty")).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
+    expect(document.querySelector(".preview-browse")).toBeNull();
+    expect(document.querySelector(".preview-idle")).toBeTruthy();
     await waitFor(() => {
       expect(dialog.querySelector(".context-empty")?.textContent).toBe(
         "This file is empty",
@@ -1466,18 +1463,13 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
-    await waitFor(() => {
-      expect(
-        document.querySelector(".preview-browse .preview-line")?.textContent,
-      ).toMatch(/ok\.txt line 1/);
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     const dialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
       expect(dialog.querySelector(".preview-line")?.textContent).toMatch(
         /ok\.txt line 1/,
       );
     });
+    expect(document.querySelector(".preview-browse")).toBeNull();
     const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
     fireEvent.change(goto, { target: { value: "50" } });
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
@@ -1509,11 +1501,9 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     fireEvent.click(screen.getByRole("button", { name: "Open file" }));
-    await waitFor(() => {
-      expect(document.querySelector(".preview-browse")).toBeTruthy();
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Context" }));
     await screen.findByRole("dialog", { name: "Context" });
+    expect(document.querySelector(".preview-browse")).toBeNull();
+    expect(document.querySelector(".preview-idle")).toBeTruthy();
     const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
     fireEvent.change(goto, { target: { value: "abc" } });
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
@@ -1675,7 +1665,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("ok.txt"));
+    clickTreePick("ok.txt");
     typeQuery("hello");
     fireEvent.click(screen.getByRole("button", { name: "Aa" }));
     fireEvent.click(screen.getByRole("button", { name: "\\b" }));
@@ -1756,7 +1746,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("skip.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("skip.txt"));
+    clickTreePick("skip.txt");
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
@@ -2059,7 +2049,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("ok.txt"));
+    clickTreePick("ok.txt");
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
@@ -2114,7 +2104,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    fireEvent.click(screen.getByText("ok.txt"));
+    clickTreePick("ok.txt");
     typeQuery("hello");
     clickSearch();
     await waitFor(() => {
@@ -3410,14 +3400,23 @@ describe("search flow", () => {
       expect(screen.getByText("data.bin")).toBeTruthy();
     });
     fireEvent.click(screen.getAllByRole("button", { name: "Open file" })[0] as HTMLButtonElement);
+    const binaryDialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
-      expect(screen.getByText("Binary file, cannot preview")).toBeTruthy();
+      expect(binaryDialog.textContent).toMatch(/Binary file, cannot preview/);
+    });
+    expect(document.querySelector(".preview-browse")).toBeNull();
+    expect(document.querySelector(".preview-idle")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Context" })).toBeNull();
     });
     fireEvent.click(screen.getAllByRole("button", { name: "Open file" })[1] as HTMLButtonElement);
+    const deniedDialog = await screen.findByRole("dialog", { name: "Context" });
     await waitFor(() => {
-      expect(screen.getByText("Path cannot be previewed")).toBeTruthy();
+      expect(deniedDialog.textContent).toMatch(/path is denied/);
     });
-    expect(screen.getByText("DENIED")).toBeTruthy();
+    expect(document.querySelector(".preview-browse")).toBeNull();
+    expect(document.querySelector(".preview-idle")).toBeTruthy();
   });
 
   it("shows L-RAIL chrome and collapsed empty copy when the tree is closed", async () => {
