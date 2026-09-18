@@ -633,6 +633,11 @@ describe("search flow", () => {
       "ok.txt",
     );
     expect(document.querySelector(".pick-chip .tree-kind")).toBeNull();
+    const clear = document.querySelector(".pick-chip-x");
+    expect(clear).toBeTruthy();
+    fireEvent.click(clear as HTMLElement);
+    expect(document.querySelector(".pick-chip")).toBeNull();
+    expect(screen.getByText("0 selected")).toBeTruthy();
   });
 
   it("typed exclude sends globExclude and does not include selected files", async () => {

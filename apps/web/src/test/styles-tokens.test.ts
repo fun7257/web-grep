@@ -80,6 +80,9 @@ describe("shipped stylesheet tokens", () => {
     expect(ruleBody(".pick-chip")).not.toMatch(
       /var\(--(hover|chip-fill|bg-subtle|muted)\)/,
     );
+    expect(ruleBody(".pick-chip-x")).toContain("border: 0");
+    expect(ruleBody(".pick-chip-x")).toContain("background: transparent");
+    expect(ruleBody(".pick-chip-x")).toContain("padding: 0");
     expect(ruleBody(".locale-cycle")).toContain("var(--icon-hit)");
     expect(ruleBody(".rail-stack")).toContain("flex-direction: column");
     expect(ruleBody(".tree-pane.collapsed .tree-foot")).toContain(
