@@ -44,6 +44,7 @@ const (
 	EnvFollowSymlinks = "WEB_GREP_FOLLOW_SYMLINKS"
 	EnvNoIgnore       = "WEB_GREP_NO_IGNORE"
 	EnvAllowSecrets   = "WEB_GREP_ALLOW_SECRETS"
+	EnvPublicPath     = "WEB_GREP_PUBLIC_PATH"
 )
 
 type Config struct {
@@ -70,6 +71,7 @@ type Config struct {
 	LogLevel       string
 	Dev            bool
 	WebDist        string
+	PublicPath     string
 }
 
 func Load(explicit string) (Config, error) {
@@ -145,6 +147,10 @@ func Load(explicit string) (Config, error) {
 	if rgPath != "" && !filepath.IsAbs(rgPath) {
 		return Config{}, fmt.Errorf("rg must be an absolute path")
 	}
+	publicPath, err := NormalizePublicPath(raw.PublicPath)
+	if err != nil {
+		return Config{}, err
+	}
 	tokenHash, wasPlain := parseToken(raw.Token)
 	cfg := Config{
 		RootReal:       rootReal,
@@ -170,6 +176,7 @@ func Load(explicit string) (Config, error) {
 		LogLevel:       level,
 		Dev:            boolOr(raw.Dev, false),
 		WebDist:        strings.TrimSpace(raw.WebDist),
+		PublicPath:     publicPath,
 	}
 	if err := AssertBindPolicy(cfg); err != nil {
 		return Config{}, err
@@ -197,6 +204,45 @@ func AssertBindPolicy(cfg Config) error {
 		return fmt.Errorf("0.0.0.0 is a bind address, not a Host. Set public_host to the name/IP in the address bar")
 	}
 	return nil
+}
+
+func NormalizePublicPath(raw string) (string, error) {
+	p := strings.TrimSpace(raw)
+	if p == "" || p == "/" {
+		return "", nil
+	}
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p
+	}
+	p = strings.TrimRight(p, "/")
+	if p == "" {
+		return "", nil
+	}
+	if strings.Contains(p, "..") || strings.Contains(p, "//") || strings.ContainsAny(p, "?#") {
+		return "", fmt.Errorf("invalid public_path %q", raw)
+	}
+	first, _, _ := strings.Cut(strings.TrimPrefix(p, "/"), "/")
+	if strings.EqualFold(first, "api") {
+		return "", fmt.Errorf("public_path must not start with /api")
+	}
+	return p, nil
+}
+
+func StripPublicPath(prefix, path string) string {
+	if prefix == "" {
+		return path
+	}
+	if path == prefix {
+		return "/"
+	}
+	if strings.HasPrefix(path, prefix+"/") {
+		out := path[len(prefix):]
+		if out == "" {
+			return "/"
+		}
+		return out
+	}
+	return path
 }
 
 func NormalizeHostname(host string) string {

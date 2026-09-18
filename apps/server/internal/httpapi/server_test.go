@@ -134,6 +134,49 @@ func TestSpaIndexNoCacheAndHashedAssets(t *testing.T) {
 	}
 }
 
+func TestPublicPathPrefixStripsAndInjectsBase(t *testing.T) {
+	s, _ := testServer(t, nil)
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	html := `<!doctype html><meta name="web-grep-base" content="__WEB_GREP_BASE__">ok`
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(html), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "app.js"), []byte("console.log(1)"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.Cfg.PublicPath = "/web-grep"
+	s.WebDist = dir
+	h := s.Handler()
+
+	idx := do(t, h, "GET", "http://127.0.0.1:8787/web-grep/", "", nil)
+	if idx.Code != 200 {
+		t.Fatal(idx.Code, idx.Body.String())
+	}
+	if !strings.Contains(idx.Body.String(), `content="/web-grep/"`) {
+		t.Fatalf("missing injected base: %s", idx.Body.String())
+	}
+	if strings.Contains(idx.Body.String(), "__WEB_GREP_BASE__") {
+		t.Fatal("marker left in html")
+	}
+
+	js := do(t, h, "GET", "http://127.0.0.1:8787/web-grep/assets/app.js", "", nil)
+	if js.Code != 200 || !strings.Contains(js.Body.String(), "console.log") {
+		t.Fatal(js.Code, js.Body.String())
+	}
+
+	health := do(t, h, "GET", "http://127.0.0.1:8787/web-grep/api/health", "", nil)
+	if health.Code != 200 {
+		t.Fatal(health.Code, health.Body.String())
+	}
+	rootHealth := do(t, h, "GET", "http://127.0.0.1:8787/api/health", "", nil)
+	if rootHealth.Code != 200 {
+		t.Fatal(rootHealth.Code, rootHealth.Body.String())
+	}
+}
+
 func TestTreeListsRoot(t *testing.T) {
 	s, _ := testServer(t, nil)
 	rec := do(t, s.Handler(), "GET", "http://127.0.0.1:8787/api/tree", "", nil)

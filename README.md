@@ -67,6 +67,7 @@ Primary config is `config.yaml` (see `config.example.yaml`). Path: `-config`, el
 | `host` | `WEB_GREP_HOST` | `127.0.0.1` | Bind address only. Never a HTTP Host name. |
 | `port` | `WEB_GREP_PORT` | `8787` | Listen port. |
 | `public_host` | `WEB_GREP_PUBLIC_HOST` | unset | List or comma-separated names/IPs in the address bar. Required when bind is non-loopback. Never `0.0.0.0`. |
+| `public_path` | `WEB_GREP_PUBLIC_PATH` | unset (`/`) | URL prefix when reverse-proxied (e.g. `/web-grep`). Assets and `/api` use this prefix. Do not use `/api`. |
 | `token` | `WEB_GREP_TOKEN` | unset | Login password. Yaml plaintext is hashed at boot to `sha256:<hex>`. Required when bind is non-loopback. Env override is in-memory only. |
 | `rg` | `WEB_GREP_RG` | unset | Absolute `rg` binary. |
 | `web_dist` | `WEB_GREP_WEB_DIST` | next to binary | Built SPA directory. Docker image uses `/app/web`. |

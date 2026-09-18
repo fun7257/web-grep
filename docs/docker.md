@@ -19,6 +19,36 @@ docker compose up --build -d
 
 打开 `http://<WEB_GREP_PUBLIC_HOST>:8787`，用 `WEB_GREP_TOKEN` 登录。
 
+## Nginx 路径前缀
+
+若必须挂在 `https://example.com/web-grep/` 而不是子域名，配置：
+
+```yaml
+public_host:
+  - example.com
+public_path: /web-grep
+```
+
+或 `WEB_GREP_PUBLIC_PATH=/web-grep`。生产包使用相对静态资源，**不必为前缀重打前端镜像**；改配置后重启进程即可。
+
+```nginx
+location /web-grep/ {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_buffering off;
+    proxy_read_timeout 3600s;
+}
+
+location = /web-grep {
+    return 301 /web-grep/;
+}
+```
+
+不要用 `rewrite` 把前缀剥掉再转给后端：Go 会自己剥 `public_path`，并把此前缀写进 HTML，让 `fetch('/web-grep/api/...')` 对上。`Host` 必须是浏览器里的主机名，且列入 `public_host`。健康检查仍可用 `http://127.0.0.1:8787/api/health`（无前缀）。
+
 ```bash
 docker compose logs -f
 docker compose ps      # 应 healthy
@@ -79,6 +109,7 @@ docker rm -f web-grep
 ## 注意
 
 - `public_host` / `WEB_GREP_PUBLIC_HOST` 必须是浏览器地址栏里的名字/IP，不要填 `0.0.0.0`。
+- 路径前缀用 `public_path` / `WEB_GREP_PUBLIC_PATH`（如 `/web-grep`），Nginx `proxy_pass` 不要剥前缀。
 - 健康检查请求 `http://127.0.0.1:8787/api/health`（Host 为本机，始终允许）。
 - 登录勾选「记住密码」后令牌在浏览器 `localStorage`，关页还在；服务端会话在内存里，**重启容器要重新登录**。
 - 时间范围、搜索历史在浏览器里。搜索次数由服务端记在配置文件同目录的 `search-count`（单文件挂载 config 时写在容器 `/app/search-count`，换容器会清零，需要持久化请把该文件或整个 `/app` 配置目录一起挂出来）。

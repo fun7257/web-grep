@@ -13,6 +13,10 @@ port: 8787
 #   - 127.0.0.1
 #   - test.example.com
 
+# Nginx 路径前缀。空或 / 表示挂在站点根。例如 /web-grep。
+# 前端静态资源和 /api 都会带此前缀。不要写成 /api。
+# public_path: /web-grep
+
 # 登录密码。非本机绑定时必填。明文启动后会被改写成 sha256:<64位hex>。
 # token: change-me
 

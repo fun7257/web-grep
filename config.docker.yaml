@@ -21,6 +21,9 @@ public_host:
   - 127.0.0.1
   # - 192.168.1.10
 
+# Nginx 路径前缀。默认根路径。例如 /web-grep
+# public_path: /web-grep
+
 # 登录密码。明文即可，启动后会被改写成 sha256:<hex>。
 # token: change-me
 

@@ -144,6 +144,32 @@ func TestRewriteYAMLSkipsComments(t *testing.T) {
 	}
 }
 
+func TestNormalizeAndStripPublicPath(t *testing.T) {
+	empty, err := NormalizePublicPath("/")
+	if err != nil || empty != "" {
+		t.Fatalf("slash: %q %v", empty, err)
+	}
+	got, err := NormalizePublicPath("web-grep/")
+	if err != nil || got != "/web-grep" {
+		t.Fatalf("got %q %v", got, err)
+	}
+	if _, err := NormalizePublicPath("/api"); err == nil {
+		t.Fatal("expected /api rejected")
+	}
+	if _, err := NormalizePublicPath("/x/../y"); err == nil {
+		t.Fatal("expected .. rejected")
+	}
+	if StripPublicPath("/web-grep", "/web-grep") != "/" {
+		t.Fatal("strip exact")
+	}
+	if StripPublicPath("/web-grep", "/web-grep/api/health") != "/api/health" {
+		t.Fatal("strip nested")
+	}
+	if StripPublicPath("/web-grep", "/api/health") != "/api/health" {
+		t.Fatal("unprefixed stays")
+	}
+}
+
 func TestPublicHostListAndString(t *testing.T) {
 	dir := t.TempDir()
 	root := filepath.Join(dir, "root")

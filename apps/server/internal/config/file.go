@@ -35,6 +35,7 @@ type rawFile struct {
 	FollowSymlinks *bool    `yaml:"follow_symlinks"`
 	NoIgnore       *bool    `yaml:"no_ignore"`
 	AllowSecrets   *bool    `yaml:"allow_secrets"`
+	PublicPath     string   `yaml:"public_path"`
 }
 
 type hostList []string
@@ -133,6 +134,9 @@ func applyEnv(raw *rawFile) error {
 	}
 	if err := envInt(EnvPort, &raw.Port); err != nil {
 		return err
+	}
+	if v, ok := lookupTrim(EnvPublicPath); ok {
+		raw.PublicPath = v
 	}
 	if v, ok := lookupTrim(EnvPublicHost); ok {
 		parsed, err := ParsePublicHosts(v)

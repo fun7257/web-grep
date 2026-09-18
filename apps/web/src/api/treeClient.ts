@@ -3,6 +3,7 @@ import {
   type TreeListing,
   TreeListingSchema,
 } from "@web-grep/shared";
+import { apiUrl } from "./base.ts";
 import { apiHeaders } from "./headers.ts";
 import { readJsonError, SearchHttpError } from "./searchClient.ts";
 
@@ -33,7 +34,7 @@ export async function fetchTree(
   }
   applyTreeFilter(params, mtimeAfter, exclude);
   const qs = params.toString();
-  const res = await fetch(qs === "" ? "/api/tree" : `/api/tree?${qs}`, {
+  const res = await fetch(apiUrl(qs === "" ? "/api/tree" : `/api/tree?${qs}`), {
     headers: apiHeaders(),
     signal,
   });
@@ -62,7 +63,7 @@ export async function fetchFileCount(
   }
   applyTreeFilter(params, mtimeAfter, exclude);
   const qs = params.toString();
-  const res = await fetch(qs === "" ? "/api/count" : `/api/count?${qs}`, {
+  const res = await fetch(apiUrl(qs === "" ? "/api/count" : `/api/count?${qs}`), {
     headers: apiHeaders(),
     signal,
   });

@@ -2,6 +2,7 @@ import {
   type FileWindowResponse,
   FileWindowResponseSchema,
 } from "@web-grep/shared";
+import { apiUrl } from "./base.ts";
 import { apiHeaders } from "./headers.ts";
 import { readJsonError, SearchHttpError } from "./searchClient.ts";
 
@@ -27,7 +28,7 @@ export async function fetchFileWindow(
     params.set("line", String(query.line));
   }
   params.set("count", String(query.count ?? PREVIEW_CHUNK));
-  const res = await fetch(`/api/file?${params.toString()}`, {
+  const res = await fetch(apiUrl(`/api/file?${params.toString()}`), {
     headers: apiHeaders(),
     ...(signal !== undefined ? { signal } : {}),
   });

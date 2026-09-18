@@ -5,6 +5,7 @@ import {
   SearchRequestSchema,
   type SseEvent,
 } from "@web-grep/shared";
+import { apiUrl } from "./base.ts";
 import { apiHeaders } from "./headers.ts";
 import { readSse } from "./readSse.ts";
 
@@ -57,7 +58,7 @@ export async function* streamSearch(
       message: "invalid query",
     });
   }
-  const res = await fetch("/api/search", {
+  const res = await fetch(apiUrl("/api/search"), {
     method: "POST",
     headers: { "content-type": "application/json", ...apiHeaders() },
     body: JSON.stringify(parsed.data),

@@ -5,13 +5,14 @@ import {
   type AuthStatus,
   type LoginResponse,
 } from "@web-grep/shared";
+import { apiUrl } from "./base.ts";
 import { apiHeaders } from "./headers.ts";
 import { readJsonError } from "./searchClient.ts";
 
 export async function fetchAuthStatus(
   signal?: AbortSignal,
 ): Promise<AuthStatus> {
-  const res = await fetch("/api/auth/status", {
+  const res = await fetch(apiUrl("/api/auth/status"), {
     headers: apiHeaders(),
     ...(signal !== undefined ? { signal } : {}),
   });
@@ -26,7 +27,7 @@ export async function loginWithPassword(
   signal?: AbortSignal,
 ): Promise<LoginResponse> {
   const body = LoginRequestSchema.parse({ password });
-  const res = await fetch("/api/auth/login", {
+  const res = await fetch(apiUrl("/api/auth/login"), {
     method: "POST",
     headers: { "content-type": "application/json", ...apiHeaders() },
     body: JSON.stringify(body),
@@ -39,7 +40,7 @@ export async function loginWithPassword(
 }
 
 export async function logoutSession(signal?: AbortSignal): Promise<void> {
-  const res = await fetch("/api/auth/logout", {
+  const res = await fetch(apiUrl("/api/auth/logout"), {
     method: "POST",
     headers: apiHeaders(),
     ...(signal !== undefined ? { signal } : {}),

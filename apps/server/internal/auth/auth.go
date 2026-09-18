@@ -119,10 +119,11 @@ func isPublicPath(path string) bool {
 	return path != "/api" && !strings.HasPrefix(path, "/api/")
 }
 
-func Middleware(cfg config.Config, sessions *Sessions) func(http.Handler) http.Handler {
-	hosts := AllowedHostnames(cfg)
+func Middleware(cfgFn func() config.Config, sessions *Sessions) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			cfg := cfgFn()
+			hosts := AllowedHostnames(cfg)
 			host := r.Host
 			if host == "" {
 				host = r.Header.Get("Host")
@@ -138,6 +139,11 @@ func Middleware(cfg config.Config, sessions *Sessions) func(http.Handler) http.H
 					writeJSON(w, http.StatusForbidden, map[string]string{"code": "FORBIDDEN_HOST", "message": "Host not allowed"})
 					return
 				}
+			}
+			stripped := config.StripPublicPath(cfg.PublicPath, r.URL.Path)
+			if stripped != r.URL.Path {
+				r = r.Clone(r.Context())
+				r.URL.Path = stripped
 			}
 			if isPublicPath(r.URL.Path) || cfg.TokenHash == "" {
 				next.ServeHTTP(w, r)

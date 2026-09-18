@@ -6,6 +6,7 @@ import {
   loginWithPassword,
   logoutSession,
 } from "../api/authClient.ts";
+import { apiUrl } from "../api/base.ts";
 import { apiHeaders, readToken, writeToken } from "../api/headers.ts";
 import { readJsonError, SearchHttpError } from "../api/searchClient.ts";
 
@@ -35,7 +36,7 @@ export function useAuth(): AuthState {
 
   const loadMeta = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch("/api/meta", {
+      const res = await fetch(apiUrl("/api/meta"), {
         headers: apiHeaders(),
         ...(signal !== undefined ? { signal } : {}),
       });

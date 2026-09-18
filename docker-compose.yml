@@ -22,6 +22,7 @@ services:
     environment:
       WEB_GREP_TOKEN: ${WEB_GREP_TOKEN:?set WEB_GREP_TOKEN (or mount a config.yaml with token)}
       WEB_GREP_PUBLIC_HOST: ${WEB_GREP_PUBLIC_HOST:-}
+      WEB_GREP_PUBLIC_PATH: ${WEB_GREP_PUBLIC_PATH:-}
     volumes:
       - type: bind
         source: ${WEB_GREP_DATA:?set WEB_GREP_DATA to the host directory to search}

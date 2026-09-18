@@ -1,7 +1,8 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === "build" ? "./" : "/",
   plugins: [react()],
   optimizeDeps: {
     exclude: ["@web-grep/shared"],
@@ -19,4 +20,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));
