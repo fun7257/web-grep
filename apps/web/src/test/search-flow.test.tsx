@@ -593,9 +593,13 @@ describe("search flow", () => {
     fireEvent.click(treeName("packages"));
     expect(screen.getByText("1 selected")).toBeTruthy();
     expect(document.querySelectorAll(".pick-chip")).toHaveLength(1);
-    expect(document.querySelector(".pick-chip-name")?.textContent).toBe(
-      "packages",
+    const folderChip = document.querySelector(".pick-chip");
+    expect(folderChip?.querySelector(".pick-chip-name")?.textContent).toBe(
+      "packages/",
     );
+    expect(folderChip?.querySelector(".tree-kind")).toBeNull();
+    expect(folderChip?.querySelector(":scope > .icon")).toBeNull();
+    expect(folderChip?.querySelectorAll(".pick-chip-x .icon")).toHaveLength(1);
     expect(row?.classList.contains("picked")).toBe(true);
     expect(row?.querySelector(".tree-check")?.classList.contains("on")).toBe(
       true,
@@ -609,6 +613,26 @@ describe("search flow", () => {
         (call) => !requestUrl(call[0] as RequestInfo).includes("/api/count"),
       ),
     ).toBe(true);
+  });
+
+  it("file pick chips omit a trailing slash", async () => {
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(treeName("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(treeName("ok.txt"));
+    expect(screen.getByText("1 selected")).toBeTruthy();
+    expect(document.querySelector(".pick-chip-name")?.textContent).toBe(
+      "ok.txt",
+    );
+    expect(document.querySelector(".pick-chip .tree-kind")).toBeNull();
   });
 
   it("typed exclude sends globExclude and does not include selected files", async () => {

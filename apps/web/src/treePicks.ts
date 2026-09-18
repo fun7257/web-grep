@@ -5,6 +5,16 @@ export type TreePick = {
   dir: boolean;
 };
 
+/** Header chip label: folder picks keep a trailing `/`; file picks do not. */
+export function pickChipLabel(pick: TreePick): string {
+  const base =
+    pick.path.split("/").filter((part) => part !== "").pop() ?? pick.path;
+  if (pick.dir) {
+    return base === "" ? "/" : `${base}/`;
+  }
+  return base;
+}
+
 export type PickMark = "off" | "on" | "covered" | "partial";
 
 export type ListedChild = {

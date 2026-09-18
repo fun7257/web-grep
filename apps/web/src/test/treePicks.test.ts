@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  pickChipLabel,
   pickMark,
   picksToGlobs,
   picksToSearchGlobs,
@@ -11,6 +12,23 @@ const kids = [
   { path: "logs/a.log", dir: false },
   { path: "logs/b.log", dir: false },
 ];
+
+describe("pickChipLabel", () => {
+  it("appends a trailing slash to folder picks only", () => {
+    expect(pickChipLabel({ path: "apps", dir: true })).toBe("apps/");
+    expect(pickChipLabel({ path: "packages", dir: true })).toBe("packages/");
+    expect(pickChipLabel({ path: "packages/legacy", dir: true })).toBe(
+      "legacy/",
+    );
+    expect(pickChipLabel({ path: "apps/", dir: true })).toBe("apps/");
+    expect(pickChipLabel({ path: "package.json", dir: false })).toBe(
+      "package.json",
+    );
+    expect(pickChipLabel({ path: "apps/web/src/main.ts", dir: false })).toBe(
+      "main.ts",
+    );
+  });
+});
 
 describe("pickMark", () => {
   it("marks files inside a picked folder as covered", () => {

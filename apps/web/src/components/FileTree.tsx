@@ -10,7 +10,7 @@ import {
   type TimeRange,
 } from "../timeRange.ts";
 import { parseGlobs } from "../globs.ts";
-import { pickMark, type TreePick } from "../treePicks.ts";
+import { pickChipLabel, pickMark, type TreePick } from "../treePicks.ts";
 import {
   BrandMark,
   FileIcon,
@@ -437,8 +437,12 @@ export function FileTree({
               <div className="tree-picked-chips">
                 {picks.map((pick) => (
                   <span key={pick.path} className="pick-chip">
-                    <span className="pick-chip-name" title={pick.path} aria-hidden="true">
-                      {pick.path.split("/").pop() || pick.path}
+                    <span
+                      className="pick-chip-name"
+                      title={pick.path}
+                      aria-hidden="true"
+                    >
+                      {pickChipLabel(pick)}
                     </span>
                     <button
                       type="button"

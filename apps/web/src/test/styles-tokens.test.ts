@@ -76,6 +76,10 @@ describe("shipped stylesheet tokens", () => {
     );
     expect(ruleBody(".tree-row.picked:hover")).toContain("var(--selected)");
     expect(ruleBody(".tree-pick")).toContain("margin-left: auto");
+    expect(ruleBody(".pick-chip")).toContain("var(--selected)");
+    expect(ruleBody(".pick-chip")).not.toMatch(
+      /var\(--(hover|chip-fill|bg-subtle|muted)\)/,
+    );
     expect(ruleBody(".locale-cycle")).toContain("var(--icon-hit)");
     expect(ruleBody(".rail-stack")).toContain("flex-direction: column");
     expect(ruleBody(".tree-pane.collapsed .tree-foot")).toContain(
