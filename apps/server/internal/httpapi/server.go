@@ -3,6 +3,7 @@ package httpapi
 import (
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"time"
 
 	"web-grep/internal/auth"
@@ -11,12 +12,22 @@ import (
 )
 
 type Server struct {
-	Cfg      config.Config
+	cfg      atomic.Pointer[config.Config]
 	Search   *search.Service
 	Engine   string
 	Version  string
 	WebDist  string
 	Sessions *auth.Sessions
+}
+
+// Config returns a consistent snapshot. Concurrent SetConfig swaps are
+// atomic; handlers never observe mixed old/new fields.
+func (s *Server) Config() config.Config {
+	return config.LoadSnapshot(&s.cfg)
+}
+
+func (s *Server) SetConfig(cfg config.Config) {
+	config.StoreSnapshot(&s.cfg, cfg)
 }
 
 func (s *Server) Handler() http.Handler {
@@ -34,9 +45,9 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "INTERNAL", "not found")
 		})
-		mux.Handle("GET /", spa(s.WebDist, func() string { return s.Cfg.PublicPath }))
+		mux.Handle("GET /", spa(s.WebDist, func() string { return s.Config().PublicPath }))
 	}
-	return auth.Middleware(func() config.Config { return s.Cfg }, s.Sessions)(mux)
+	return auth.Middleware(s.Config, s.Sessions)(mux)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -44,6 +55,7 @@ func (s *Server) health(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
+	cfg := s.Config()
 	var rgVersion any
 	if s.Version != "" {
 		rgVersion = s.Version
@@ -51,25 +63,26 @@ func (s *Server) meta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"engine":         s.Engine,
 		"rgVersion":      rgVersion,
-		"rootLabel":      s.Cfg.RootLabel,
-		"root":           s.Cfg.RootReal,
-		"followSymlinks": s.Cfg.FollowSymlinks,
+		"rootLabel":      cfg.RootLabel,
+		"root":           cfg.RootReal,
+		"followSymlinks": cfg.FollowSymlinks,
 		"limits": map[string]any{
-			"maxResults":     s.Cfg.MaxResults,
-			"maxResultsHard": s.Cfg.MaxResultsHard,
-			"timeoutMs":      s.Cfg.TimeoutMs,
-			"previewBytes":   s.Cfg.PreviewBytes,
-			"previewLines":   s.Cfg.PreviewLines,
+			"maxResults":     cfg.MaxResults,
+			"maxResultsHard": cfg.MaxResultsHard,
+			"timeoutMs":      cfg.TimeoutMs,
+			"previewBytes":   cfg.PreviewBytes,
+			"previewLines":   cfg.PreviewLines,
 			"queryMaxChars":  config.QueryMaxChars,
 		},
 		"defaultLocale": "zh-CN",
-		"authRequired":  s.Cfg.TokenHash != "",
+		"authRequired":  cfg.TokenHash != "",
 		"searchCount":   s.Search.Stats.Get(),
 	})
 }
 
 func ListenAndServe(s *Server) error {
-	addr := fmt.Sprintf("%s:%d", s.Cfg.Host, s.Cfg.Port)
+	cfg := s.Config()
+	addr := fmt.Sprintf("%s:%d", cfg.Host, cfg.Port)
 	hs := &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),

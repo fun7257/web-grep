@@ -91,7 +91,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 ### `GET /api/meta`（设置了密码时需会话）
 
-见 `MetaResponseSchema`。`rgVersion` 可为 `null`。`rootLabel` 是根目录 basename，不是绝对路径。`previewBytes=0` 表示不限制文件体积。含 `authRequired`、`searchCount`（本实例累计执行的搜索次数，落在配置文件旁的 `search-count`）。
+见 `MetaResponseSchema`。`rgVersion` 可为 `null`。`rootLabel` 是根目录 basename，不是绝对路径。`previewBytes=0` 表示不限制文件体积。含 `authRequired`、`searchCount`（本实例累计执行的搜索次数，落在配置文件旁的 `search-count`；内存先加，约每 2 秒以及进程退出时刷盘）。
 
 ### `POST /api/search`（设置了密码时需会话）
 

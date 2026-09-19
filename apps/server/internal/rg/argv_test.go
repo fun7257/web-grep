@@ -138,6 +138,30 @@ func TestBuildArgvAnchorsLiteralUserGlobs(t *testing.T) {
 	}
 }
 
+func TestBuildArgvDoesNotORGlobAndWithInclude(t *testing.T) {
+	argv, err := BuildArgv(Input{
+		RootReal:    "/tmp/root",
+		RelativeDir: ".",
+		Query:       "needle",
+		GlobInclude: []string{"src/**"},
+		GlobAnd:     []string{"*.ts"},
+		GlobExclude: []string{"*.test.ts"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(argv, " ")
+	if !strings.Contains(joined, "--glob src/**") {
+		t.Fatalf("include should be pushed: %v", argv)
+	}
+	if !strings.Contains(joined, "--glob !*.test.ts") {
+		t.Fatalf("exclude should be pushed: %v", argv)
+	}
+	if strings.Contains(joined, "--glob *.ts") {
+		t.Fatalf("globAnd must not be OR'd into --glob when include is set: %v", argv)
+	}
+}
+
 func TestBuildArgvUsesGlobAndWhenIncludeEmpty(t *testing.T) {
 	argv, err := BuildArgv(Input{
 		RootReal:    "/tmp/root",

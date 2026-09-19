@@ -64,12 +64,13 @@ func testServer(t *testing.T, engine search.Engine) (*Server, string) {
 	if engine != nil {
 		kind = "rg"
 	}
-	return &Server{
-		Cfg:     cfg,
+	s := &Server{
 		Search:  search.New(cfg, engine, kind, nil),
 		Engine:  kind,
 		Version: "",
-	}, root
+	}
+	s.SetConfig(cfg)
+	return s, root
 }
 
 func do(t *testing.T, h http.Handler, method, url, body string, hdr map[string]string) *httptest.ResponseRecorder {
@@ -147,7 +148,9 @@ func TestPublicPathPrefixStripsAndInjectsBase(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "assets", "app.js"), []byte("console.log(1)"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.Cfg.PublicPath = "/web-grep"
+	cfg := s.Config()
+	cfg.PublicPath = "/web-grep"
+	s.SetConfig(cfg)
 	s.WebDist = dir
 	h := s.Handler()
 
@@ -243,6 +246,34 @@ func TestHealthAndForbiddenHost(t *testing.T) {
 	h.ServeHTTP(rec2, req)
 	if rec2.Code != 403 {
 		t.Fatalf("got %d %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+func TestSetConfigSwapVisibleToMeta(t *testing.T) {
+	s, _ := testServer(t, nil)
+	h := s.Handler()
+	before := do(t, h, "GET", "http://127.0.0.1:8787/api/meta", "", nil)
+	if before.Code != 200 {
+		t.Fatal(before.Body.String())
+	}
+	cfg := s.Config()
+	cfg.RootLabel = "reloaded-root"
+	cfg.MaxResults = 1234
+	s.SetConfig(cfg)
+	after := do(t, h, "GET", "http://127.0.0.1:8787/api/meta", "", nil)
+	if after.Code != 200 {
+		t.Fatal(after.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(after.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["rootLabel"] != "reloaded-root" {
+		t.Fatalf("rootLabel: %v", body["rootLabel"])
+	}
+	limits, _ := body["limits"].(map[string]any)
+	if limits["maxResults"] != float64(1234) {
+		t.Fatalf("maxResults: %v", limits["maxResults"])
 	}
 }
 

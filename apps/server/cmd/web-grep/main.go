@@ -57,18 +57,19 @@ func run() error {
 	if cfg.ConfigPath != "" {
 		countPath = filepath.Join(filepath.Dir(cfg.ConfigPath), "search-count")
 	}
-	svc := search.New(cfg, engine, kind, stats.Open(countPath))
+	counter := stats.Open(countPath)
+	svc := search.New(cfg, engine, kind, counter)
 	webDist := ""
 	if !cfg.Dev {
 		webDist = resolveWebDist(cfg.WebDist)
 	}
 	srv := &httpapi.Server{
-		Cfg:      cfg,
 		Search:   svc,
 		Engine:   kind,
 		WebDist:  webDist,
 		Sessions: sessions,
 	}
+	srv.SetConfig(cfg)
 	if s, ok := version.(string); ok {
 		srv.Version = s
 	}
@@ -111,8 +112,10 @@ func run() error {
 				continue
 			}
 			svc.AbortAll()
+			// Publish a complete snapshot. Readers (HTTP + search) load
+			// atomically and never see mixed old/new fields.
 			svc.SetCfg(next)
-			srv.Cfg = next
+			srv.SetConfig(next)
 			logx.SetLevel(next.LogLevel)
 			logx.Info("reloaded config", map[string]any{"rootLabel": next.RootLabel, "root": next.RootReal})
 		}
@@ -123,8 +126,11 @@ func run() error {
 	select {
 	case <-sig:
 		svc.AbortAll()
+		counter.Close()
 		return nil
 	case err := <-errCh:
+		svc.AbortAll()
+		counter.Close()
 		return err
 	}
 }

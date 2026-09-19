@@ -2,6 +2,38 @@ package sandbox
 
 import "regexp"
 
+// CompileHitFilter returns a reusable path predicate: match any include
+// (if given), none of the exclude globs, and any of the and globs (if
+// given). Empty slices are no-ops. Compile once per search; do not call
+// FilterByGlobs per hit.
+func CompileHitFilter(include, exclude, and []string) func(string) bool {
+	var inc, exc, andM func(string) bool
+	if len(include) > 0 {
+		inc = NewGlobMatcher(include)
+	}
+	if len(exclude) > 0 {
+		exc = NewGlobMatcher(exclude)
+	}
+	if len(and) > 0 {
+		andM = NewGlobMatcher(and)
+	}
+	if inc == nil && exc == nil && andM == nil {
+		return func(string) bool { return true }
+	}
+	return func(path string) bool {
+		if inc != nil && !inc(path) {
+			return false
+		}
+		if exc != nil && exc(path) {
+			return false
+		}
+		if andM != nil && !andM(path) {
+			return false
+		}
+		return true
+	}
+}
+
 // FilterByGlobs keeps files that match any include glob (if given) and
 // none of the exclude globs. Patterns follow ripgrep/gitignore rules:
 // a glob without a slash matches the basename in any directory.
