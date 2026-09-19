@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { fetchFileWindow, PREVIEW_CHUNK } from "../api/fileClient.ts";
-import { SearchHttpError } from "../api/searchClient.ts";
+import { isAbortError, SearchHttpError } from "../api/http.ts";
 import { mergeLines, type WindowLine } from "../fileWindow.ts";
 import type { Translate } from "../i18n/index.ts";
 
@@ -20,8 +20,10 @@ export function useFileWindow(t: Translate) {
   const [loading, setLoading] = useState(false);
   const loadingRef = useRef(false);
   const pathRef = useRef<string | null>(null);
+  const genRef = useRef(0);
 
   const reset = useCallback(() => {
+    genRef.current += 1;
     setLines([]);
     setError(null);
     setErrorCode(null);
@@ -41,6 +43,7 @@ export function useFileWindow(t: Translate) {
       },
     ): Promise<WindowLine[] | null> => {
       const openedPath = query.path;
+      const gen = opts.mode === "replace" ? ++genRef.current : genRef.current;
       loadingRef.current = true;
       setLoading(true);
       setError(null);
@@ -50,7 +53,7 @@ export function useFileWindow(t: Translate) {
           { ...query, count: query.count ?? PREVIEW_CHUNK },
           opts.signal,
         );
-        if (pathRef.current !== openedPath) {
+        if (pathRef.current !== openedPath || gen !== genRef.current) {
           return null;
         }
         if (win.binary) {
@@ -80,7 +83,12 @@ export function useFileWindow(t: Translate) {
         }
         return merged;
       } catch (err: unknown) {
-        if (opts.signal?.aborted === true || pathRef.current !== openedPath) {
+        if (
+          opts.signal?.aborted === true ||
+          isAbortError(err) ||
+          pathRef.current !== openedPath ||
+          gen !== genRef.current
+        ) {
           return null;
         }
         if (err instanceof SearchHttpError) {
@@ -92,7 +100,7 @@ export function useFileWindow(t: Translate) {
         }
         return null;
       } finally {
-        if (pathRef.current === openedPath) {
+        if (pathRef.current === openedPath && gen === genRef.current) {
           loadingRef.current = false;
           setLoading(false);
         }

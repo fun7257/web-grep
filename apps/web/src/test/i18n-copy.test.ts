@@ -35,6 +35,23 @@ describe("i18n catalogs", () => {
     expect(catalogs["en-US"].queryAndHintShort).toBe("to add");
   });
 
+  it("drops unused chip / browse / token copy keys", () => {
+    const zh = catalogs["zh-CN"] as Record<string, string>;
+    const en = catalogs["en-US"] as Record<string, string>;
+    for (const key of [
+      "appTagline",
+      "queryAdd",
+      "tokenPrompt",
+      "resultBack",
+      "previewDenied",
+      "previewBinaryHelper",
+      "kbdSearch",
+    ]) {
+      expect(zh[key]).toBeUndefined();
+      expect(en[key]).toBeUndefined();
+    }
+  });
+
   it("ships L-RAIL collapsed empty copy in zh-CN and en-US", () => {
     expect(catalogs["zh-CN"].treeCollapsed).toBe("左栏已收起");
     expect(catalogs["zh-CN"].treeCollapsedHelper).toBe(

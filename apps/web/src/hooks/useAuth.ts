@@ -1,14 +1,13 @@
 import type { MetaResponse } from "@web-grep/shared";
-import { MetaResponseSchema } from "@web-grep/shared";
 import { useCallback, useEffect, useState } from "react";
 import {
   fetchAuthStatus,
   loginWithPassword,
   logoutSession,
 } from "../api/authClient.ts";
-import { apiUrl } from "../api/base.ts";
-import { apiHeaders, readToken, writeToken } from "../api/headers.ts";
-import { readJsonError, SearchHttpError } from "../api/searchClient.ts";
+import { readToken, writeToken } from "../api/headers.ts";
+import { isAbortError, SearchHttpError } from "../api/http.ts";
+import { loadMetaResponse } from "../api/metaClient.ts";
 
 export type AuthState = {
   promptOpen: boolean;
@@ -36,37 +35,32 @@ export function useAuth(): AuthState {
 
   const loadMeta = useCallback(async (signal?: AbortSignal) => {
     try {
-      const res = await fetch(apiUrl("/api/meta"), {
-        headers: apiHeaders(),
-        ...(signal !== undefined ? { signal } : {}),
-      });
-      if (res.status === 401) {
-        writeToken("");
-        setPromptOpen(true);
-        setHasSession(false);
-        return;
-      }
-      if (!res.ok) {
-        const err = await readJsonError(res);
-        if (err.body.code === "FORBIDDEN_HOST" || res.status === 403) {
-          if (err.body.code === "FORBIDDEN_HOST") {
+      const result = await loadMetaResponse(signal);
+      if (!result.ok) {
+        if (result.status === 401) {
+          writeToken("");
+          setPromptOpen(true);
+          setHasSession(false);
+          return;
+        }
+        if (
+          result.error?.body.code === "FORBIDDEN_HOST" ||
+          result.status === 403
+        ) {
+          if (result.error?.body.code === "FORBIDDEN_HOST") {
             setHostForbidden(true);
             setPromptOpen(false);
           }
         }
         return;
       }
-      const parsed = MetaResponseSchema.safeParse(await res.json());
-      if (!parsed.success) {
-        return;
-      }
-      setMeta(parsed.data);
-      if (parsed.data.authRequired && readToken() === "") {
+      setMeta(result.meta);
+      if (result.meta.authRequired && readToken() === "") {
         setPromptOpen(true);
         setHasSession(false);
       }
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
+      if (isAbortError(err)) {
         return;
       }
     }
@@ -83,7 +77,7 @@ export function useAuth(): AuthState {
         }
         await loadMeta(signal);
       } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") {
+        if (isAbortError(err)) {
           return;
         }
         await loadMeta(signal);

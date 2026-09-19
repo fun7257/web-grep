@@ -1,5 +1,5 @@
 import { type FormEvent, useState } from "react";
-import { SearchHttpError } from "../api/searchClient.ts";
+import { SearchHttpError } from "../api/http.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import { BrandMark } from "./icons.tsx";
 

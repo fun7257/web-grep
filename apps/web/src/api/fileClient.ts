@@ -2,9 +2,7 @@ import {
   type FileWindowResponse,
   FileWindowResponseSchema,
 } from "@web-grep/shared";
-import { apiUrl } from "./base.ts";
-import { apiHeaders } from "./headers.ts";
-import { readJsonError, SearchHttpError } from "./searchClient.ts";
+import { fetchJson, SearchHttpError } from "./http.ts";
 
 export const PREVIEW_CHUNK = 160;
 
@@ -28,14 +26,9 @@ export async function fetchFileWindow(
     params.set("line", String(query.line));
   }
   params.set("count", String(query.count ?? PREVIEW_CHUNK));
-  const res = await fetch(apiUrl(`/api/file?${params.toString()}`), {
-    headers: apiHeaders(),
-    ...(signal !== undefined ? { signal } : {}),
-  });
-  if (!res.ok) {
-    throw await readJsonError(res);
-  }
-  const parsed = FileWindowResponseSchema.safeParse(await res.json());
+  const parsed = FileWindowResponseSchema.safeParse(
+    await fetchJson(`/api/file?${params.toString()}`, { signal }),
+  );
   if (!parsed.success) {
     throw new SearchHttpError(500, {
       code: "INTERNAL",

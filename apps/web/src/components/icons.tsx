@@ -369,30 +369,6 @@ export function IconWarn() {
   );
 }
 
-export function IconBinary() {
-  return (
-    <svg className="icon idle-mark" viewBox="0 0 88 88" aria-hidden="true">
-      <rect
-        x="24"
-        y="18"
-        width="40"
-        height="52"
-        rx="6"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-      />
-      <path
-        d="M34 36h20M34 46h14M34 56h18"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.7"
-        strokeLinecap="round"
-      />
-    </svg>
-  );
-}
-
 export function BrandMark() {
   return (
     <span className="brand-mark" aria-hidden="true">

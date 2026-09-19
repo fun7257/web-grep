@@ -1,51 +1,12 @@
 import {
-  type JsonError,
-  JsonErrorSchema,
   type SearchRequestInput,
   SearchRequestSchema,
   type SseEvent,
 } from "@web-grep/shared";
-import { apiUrl } from "./base.ts";
-import { apiHeaders } from "./headers.ts";
+import { fetchApi, readJsonError, SearchHttpError } from "./http.ts";
 import { readSse } from "./readSse.ts";
 
-export class SearchHttpError extends Error {
-  readonly status: number;
-  readonly body: JsonError;
-
-  constructor(status: number, body: JsonError) {
-    super("search request failed");
-    this.name = "SearchHttpError";
-    this.status = status;
-    this.body = body;
-  }
-}
-
-export async function readJsonError(res: Response): Promise<SearchHttpError> {
-  let body: JsonError | undefined;
-  try {
-    const json: unknown = await res.json();
-    const parsed = JsonErrorSchema.safeParse(json);
-    if (parsed.success) {
-      body = parsed.data;
-    }
-  } catch {
-    // non-JSON error body
-  }
-  if (body !== undefined) {
-    return new SearchHttpError(res.status, body);
-  }
-  if (res.status === 401) {
-    return new SearchHttpError(res.status, {
-      code: "UNAUTHORIZED",
-      message: "missing or invalid token",
-    });
-  }
-  return new SearchHttpError(res.status, {
-    code: "INTERNAL",
-    message: "request failed",
-  });
-}
+export { readJsonError, SearchHttpError } from "./http.ts";
 
 export async function* streamSearch(
   input: SearchRequestInput,
@@ -58,9 +19,9 @@ export async function* streamSearch(
       message: "invalid query",
     });
   }
-  const res = await fetch(apiUrl("/api/search"), {
+  const res = await fetchApi("/api/search", {
     method: "POST",
-    headers: { "content-type": "application/json", ...apiHeaders() },
+    headers: { "content-type": "application/json" },
     body: JSON.stringify(parsed.data),
     signal,
   });
