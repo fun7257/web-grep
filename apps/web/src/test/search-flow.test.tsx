@@ -25,6 +25,8 @@ const META = {
     timeoutMs: 30_000,
     previewBytes: 1_048_576,
     previewLines: 201,
+    previewChunk: 160,
+    previewChunkMax: 400,
     queryMaxChars: 512,
   },
   defaultLocale: "zh-CN",
@@ -177,10 +179,9 @@ function mockFetch(
     authRequired?: boolean;
     treeEntries?: { name: string; path: string; dir: boolean }[];
     engine?: "rg" | "none";
-    limits?: Partial<(typeof META)["limits"]> & {
-      previewChunk?: number;
-      previewChunkMax?: number;
-    };
+    limits?: Partial<{
+      [K in keyof (typeof META)["limits"]]: number;
+    }>;
   },
 ): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {

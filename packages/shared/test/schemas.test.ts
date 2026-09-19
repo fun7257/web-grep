@@ -193,24 +193,24 @@ describe("MetaResponseSchema", () => {
     ).toBe(false);
   });
 
-  it("keeps current limits without previewChunk and accepts them when present", () => {
+  it("accepts #28 previewChunk / previewChunkMax and still parses without them", () => {
     const without = MetaResponseSchema.parse({ ...base, engine: "rg" });
     expect(without.limits.previewChunk).toBeUndefined();
     expect(without.limits.previewChunkMax).toBeUndefined();
     expect(without.limits.previewLines).toBe(201);
 
-    const withChunk = MetaResponseSchema.parse({
+    const fromServer = MetaResponseSchema.parse({
       ...base,
       engine: "rg",
       limits: {
         ...base.limits,
-        previewChunk: 80,
-        previewChunkMax: 200,
+        previewChunk: LIMITS.previewChunk,
+        previewChunkMax: LIMITS.previewChunkMax,
       },
     });
-    expect(withChunk.limits.previewChunk).toBe(80);
-    expect(withChunk.limits.previewChunkMax).toBe(200);
-    expect(withChunk.limits.previewLines).toBe(201);
+    expect(fromServer.limits.previewChunk).toBe(LIMITS.previewChunk);
+    expect(fromServer.limits.previewChunkMax).toBe(LIMITS.previewChunkMax);
+    expect(fromServer.limits.previewLines).toBe(201);
   });
 });
 
