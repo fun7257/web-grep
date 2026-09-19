@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   AuthStatusSchema,
+  CountQuerySchema,
+  CountResponseSchema,
   ErrorCodeSchema,
   LoginRequestSchema,
   LoginResponseSchema,
   FileQuerySchema,
   FileSliceQuerySchema,
   FileWindowResponseSchema,
+  HealthResponseSchema,
   JsonErrorSchema,
   LIMITS,
   mapLegacyErrorCode,
@@ -14,6 +17,7 @@ import {
   SearchRequestSchema,
   SseMetaSchema,
   TreeListingSchema,
+  TreeQuerySchema,
 } from "../src/index.ts";
 
 describe("auth schemas", () => {
@@ -227,6 +231,16 @@ describe("FileSliceQuerySchema", () => {
     });
     expect(parsed.from).toBe(1);
     expect(parsed.count).toBe(LIMITS.previewChunk);
+    expect(parsed.tail).toBeUndefined();
+  });
+
+  it("accepts optional tail (frontend sends tail=1)", () => {
+    const parsed = FileSliceQuerySchema.parse({
+      path: "src/app.ts",
+      count: LIMITS.previewChunk,
+      tail: true,
+    });
+    expect(parsed.tail).toBe(true);
   });
 });
 
@@ -252,6 +266,59 @@ describe("TreeListingSchema", () => {
       entries: [{ name: "src", path: "src", dir: true }],
     });
     expect(parsed.entries[0]?.dir).toBe(true);
+  });
+});
+
+describe("TreeQuerySchema", () => {
+  it("defaults exclude to [] and leaves include optional", () => {
+    const parsed = TreeQuerySchema.parse({ path: "src" });
+    expect(parsed.path).toBe("src");
+    expect(parsed.exclude).toEqual([]);
+    expect(parsed.include).toBeUndefined();
+  });
+
+  it("accepts exclude and optional include arrays", () => {
+    const parsed = TreeQuerySchema.parse({
+      path: "",
+      mtimeAfter: 1_726_300_000_000,
+      exclude: ["*.test.ts", "dist/**"],
+      include: ["src/**"],
+    });
+    expect(parsed.exclude).toEqual(["*.test.ts", "dist/**"]);
+    expect(parsed.include).toEqual(["src/**"]);
+    expect(parsed.mtimeAfter).toBe(1_726_300_000_000);
+  });
+});
+
+describe("Count schemas", () => {
+  it("parses the same query filters as tree", () => {
+    const parsed = CountQuerySchema.parse({
+      path: "apps",
+      exclude: ["node_modules/**"],
+    });
+    expect(parsed.path).toBe("apps");
+    expect(parsed.exclude).toEqual(["node_modules/**"]);
+    expect(parsed.include).toBeUndefined();
+  });
+
+  it("parses { count }", () => {
+    expect(CountResponseSchema.parse({ count: 12 })).toEqual({ count: 12 });
+    expect(CountResponseSchema.safeParse({ count: -1 }).success).toBe(false);
+  });
+});
+
+describe("HealthResponseSchema", () => {
+  it("accepts engine rg or none", () => {
+    expect(HealthResponseSchema.parse({ ok: true, engine: "rg" })).toEqual({
+      ok: true,
+      engine: "rg",
+    });
+    expect(
+      HealthResponseSchema.safeParse({ ok: true, engine: "none" }).success,
+    ).toBe(true);
+    expect(
+      HealthResponseSchema.safeParse({ ok: true, engine: "literal" }).success,
+    ).toBe(false);
   });
 });
 

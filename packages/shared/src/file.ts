@@ -30,6 +30,8 @@ export const FileSliceQuerySchema = z.object({
     .max(LIMITS.previewChunkMax)
     .optional(),
   line: z.number().int().positive().optional(),
+  /** When true, Go reads from EOF (`tail=1` / `tail=true`). */
+  tail: z.boolean().optional(),
 });
 export type FileSliceQuery = z.output<typeof FileSliceQuerySchema>;
 
