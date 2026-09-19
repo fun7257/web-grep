@@ -79,8 +79,8 @@ Primary config is `config.yaml` (see `config.example.yaml`). Path: `-config`, el
 - Loopback bind can start without `token`.
 - Binding `0.0.0.0` without `token` **or** `public_host` fails at boot.
 - After login the SPA stores a **session** token with no expiry. Checking **Remember password** writes it to `localStorage` until logout or the user clears site data; otherwise `sessionStorage` (cleared when the tab closes). Requests send `Authorization: Bearer` / `X-Web-Grep-Token`. The password is never sent on search. Sessions live in process memory, so restarting the server still requires a new login.
-- Time range is **file mtime** (`mtimeAfter` from the browser), not a yaml key. Search history is in `localStorage`. Search count is a file next to `config.yaml` named `search-count`.
-- `SIGHUP` 会按同一条 `config.yaml` 路径重新加载配置。
+- Time range is **file mtime** (`mtimeAfter` from the browser), not a yaml key. Search history is in `localStorage`. Search count is a file next to `config.yaml` named `search-count`. The in-memory counter increments on every search; the file is flushed about every 2s and on SIGINT/SIGTERM. A crash before the next flush can lose recent increments.
+- `SIGHUP` 会按同一条 `config.yaml` 路径重新加载配置，并以原子快照替换（并发请求不会读到半更新的字段）。进行中的搜索会被中止。监听地址/端口不会在热加载时重绑。
 
 ## Architecture
 

@@ -51,7 +51,7 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 			from = 1
 		}
 	}
-	win, err := preview.ReadSlice(s.Cfg, preview.Query{Path: path, From: from, Count: count, Tail: tail})
+	win, err := preview.ReadSlice(s.Config(), preview.Query{Path: path, From: from, Count: count, Tail: tail})
 	if err != nil {
 		var pe *preview.Error
 		if errors.As(err, &pe) {

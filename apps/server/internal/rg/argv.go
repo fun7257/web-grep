@@ -74,6 +74,8 @@ func BuildArgv(in Input) ([]string, error) {
 	}
 	if !in.LimitToList {
 		argv = append(argv, "--glob", "!.git/**")
+		// Positive --glob flags are OR. Push include when set; otherwise
+		// globAnd (same OR-within-set). include∩and is applied in Go.
 		includes := in.GlobInclude
 		if len(includes) == 0 {
 			includes = in.GlobAnd

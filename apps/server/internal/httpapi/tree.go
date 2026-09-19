@@ -20,7 +20,8 @@ func (s *Server) tree(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")
 		return
 	}
-	listing, err := tree.List(s.Cfg.RootReal, rel, s.Cfg.AllowSecrets, filter)
+	cfg := s.Config()
+	listing, err := tree.List(cfg.RootReal, rel, cfg.AllowSecrets, filter)
 	if err != nil {
 		logx.Warn("sandbox reject", map[string]any{"code": "INVALID_PATH"})
 		writeErr(w, http.StatusNotFound, "INVALID_PATH", "invalid path")
@@ -35,7 +36,8 @@ func (s *Server) count(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")
 		return
 	}
-	n, err := tree.CountFiles(s.Cfg.RootReal, rel, s.Cfg.AllowSecrets, filter)
+	cfg := s.Config()
+	n, err := tree.CountFiles(cfg.RootReal, rel, cfg.AllowSecrets, filter)
 	if err != nil {
 		logx.Warn("sandbox reject", map[string]any{"code": "INVALID_PATH"})
 		writeErr(w, http.StatusNotFound, "INVALID_PATH", "invalid path")

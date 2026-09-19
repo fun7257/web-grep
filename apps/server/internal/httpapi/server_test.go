@@ -64,12 +64,18 @@ func testServer(t *testing.T, engine search.Engine) (*Server, string) {
 	if engine != nil {
 		kind = "rg"
 	}
-	return &Server{
-		Cfg:     cfg,
+	s := newTestServer(cfg, engine, kind)
+	return s, root
+}
+
+func newTestServer(cfg config.Config, engine search.Engine, kind string) *Server {
+	s := &Server{
 		Search:  search.New(cfg, engine, kind, nil),
 		Engine:  kind,
 		Version: "",
-	}, root
+	}
+	s.SetConfig(cfg)
+	return s
 }
 
 func do(t *testing.T, h http.Handler, method, url, body string, hdr map[string]string) *httptest.ResponseRecorder {
@@ -147,7 +153,9 @@ func TestPublicPathPrefixStripsAndInjectsBase(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "assets", "app.js"), []byte("console.log(1)"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.Cfg.PublicPath = "/web-grep"
+	cfg := s.Config()
+	cfg.PublicPath = "/web-grep"
+	s.SetConfig(cfg)
 	s.WebDist = dir
 	h := s.Handler()
 
@@ -243,6 +251,34 @@ func TestHealthAndForbiddenHost(t *testing.T) {
 	h.ServeHTTP(rec2, req)
 	if rec2.Code != 403 {
 		t.Fatalf("got %d %s", rec2.Code, rec2.Body.String())
+	}
+}
+
+func TestSetConfigSwapVisibleToMeta(t *testing.T) {
+	s, _ := testServer(t, nil)
+	h := s.Handler()
+	before := do(t, h, "GET", "http://127.0.0.1:8787/api/meta", "", nil)
+	if before.Code != 200 {
+		t.Fatal(before.Body.String())
+	}
+	cfg := s.Config()
+	cfg.RootLabel = "reloaded-root"
+	cfg.MaxResults = 1234
+	s.SetConfig(cfg)
+	after := do(t, h, "GET", "http://127.0.0.1:8787/api/meta", "", nil)
+	if after.Code != 200 {
+		t.Fatal(after.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(after.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body["rootLabel"] != "reloaded-root" {
+		t.Fatalf("rootLabel: %v", body["rootLabel"])
+	}
+	limits, _ := body["limits"].(map[string]any)
+	if limits["maxResults"] != float64(1234) {
+		t.Fatalf("maxResults: %v", limits["maxResults"])
 	}
 }
 
@@ -695,7 +731,7 @@ func TestLiveRipgrepOnlySearchesPrefilteredFiles(t *testing.T) {
 		RootReal: root, RootLabel: "t", Host: "127.0.0.1", Port: 8787,
 		MaxResults: 10000, TimeoutMs: 5000,
 	}
-	s := &Server{Cfg: cfg, Search: search.New(cfg, rg.Engine{Bin: bin}, "rg", nil), Engine: "rg"}
+	s := newTestServer(cfg, rg.Engine{Bin: bin}, "rg")
 	cutoff := time.Now().Add(-2 * time.Hour).UnixMilli()
 	body := fmt.Sprintf(`{"query":"hello-needle","mtimeAfter":%d}`, cutoff)
 	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search", body, nil)
@@ -748,7 +784,7 @@ func TestLiveRipgrepAndTermsAnyOrder(t *testing.T) {
 		RootReal: root, RootLabel: "t", Host: "127.0.0.1", Port: 8787,
 		MaxResults: 10000, TimeoutMs: 5000, NoIgnore: true,
 	}
-	s := &Server{Cfg: cfg, Search: search.New(cfg, rg.Engine{Bin: bin}, "rg", nil), Engine: "rg"}
+	s := newTestServer(cfg, rg.Engine{Bin: bin}, "rg")
 	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
 		`{"query":"030680228968","andTerms":["industryType","trade-users","host"]}`, nil)
 	if rec.Code != 200 {
@@ -788,7 +824,7 @@ func TestLiveRipgrepSearchSelectedAdvancedOptions(t *testing.T) {
 		RootReal: root, RootLabel: "t", Host: "127.0.0.1", Port: 8787,
 		MaxResults: 10000, TimeoutMs: 5000, NoIgnore: true,
 	}
-	s := &Server{Cfg: cfg, Search: search.New(cfg, rg.Engine{Bin: bin}, "rg", nil), Engine: "rg"}
+	s := newTestServer(cfg, rg.Engine{Bin: bin}, "rg")
 	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
 		`{"query":"H.llo","regex":true,"caseSensitive":true,"wordMatch":true,"globInclude":["src/**"],"globAnd":["*.ts"],"globExclude":["*.test.ts"]}`, nil)
 	if rec.Code != 200 {
@@ -822,7 +858,7 @@ func TestLiveRipgrepMtimeAndGlobInclude(t *testing.T) {
 		RootReal: root, RootLabel: "t", Host: "127.0.0.1", Port: 8787,
 		MaxResults: 10000, TimeoutMs: 5000,
 	}
-	s := &Server{Cfg: cfg, Search: search.New(cfg, rg.Engine{Bin: bin}, "rg", nil), Engine: "rg"}
+	s := newTestServer(cfg, rg.Engine{Bin: bin}, "rg")
 	cutoff := time.Now().Add(-2 * time.Hour).UnixMilli()
 	body := fmt.Sprintf(
 		`{"query":"hello-needle","mtimeAfter":%d,"globInclude":["keep.txt"]}`,
@@ -861,7 +897,7 @@ func TestLiveRipgrepLiteralGlobDoesNotMatchNested(t *testing.T) {
 		RootReal: root, RootLabel: "t", Host: "127.0.0.1", Port: 8787,
 		MaxResults: 10000, TimeoutMs: 5000, NoIgnore: true,
 	}
-	s := &Server{Cfg: cfg, Search: search.New(cfg, rg.Engine{Bin: bin}, "rg", nil), Engine: "rg"}
+	s := newTestServer(cfg, rg.Engine{Bin: bin}, "rg")
 	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
 		`{"query":"hello-needle","globInclude":["keep.log"]}`, nil)
 	if rec.Code != 200 {
@@ -891,7 +927,7 @@ func TestLiveRipgrep(t *testing.T) {
 		MaxResults: 10000, MaxResultsHard: 50000, TimeoutMs: 5000,
 		PreviewBytes: 1 << 20, PreviewLines: 201,
 	}
-	s := &Server{Cfg: cfg, Search: search.New(cfg, rg.Engine{Bin: bin}, "rg", nil), Engine: "rg"}
+	s := newTestServer(cfg, rg.Engine{Bin: bin}, "rg")
 	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search", `{"query":"hello-needle","regex":false}`, nil)
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())

@@ -13,7 +13,9 @@ import (
 
 func TestAuthLoginAndGuard(t *testing.T) {
 	s, _ := testServer(t, nil)
-	s.Cfg.TokenHash = config.HashPassword("secret1")
+	cfg := s.Config()
+	cfg.TokenHash = config.HashPassword("secret1")
+	s.SetConfig(cfg)
 	s.Sessions = auth.NewSessions()
 	h := s.Handler()
 
@@ -90,7 +92,9 @@ func TestSpaIsPublicWhenPasswordAuthIsOn(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "assets", "app.js"), []byte("window.app=1"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	s.Cfg.TokenHash = config.HashPassword("secret1")
+	cfg := s.Config()
+	cfg.TokenHash = config.HashPassword("secret1")
+	s.SetConfig(cfg)
 	s.Sessions = auth.NewSessions()
 	s.WebDist = dir
 	h := s.Handler()

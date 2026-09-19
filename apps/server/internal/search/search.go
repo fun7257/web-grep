@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"web-grep/internal/config"
@@ -51,7 +52,7 @@ type Engine interface {
 }
 
 type Service struct {
-	Cfg    config.Config
+	cfg    atomic.Pointer[config.Config]
 	Engine Engine
 	Kind   string // "rg" | "none"
 	Stats  *stats.Counter
@@ -61,13 +62,20 @@ type Service struct {
 }
 
 func New(cfg config.Config, engine Engine, kind string, counter *stats.Counter) *Service {
-	return &Service{
-		Cfg:      cfg,
+	s := &Service{
 		Engine:   engine,
 		Kind:     kind,
 		Stats:    counter,
 		inflight: make(map[string]context.CancelFunc),
 	}
+	s.SetCfg(cfg)
+	return s
+}
+
+// Snapshot returns the current config copy. Concurrent SetCfg swaps are
+// atomic: readers never observe a half-updated value.
+func (s *Service) Snapshot() config.Config {
+	return config.LoadSnapshot(&s.cfg)
 }
 
 func (s *Service) Inflight() int {
@@ -85,15 +93,16 @@ func (s *Service) AbortAll() {
 }
 
 func (s *Service) Preflight(req Request) Preflight {
+	cfg := s.Snapshot()
 	if s.Kind == "none" || s.Engine == nil {
 		return Preflight{Status: 503, Code: "ENGINE", Message: "ripgrep is not available"}
 	}
-	resolved, err := sandbox.ResolveUnderRoot(s.Cfg.RootReal, req.Path)
+	resolved, err := sandbox.ResolveUnderRoot(cfg.RootReal, req.Path)
 	if err != nil {
 		logx.Warn("sandbox reject", map[string]any{"code": "INVALID_PATH"})
 		return Preflight{Status: 400, Code: "INVALID_PATH", Message: "invalid path"}
 	}
-	if resolved.Rel != "" && sandbox.IsDenied(resolved.Rel, s.Cfg.AllowSecrets) {
+	if resolved.Rel != "" && sandbox.IsDenied(resolved.Rel, cfg.AllowSecrets) {
 		return Preflight{Status: 403, Code: "DENIED", Message: "path is denied"}
 	}
 	var include, exclude []string
@@ -103,7 +112,7 @@ func (s *Service) Preflight(req Request) Preflight {
 			return Preflight{Status: 400, Code: "INVALID_GLOB", Message: "invalid glob"}
 		}
 		posix := sandbox.ToPosixRel(clean)
-		if sandbox.IsDenied(posix, s.Cfg.AllowSecrets) {
+		if sandbox.IsDenied(posix, cfg.AllowSecrets) {
 			continue
 		}
 		include = append(include, clean)
@@ -122,7 +131,7 @@ func (s *Service) Preflight(req Request) Preflight {
 			return Preflight{Status: 400, Code: "INVALID_GLOB", Message: "invalid glob"}
 		}
 		posix := sandbox.ToPosixRel(clean)
-		if sandbox.IsDenied(posix, s.Cfg.AllowSecrets) {
+		if sandbox.IsDenied(posix, cfg.AllowSecrets) {
 			continue
 		}
 		and = append(and, clean)
@@ -137,10 +146,10 @@ func (s *Service) Preflight(req Request) Preflight {
 	}
 	maxResults := req.MaxResults
 	if maxResults <= 0 {
-		maxResults = s.Cfg.MaxResults
+		maxResults = cfg.MaxResults
 	}
-	if s.Cfg.MaxResultsHard > 0 && (maxResults <= 0 || maxResults > s.Cfg.MaxResultsHard) {
-		maxResults = s.Cfg.MaxResultsHard
+	if cfg.MaxResultsHard > 0 && (maxResults <= 0 || maxResults > cfg.MaxResultsHard) {
+		maxResults = cfg.MaxResultsHard
 	}
 	return Preflight{
 		OK:          true,
@@ -155,7 +164,7 @@ func (s *Service) Preflight(req Request) Preflight {
 }
 
 func (s *Service) maxConcurrentLocked() int {
-	maxC := s.Cfg.MaxConcurrent
+	maxC := s.Snapshot().MaxConcurrent
 	if maxC <= 0 {
 		return config.MaxConcurrentDefault
 	}
@@ -189,9 +198,7 @@ func (s *Service) bindCancel(id string, cancel context.CancelFunc) {
 func nopCancel() {}
 
 func (s *Service) SetCfg(cfg config.Config) {
-	s.mu.Lock()
-	s.Cfg = cfg
-	s.mu.Unlock()
+	config.StoreSnapshot(&s.cfg, cfg)
 }
 
 func (s *Service) Release(id string) {
@@ -217,10 +224,11 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	if pre.SearchID != "" {
 		defer s.Release(pre.SearchID)
 	}
+	cfg := s.Snapshot()
 	var ctx context.Context
 	var cancel context.CancelFunc
-	if s.Cfg.TimeoutMs > 0 {
-		ctx, cancel = context.WithTimeout(parent, time.Duration(s.Cfg.TimeoutMs)*time.Millisecond)
+	if cfg.TimeoutMs > 0 {
+		ctx, cancel = context.WithTimeout(parent, time.Duration(cfg.TimeoutMs)*time.Millisecond)
 	} else {
 		ctx, cancel = context.WithCancel(parent)
 	}
@@ -294,18 +302,18 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	}
 
 	in := rg.Input{
-		RootReal:       s.Cfg.RootReal,
+		RootReal:       cfg.RootReal,
 		RelativeDir:    pre.RelativeDir,
 		Query:          pre.Request.Query,
 		Regex:          pre.Request.Regex,
 		CaseSensitive:  pre.Request.CaseSensitive,
 		WordMatch:      pre.Request.WordMatch,
 		Hidden:         pre.Request.Hidden,
-		AllowSecrets:   s.Cfg.AllowSecrets,
-		FollowSymlinks: s.Cfg.FollowSymlinks,
-		NoIgnore:       s.Cfg.NoIgnore,
-		SearchZip:      s.Cfg.SearchZip,
-		Threads:        s.Cfg.Threads,
+		AllowSecrets:   cfg.AllowSecrets,
+		FollowSymlinks: cfg.FollowSymlinks,
+		NoIgnore:       cfg.NoIgnore,
+		SearchZip:      cfg.SearchZip,
+		Threads:        cfg.Threads,
 		AndTerms:       pre.Request.AndTerms,
 	}
 	// mtimeAfter is the only reason to WalkDir + LimitToList. Otherwise
@@ -313,12 +321,12 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	if NeedsMtimeFileList(pre.Request.MtimeAfter) {
 		listed, listErr := listNewerFiles(
 			ctx,
-			s.Cfg.RootReal,
+			cfg.RootReal,
 			pre.RelativeDir,
 			pre.Request.MtimeAfter,
 			pre.Request.Hidden,
-			s.Cfg.FollowSymlinks,
-			s.Cfg.AllowSecrets,
+			cfg.FollowSymlinks,
+			cfg.AllowSecrets,
 			pre.GlobExclude,
 		)
 		if listErr != nil {
@@ -355,15 +363,12 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	searchCtx, stopSearch := context.WithCancel(ctx)
 	defer stopSearch()
 
-	acceptHit := func(path string) bool {
-		if in.LimitToList {
-			return true
-		}
-		kept := sandbox.FilterByGlobs([]string{path}, pre.GlobInclude, pre.GlobExclude)
-		if len(pre.GlobAnd) > 0 {
-			kept = sandbox.FilterByGlobs(kept, pre.GlobAnd, nil)
-		}
-		return len(kept) == 1
+	// Include/exclude (and globAnd when include is empty) are already in
+	// rg argv. rg ORs positive --glob flags, so include∩and cannot be
+	// expressed there and is applied in Go — compiled once, not per hit.
+	acceptHit := func(string) bool { return true }
+	if !in.LimitToList && NeedGlobAndPostFilter(pre.GlobInclude, pre.GlobAnd) {
+		acceptHit = sandbox.CompileHitFilter(nil, nil, pre.GlobAnd)
 	}
 
 	lastProg := time.Now()
@@ -373,7 +378,7 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 			if truncated || searchCtx.Err() != nil || stream.Aborted() {
 				return errStop
 			}
-			hit, ok := rg.ToRelativeHit(s.Cfg.RootReal, s.Cfg.AllowSecrets, m)
+			hit, ok := rg.ToRelativeHit(cfg.RootReal, cfg.AllowSecrets, m)
 			if !ok {
 				return nil
 			}
@@ -438,6 +443,12 @@ var listNewerFiles = ListNewerFiles
 // before invoking rg. Zero / omitted mtimeAfter skips WalkDir.
 func NeedsMtimeFileList(after time.Time) bool {
 	return !after.IsZero()
+}
+
+// NeedGlobAndPostFilter is true when include and and are both set.
+// Those two sets are intersected; rg --glob cannot express that AND.
+func NeedGlobAndPostFilter(include, and []string) bool {
+	return len(include) > 0 && len(and) > 0
 }
 
 func newUUID() string {

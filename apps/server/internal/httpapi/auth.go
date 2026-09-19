@@ -16,12 +16,13 @@ type loginBody struct {
 
 func (s *Server) authStatus(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
-		"authRequired": s.Cfg.TokenHash != "",
+		"authRequired": s.Config().TokenHash != "",
 	})
 }
 
 func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
-	if s.Cfg.TokenHash == "" || s.Sessions == nil {
+	cfg := s.Config()
+	if cfg.TokenHash == "" || s.Sessions == nil {
 		writeErr(w, http.StatusUnauthorized, "UNAUTHORIZED", "auth is not enabled")
 		return
 	}
@@ -29,7 +30,7 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if !config.PasswordMatches(s.Cfg.TokenHash, body.Password) {
+	if !config.PasswordMatches(cfg.TokenHash, body.Password) {
 		writeErr(w, http.StatusUnauthorized, "INVALID_AUTH", "invalid password")
 		return
 	}

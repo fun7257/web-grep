@@ -20,7 +20,9 @@ import (
 
 func TestPinAuthSessionLoginRejectAndInvalidate(t *testing.T) {
 	s, _ := testServer(t, fakeEngine{})
-	s.Cfg.TokenHash = config.HashPassword("secret1")
+	cfg := s.Config()
+	cfg.TokenHash = config.HashPassword("secret1")
+	s.SetConfig(cfg)
 	s.Sessions = auth.NewSessions()
 	h := s.Handler()
 
@@ -190,8 +192,8 @@ func TestPinSearchMaxConcurrentBusyThenOneRelease(t *testing.T) {
 	release := make(chan struct{})
 	eng := blockingEngine{started: started, release: release}
 	s, _ := testServer(t, eng)
-	if s.Cfg.MaxConcurrent != n {
-		t.Fatalf("testServer MaxConcurrent=%d want default %d", s.Cfg.MaxConcurrent, n)
+	if s.Config().MaxConcurrent != n {
+		t.Fatalf("testServer MaxConcurrent=%d want default %d", s.Config().MaxConcurrent, n)
 	}
 	h := s.Handler()
 
@@ -324,9 +326,9 @@ func startSearch(t *testing.T, h http.Handler, hdr map[string]string) (context.C
 }
 
 func setMaxConcurrent(s *Server, n int) {
-	cfg := s.Cfg
+	cfg := s.Config()
 	cfg.MaxConcurrent = n
-	s.Cfg = cfg
+	s.SetConfig(cfg)
 	s.Search.SetCfg(cfg)
 }
 

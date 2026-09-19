@@ -16,12 +16,18 @@ import (
 type memStream struct {
 	mu     sync.Mutex
 	events []string
+	paths  []string
 }
 
-func (m *memStream) Event(name string, _ any) error {
+func (m *memStream) Event(name string, data any) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.events = append(m.events, name)
+	if name == "hit" {
+		if hit, ok := data.(rg.Hit); ok {
+			m.paths = append(m.paths, hit.Path)
+		}
+	}
 	return nil
 }
 func (m *memStream) Ping()         {}
@@ -32,6 +38,13 @@ func (m *memStream) names() []string {
 	defer m.mu.Unlock()
 	out := make([]string, len(m.events))
 	copy(out, m.events)
+	return out
+}
+func (m *memStream) hits() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.paths))
+	copy(out, m.paths)
 	return out
 }
 
@@ -103,6 +116,18 @@ func TestNeedsMtimeFileList(t *testing.T) {
 	}
 }
 
+func TestNeedGlobAndPostFilter(t *testing.T) {
+	if NeedGlobAndPostFilter(nil, []string{"*.ts"}) {
+		t.Fatal("and-only is pushed to rg --glob")
+	}
+	if NeedGlobAndPostFilter([]string{"src/**"}, nil) {
+		t.Fatal("include-only is pushed to rg --glob")
+	}
+	if !NeedGlobAndPostFilter([]string{"src/**"}, []string{"*.ts"}) {
+		t.Fatal("include∩and cannot be expressed as rg --glob")
+	}
+}
+
 func TestRunSkipsWalkWithoutMtime(t *testing.T) {
 	walked := false
 	orig := listNewerFiles
@@ -128,6 +153,155 @@ func TestRunSkipsWalkWithoutMtime(t *testing.T) {
 	if svc.Inflight() != 0 {
 		t.Fatalf("slot leak: %d", svc.Inflight())
 	}
+}
+
+func TestRunPushesGlobsToRgWithoutMtime(t *testing.T) {
+	walked := false
+	orig := listNewerFiles
+	listNewerFiles = func(ctx context.Context, rootReal, rel string, after time.Time, hidden, follow, allowSecrets bool, exclude []string) ([]string, error) {
+		walked = true
+		return orig(ctx, rootReal, rel, after, hidden, follow, allowSecrets, exclude)
+	}
+	t.Cleanup(func() { listNewerFiles = orig })
+
+	eng := &captureEngine{}
+	svc := testService(t, eng, 2, 0)
+	pre := svc.Preflight(Request{
+		Query:       "hello",
+		Hidden:      true,
+		GlobInclude: []string{"src/**"},
+		GlobAnd:     []string{"*.ts"},
+		GlobExclude: []string{"*.test.ts"},
+	})
+	if !pre.OK {
+		t.Fatalf("preflight: %+v", pre)
+	}
+	svc.Run(context.Background(), pre, &memStream{})
+	if walked {
+		t.Fatal("globs must not force WalkDir")
+	}
+	if eng.in.LimitToList {
+		t.Fatal("expected rg to search the root with globs")
+	}
+	if len(eng.in.GlobInclude) != 1 || eng.in.GlobInclude[0] != "src/**" {
+		t.Fatalf("include: %v", eng.in.GlobInclude)
+	}
+	if len(eng.in.GlobAnd) != 1 || eng.in.GlobAnd[0] != "*.ts" {
+		t.Fatalf("and: %v", eng.in.GlobAnd)
+	}
+	if len(eng.in.GlobExclude) != 1 || eng.in.GlobExclude[0] != "*.test.ts" {
+		t.Fatalf("exclude: %v", eng.in.GlobExclude)
+	}
+}
+
+func TestRunPostFiltersGlobAndIntersection(t *testing.T) {
+	// Fake engine does not honor --glob. Emit only paths that include
+	// (src/**) would have kept; Go must still drop files that fail and.
+	eng := emitEngine{matches: []rg.Match{
+		{Path: "src/a.ts", Line: 1, Text: "hello\n"},
+		{Path: "src/b.js", Line: 1, Text: "hello\n"},
+	}}
+	svc := testService(t, &eng, 2, 0)
+	root := svc.Snapshot().RootReal
+	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"src/a.ts", "src/b.js"} {
+		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte("hello\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pre := svc.Preflight(Request{
+		Query:       "hello",
+		Hidden:      true,
+		GlobInclude: []string{"src/**"},
+		GlobAnd:     []string{"*.ts"},
+	})
+	if !pre.OK {
+		t.Fatalf("preflight: %+v", pre)
+	}
+	stream := &memStream{}
+	svc.Run(context.Background(), pre, stream)
+	hits := stream.hits()
+	if len(hits) != 1 || hits[0] != "src/a.ts" {
+		t.Fatalf("include∩and should keep only src/a.ts, got %v events=%v", hits, stream.names())
+	}
+}
+
+func TestSetCfgSwapIsAtomic(t *testing.T) {
+	svc := testService(t, &captureEngine{}, 2, 0)
+	a := svc.Snapshot()
+	a.RootLabel = "a"
+	a.RootReal = "/a"
+	a.MaxResults = 1
+	b := a
+	b.RootLabel = "b"
+	b.RootReal = "/b"
+	b.MaxResults = 2
+	svc.SetCfg(a)
+
+	var writers sync.WaitGroup
+	writers.Add(2)
+	done := make(chan struct{})
+	errCh := make(chan config.Config, 1)
+	for i := 0; i < 2; i++ {
+		go func() {
+			defer writers.Done()
+			for n := 0; n < 1000; n++ {
+				if n%2 == 0 {
+					svc.SetCfg(a)
+				} else {
+					svc.SetCfg(b)
+				}
+			}
+		}()
+	}
+	var readers sync.WaitGroup
+	readers.Add(4)
+	for i := 0; i < 4; i++ {
+		go func() {
+			defer readers.Done()
+			for {
+				select {
+				case <-done:
+					return
+				default:
+				}
+				got := svc.Snapshot()
+				okA := got.RootLabel == "a" && got.RootReal == "/a" && got.MaxResults == 1
+				okB := got.RootLabel == "b" && got.RootReal == "/b" && got.MaxResults == 2
+				if !okA && !okB {
+					select {
+					case errCh <- got:
+					default:
+					}
+					return
+				}
+			}
+		}()
+	}
+	writers.Wait()
+	close(done)
+	readers.Wait()
+	select {
+	case got := <-errCh:
+		t.Fatalf("torn config: %+v", got)
+	default:
+	}
+}
+
+type emitEngine struct {
+	matches []rg.Match
+}
+
+func (e *emitEngine) Kind() string { return "rg" }
+func (e *emitEngine) Search(_ context.Context, _ rg.Input, emit func(rg.Match) error, _ func(int)) error {
+	for _, m := range e.matches {
+		if err := emit(m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func TestRunWalksWhenMtimeAfterSet(t *testing.T) {
