@@ -43,6 +43,11 @@ preview_chunk_max: 400
 # preview_lines: 201
 threads: 0 # 0 = 交给 rg
 max_concurrent: 8 # 同时进行的搜索路数
+# GET /api/tree、/api/count、/api/file 的读接口限额（与搜索 max_concurrent 分开）。
+# 默认够一个人点树、滚预览；洪水请求会 HTTP 429 BUSY。
+read_max_concurrent: 32 # 同时进行的 tree/count/file；WEB_GREP_READ_MAX_CONCURRENT
+read_rate_limit: 120 # 每个客户端（会话或 IP）在窗口内的次数；WEB_GREP_READ_RATE_LIMIT
+read_rate_window_ms: 10000 # 上述次数的滑动窗口；WEB_GREP_READ_RATE_WINDOW_MS
 
 search_zip: true # 是否搜压缩包
 follow_symlinks: true # 是否跟随符号链接

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"web-grep/internal/config"
+	"web-grep/internal/ratelimit"
 	"web-grep/internal/rg"
 	"web-grep/internal/search"
 )
@@ -73,6 +74,7 @@ func newTestServer(cfg config.Config, engine search.Engine, kind string) *Server
 		Search:  search.New(cfg, engine, kind, nil),
 		Engine:  kind,
 		Version: "",
+		Reads:   ratelimit.New(),
 	}
 	s.SetConfig(cfg)
 	return s
