@@ -195,18 +195,18 @@ func TestRunPushesGlobsToRgWithoutMtime(t *testing.T) {
 }
 
 func TestRunPostFiltersGlobAndIntersection(t *testing.T) {
-	root := ""
+	// Fake engine does not honor --glob. Emit only paths that include
+	// (src/**) would have kept; Go must still drop files that fail and.
 	eng := emitEngine{matches: []rg.Match{
 		{Path: "src/a.ts", Line: 1, Text: "hello\n"},
 		{Path: "src/b.js", Line: 1, Text: "hello\n"},
-		{Path: "other.ts", Line: 1, Text: "hello\n"},
 	}}
 	svc := testService(t, &eng, 2, 0)
-	root = svc.Snapshot().RootReal
+	root := svc.Snapshot().RootReal
 	if err := os.MkdirAll(filepath.Join(root, "src"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"src/a.ts", "src/b.js", "other.ts"} {
+	for _, name := range []string{"src/a.ts", "src/b.js"} {
 		if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(name)), []byte("hello\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
