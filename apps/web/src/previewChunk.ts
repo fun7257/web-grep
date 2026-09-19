@@ -1,10 +1,10 @@
 import { LIMITS } from "@web-grep/shared";
 
 export type PreviewChunkLimits = {
-  previewChunk?: number;
-  previewChunkMax?: number;
+  previewChunk?: number | undefined;
+  previewChunkMax?: number | undefined;
   /** Legacy meta field; ignored for /api/file request size. */
-  previewLines?: number;
+  previewLines?: number | undefined;
 };
 
 /** Shared default /api/file count. Prefer resolvePreviewChunk(meta.limits). */
