@@ -10,7 +10,7 @@ import (
 	"web-grep/internal/ratelimit"
 )
 
-const readBusyMessage = "too many tree/count/file requests"
+const readBusyMessage = "too many tree/file requests"
 
 func (s *Server) acquireRead(w http.ResponseWriter, r *http.Request) (release func(), ok bool) {
 	if s.Reads == nil {

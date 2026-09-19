@@ -35,27 +35,6 @@ func (s *Server) tree(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, listing)
 }
 
-func (s *Server) count(w http.ResponseWriter, r *http.Request) {
-	release, ok := s.acquireRead(w, r)
-	if !ok {
-		return
-	}
-	defer release()
-	rel, filter, err := parseListingQuery(r)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")
-		return
-	}
-	cfg := s.Config()
-	n, err := tree.CountFiles(cfg.RootReal, rel, cfg.AllowSecrets, filter)
-	if err != nil {
-		logx.Warn("sandbox reject", map[string]any{"code": "INVALID_PATH"})
-		writeErr(w, http.StatusNotFound, "INVALID_PATH", "invalid path")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]int{"count": n})
-}
-
 func parseListingQuery(r *http.Request) (string, tree.Filter, error) {
 	rel := r.URL.Query().Get("path")
 	if len(rel) > config.PathMaxChars {

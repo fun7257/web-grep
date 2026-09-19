@@ -40,10 +40,6 @@ func TestPinReadRateUnderLimitSucceeds(t *testing.T) {
 		if tree.Code != 200 {
 			t.Fatalf("tree %d: %d %s", i, tree.Code, tree.Body.String())
 		}
-		count := do(t, h, "GET", "http://127.0.0.1:8787/api/count", "", nil)
-		if count.Code != 200 {
-			t.Fatalf("count %d: %d %s", i, count.Code, count.Body.String())
-		}
 		file := do(t, h, "GET", "http://127.0.0.1:8787/api/file?path=ok.txt&line=1", "", nil)
 		if file.Code != 200 {
 			t.Fatalf("file %d: %d %s", i, file.Code, file.Body.String())
@@ -60,7 +56,7 @@ func TestPinReadRateOverLimitIsBusy(t *testing.T) {
 	if first.Code != 200 {
 		t.Fatal(first.Body.String())
 	}
-	second := do(t, h, "GET", "http://127.0.0.1:8787/api/count", "", nil)
+	second := do(t, h, "GET", "http://127.0.0.1:8787/api/file?path=ok.txt&line=1", "", nil)
 	if second.Code != 200 {
 		t.Fatal(second.Body.String())
 	}
@@ -68,7 +64,7 @@ func TestPinReadRateOverLimitIsBusy(t *testing.T) {
 	if busy.Code != 429 || jsonCode(t, busy) != "BUSY" {
 		t.Fatalf("expected BUSY after 2 reads, got %d %s", busy.Code, busy.Body.String())
 	}
-	if got := busy.Body.String(); !strings.Contains(got, "too many tree/count/file requests") {
+	if got := busy.Body.String(); !strings.Contains(got, "too many tree/file requests") {
 		t.Fatalf("busy message: %s", got)
 	}
 }
@@ -121,9 +117,9 @@ func TestPinReadConcurrentBusyThenRelease(t *testing.T) {
 	if busy.Code != 429 || jsonCode(t, busy) != "BUSY" {
 		t.Fatalf("expected concurrent BUSY, got %d %s", busy.Code, busy.Body.String())
 	}
-	countBusy := do(t, h, "GET", "http://127.0.0.1:8787/api/count", "", nil)
-	if countBusy.Code != 429 || jsonCode(t, countBusy) != "BUSY" {
-		t.Fatalf("count should share the cap: %d %s", countBusy.Code, countBusy.Body.String())
+	fileBusy := do(t, h, "GET", "http://127.0.0.1:8787/api/file?path=ok.txt&line=1", "", nil)
+	if fileBusy.Code != 429 || jsonCode(t, fileBusy) != "BUSY" {
+		t.Fatalf("file should share the cap: %d %s", fileBusy.Code, fileBusy.Body.String())
 	}
 
 	s.Reads.Release()
