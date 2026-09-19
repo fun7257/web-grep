@@ -291,6 +291,74 @@ func TestBusyAtMaxConcurrentThenRecovers(t *testing.T) {
 	svc.Release(next.SearchID)
 }
 
+func TestCancelOneOfMaxConcurrentFreesExactlyOneSlot(t *testing.T) {
+	const n = 2
+	started := make(chan struct{}, n)
+	release := make(chan struct{})
+	svc := testService(t, blockingEngine{started: started, release: release}, n, 0)
+
+	pre1 := svc.Preflight(Request{Query: "hello", Hidden: true})
+	pre2 := svc.Preflight(Request{Query: "hello", Hidden: true})
+	if !pre1.OK || !pre2.OK {
+		t.Fatalf("preflight: %+v %+v", pre1, pre2)
+	}
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	done1 := make(chan struct{})
+	done2 := make(chan struct{})
+	go func() {
+		defer close(done1)
+		svc.Run(ctx1, pre1, &memStream{})
+	}()
+	go func() {
+		defer close(done2)
+		svc.Run(context.Background(), pre2, &memStream{})
+	}()
+	deadline := time.After(2 * time.Second)
+	for i := 0; i < n; i++ {
+		select {
+		case <-started:
+		case <-deadline:
+			t.Fatal("searches did not start")
+		}
+	}
+
+	busy := svc.Preflight(Request{Query: "hello", Hidden: true})
+	if busy.OK || busy.Code != "BUSY" {
+		t.Fatalf("expected BUSY at cap, got %+v", busy)
+	}
+
+	cancel1()
+	select {
+	case <-done1:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	if svc.Inflight() != n-1 {
+		t.Fatalf("cancel should free one slot, inflight=%d", svc.Inflight())
+	}
+
+	next := svc.Preflight(Request{Query: "hello", Hidden: true})
+	if !next.OK {
+		t.Fatalf("expected free slot after cancel, got %+v", next)
+	}
+	stillBusy := svc.Preflight(Request{Query: "hello", Hidden: true})
+	if stillBusy.OK || stillBusy.Code != "BUSY" {
+		t.Fatalf("cap should still hold after replacing the cancelled slot: %+v", stillBusy)
+	}
+	svc.Release(next.SearchID)
+
+	close(release)
+	select {
+	case <-done2:
+	case <-time.After(2 * time.Second):
+		t.Fatal("held Run did not return")
+	}
+	if svc.Inflight() != 0 {
+		t.Fatalf("slots leaked: %d", svc.Inflight())
+	}
+}
+
 func TestPreflightDefaultMaxConcurrentIsEight(t *testing.T) {
 	svc := testService(t, &captureEngine{}, 0, 0)
 	held := make([]string, 0, config.MaxConcurrentDefault)
