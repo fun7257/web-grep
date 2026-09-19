@@ -26,6 +26,7 @@ import { copyText } from "./copyText.ts";
 import { parseGlobs } from "./globs.ts";
 import type { HlTermInput } from "./highlight.ts";
 import { useAuth } from "./hooks/useAuth.ts";
+import { useBatchedHits } from "./hooks/useBatchedHits.ts";
 import {
   buildShareUrl,
   captureShareState,
@@ -112,6 +113,7 @@ function AppShell() {
   const runSearch = search.submit;
   const cancelSearch = search.cancel;
   const resetSearch = search.reset;
+  const listHits = useBatchedHits(search.hits, search.status);
   const selectedIndexClamped =
     search.hits.length === 0
       ? 0
@@ -621,7 +623,7 @@ function AppShell() {
           }
         />
         <WarnBanners done={search.done} />
-        {search.hits.length === 0 ? (
+        {listHits.length === 0 ? (
           <EmptyState
             status={search.status}
             hitCount={search.hits.length}
@@ -633,7 +635,7 @@ function AppShell() {
           />
         ) : (
           <ResultList
-            hits={search.hits}
+            hits={listHits}
             selectedIndex={selectedIndexClamped}
             onSelect={selectHit}
             listRef={listRef}

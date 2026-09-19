@@ -67,6 +67,32 @@ function sseResponse(chunks: string[]): Response {
   });
 }
 
+function openSse(): {
+  response: Response;
+  push: (chunk: string) => void;
+  close: () => void;
+} {
+  const encoder = new TextEncoder();
+  let controller: ReadableStreamDefaultController<Uint8Array> | undefined;
+  const stream = new ReadableStream<Uint8Array>({
+    start(next) {
+      controller = next;
+    },
+  });
+  return {
+    response: new Response(stream, {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    }),
+    push: (chunk: string): void => {
+      controller?.enqueue(encoder.encode(chunk));
+    },
+    close: (): void => {
+      controller?.close();
+    },
+  };
+}
+
 function sseEvent(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 }
@@ -2519,6 +2545,38 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.queryByText("Keyboard Shortcuts")).toBeNull();
     });
+  });
+
+  it("paints streaming hits before done and flushes the rest on done", async () => {
+    const stream = openSse();
+    mockFetch(() => stream.response);
+    render(<App />);
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toMatch(/Searching/);
+    });
+    stream.push(sseEvent("hit", HIT_A));
+    await waitFor(() => {
+      expect(fileRow("src/a.ts")).toBeTruthy();
+      expect(getLoc("src/a.ts:1")).toBeTruthy();
+    });
+    expect(screen.getByRole("status").textContent).toMatch(/Searching/);
+    stream.push(sseEvent("hit", HIT_B));
+    await waitFor(() => {
+      expect(fileRow("src/b.ts")).toBeTruthy();
+      expect(getLoc("src/b.ts:3")).toBeTruthy();
+    });
+    expect(screen.getByRole("status").textContent).toMatch(/Searching/);
+    stream.push(sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })));
+    stream.close();
+    await waitFor(() => {
+      expect(screen.getByRole("status").textContent).toMatch(/2 matches/);
+    });
+    expect(fileRow("src/a.ts")).toBeTruthy();
+    expect(fileRow("src/b.ts")).toBeTruthy();
+    expect(getLoc("src/a.ts:1")).toBeTruthy();
+    expect(getLoc("src/b.ts:3")).toBeTruthy();
   });
 
   it("groups logs under filenames without collapsing", async () => {
