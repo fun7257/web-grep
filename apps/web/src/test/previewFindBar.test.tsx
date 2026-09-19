@@ -6,13 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PreviewFindBar } from "../components/PreviewFindBar.tsx";
 import { LocaleProvider } from "../hooks/useLocale.ts";
 
-function FindHarness({
-  text,
-  line = "99",
-}: {
-  text: string;
-  line?: string;
-}) {
+function FindHarness({ text, line = "99" }: { text: string; line?: string }) {
   const rootRef = useRef<HTMLDivElement>(null);
   return (
     <LocaleProvider>
@@ -50,7 +44,7 @@ function countLabel(): string {
 }
 
 function pressFindKey(
-  target: EventTarget,
+  target: Element,
   key: string,
   opts: { ctrl?: boolean; alt?: boolean; shift?: boolean } = {},
 ): void {
@@ -79,17 +73,17 @@ describe("PreviewFindBar", () => {
     render(<FindHarness text="alpha foo beta" />);
     expect(screen.queryByRole("search")).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Find in preview" }).getAttribute(
-        "aria-expanded",
-      ),
+      screen
+        .getByRole("button", { name: "Find in preview" })
+        .getAttribute("aria-expanded"),
     ).toBe("false");
 
     openFind();
     expect(screen.getByRole("search")).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Find in preview" }).getAttribute(
-        "aria-expanded",
-      ),
+      screen
+        .getByRole("button", { name: "Find in preview" })
+        .getAttribute("aria-expanded"),
     ).toBe("true");
     expect(queryBox()).toBeTruthy();
 
@@ -186,7 +180,8 @@ describe("PreviewFindBar", () => {
     typeQuery("foo");
     expect(countLabel()).toBe("1/2");
 
-    const caseBtn = screen.getByRole("button", { name: "Match Case (Alt+C)" });
+    const caseBtn = screen.getByRole("button", { name: "Aa" });
+    expect(caseBtn.getAttribute("title")).toBe("Match Case (Alt+C)");
     expect(caseBtn.getAttribute("aria-pressed")).toBe("false");
     fireEvent.click(caseBtn);
     expect(caseBtn.getAttribute("aria-pressed")).toBe("true");
@@ -203,9 +198,8 @@ describe("PreviewFindBar", () => {
     typeQuery("cat");
     expect(countLabel()).toBe("1/3");
 
-    const wordBtn = screen.getByRole("button", {
-      name: "Match Whole Word (Alt+W)",
-    });
+    const wordBtn = screen.getByRole("button", { name: "\\b" });
+    expect(wordBtn.getAttribute("title")).toBe("Match Whole Word (Alt+W)");
     fireEvent.click(wordBtn);
     expect(wordBtn.getAttribute("aria-pressed")).toBe("true");
     expect(countLabel()).toBe("1/2");

@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 
-import type { SseHit } from "@web-grep/shared";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import type { SseHit } from "@web-grep/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FilePreview } from "../components/FilePreview.tsx";
 import { FormattedLine } from "../components/FormattedPreview.tsx";
@@ -71,7 +71,9 @@ describe("FormattedLine", () => {
     );
     const pre = container.querySelector(".fmt-json");
     expect(pre).toBeTruthy();
-    expect(pre?.textContent).toBe(JSON.stringify(JSON.parse(original), null, 4));
+    expect(pre?.textContent).toBe(
+      JSON.stringify(JSON.parse(original), null, 4),
+    );
     expect(pre?.querySelector(".tok-key")?.textContent).toContain("hello");
     expect(pre?.querySelector(".tok-str")?.textContent).toContain("World");
     expect(pre?.querySelector(".tok-num")?.textContent).toBe("1");
@@ -139,9 +141,9 @@ describe("FilePreview formatted path", () => {
     expect(container.querySelector(".preview-hit")).toBeNull();
     expect(container.querySelector(".fmt-md mark")?.textContent).toBe("World");
     expect(
-      screen.getByRole("button", { name: /^Preview$/ }).getAttribute(
-        "aria-pressed",
-      ),
+      screen
+        .getByRole("button", { name: /^Preview$/ })
+        .getAttribute("aria-pressed"),
     ).toBe("true");
 
     fireEvent.click(screen.getByRole("button", { name: /^Source$/ }));
@@ -167,12 +169,14 @@ describe("FilePreview formatted path", () => {
     const { container } = renderPreview(hit, ["World"]);
     const pre = container.querySelector(".fmt-json");
     expect(pre).toBeTruthy();
-    expect(pre?.textContent).toBe(JSON.stringify(JSON.parse(original), null, 4));
+    expect(pre?.textContent).toBe(
+      JSON.stringify(JSON.parse(original), null, 4),
+    );
     expect(pre?.querySelector("mark")?.textContent).toBe("World");
     expect(
-      screen.getByRole("button", { name: /^Preview$/ }).getAttribute(
-        "aria-pressed",
-      ),
+      screen
+        .getByRole("button", { name: /^Preview$/ })
+        .getAttribute("aria-pressed"),
     ).toBe("true");
   });
 
@@ -190,9 +194,12 @@ describe("FilePreview formatted path", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Find in preview" }));
     expect(screen.getByRole("search")).toBeTruthy();
-    fireEvent.change(screen.getByRole("searchbox", { name: "Find in preview" }), {
-      target: { value: "Safe" },
-    });
+    fireEvent.change(
+      screen.getByRole("searchbox", { name: "Find in preview" }),
+      {
+        target: { value: "Safe" },
+      },
+    );
     expect(document.querySelector(".preview-find-count")?.textContent).toBe(
       "1/1",
     );
@@ -211,6 +218,8 @@ describe("FilePreview formatted path", () => {
     expect(container.querySelector(".preview-hit")).toBeTruthy();
     expect(container.querySelector(".fmt-md")).toBeNull();
     expect(container.querySelector(".fmt-json")).toBeNull();
-    expect(screen.getByRole("button", { name: "Find in preview" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Find in preview" }),
+    ).toBeTruthy();
   });
 });
