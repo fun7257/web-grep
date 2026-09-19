@@ -1,11 +1,13 @@
 # Web Grep: Self-Hosted Ripgrep in the Browser
 
+> **Historical.** This document is the original TypeScript + Hono design (2026-09-11). The running server is **Go** (`apps/server`). Treat [README.md](README.md), [docs/API.md](docs/API.md), and `@web-grep/shared` as the current contract. Do not implement new work from this file without checking those sources.
+
 | Field | Value |
 | --- | --- |
 | **Title** | Web Grep — convenient web UI for server-side file search |
 | **Author** | TBD |
 | **Date** | 2026-09-11 |
-| **Status** | Draft (rev 3) |
+| **Status** | Historical (original TS/Hono draft, rev 3) |
 | **Audience** | Senior engineers implementing v1 |
 | **Workspace** | `/Users/fun/code/ts/web-grep` (empty greenfield; confirmed no source, config, or git metadata) |
 
