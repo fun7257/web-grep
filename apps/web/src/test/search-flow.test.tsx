@@ -1301,13 +1301,19 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(dialog.textContent).toMatch(/ok\.txt line 1/);
     });
-    const counts = fetchMock.mock.calls
-      .map((call) => requestUrl(call[0] as RequestInfo))
-      .filter((url) => url.includes("/api/file"))
-      .map((url) => new URL(url, "http://localhost").searchParams.get("count"));
-    expect(counts.length).toBeGreaterThan(0);
-    expect(counts.every((count) => count === "80")).toBe(true);
-    expect(counts.some((count) => count === "201")).toBe(false);
+    const fileCounts = (): (string | null)[] =>
+      fetchMock.mock.calls
+        .map((call) => requestUrl(call[0] as RequestInfo))
+        .filter((url) => url.includes("/api/file"))
+        .map((url) =>
+          new URL(url, "http://localhost").searchParams.get("count"),
+        );
+    await waitFor(() => {
+      expect(fileCounts().length).toBeGreaterThan(0);
+      expect(fileCounts().every((count) => count === "80")).toBe(true);
+    });
+    expect(fileCounts().some((count) => count === "201")).toBe(false);
+    expect(fileCounts().some((count) => count === "160")).toBe(false);
   });
 
   it("jumps to a line in the tree file preview", async () => {

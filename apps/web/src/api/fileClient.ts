@@ -2,7 +2,7 @@ import {
   type FileWindowResponse,
   FileWindowResponseSchema,
 } from "@web-grep/shared";
-import { PREVIEW_CHUNK } from "../previewChunk.ts";
+import { livePreviewChunk, PREVIEW_CHUNK } from "../previewChunk.ts";
 import { fetchJson, SearchHttpError } from "./http.ts";
 
 export { PREVIEW_CHUNK };
@@ -26,7 +26,7 @@ export async function fetchFileWindow(
   } else if (query.line !== undefined) {
     params.set("line", String(query.line));
   }
-  params.set("count", String(query.count ?? PREVIEW_CHUNK));
+  params.set("count", String(query.count ?? livePreviewChunk()));
   const parsed = FileWindowResponseSchema.safeParse(
     await fetchJson(`/api/file?${params.toString()}`, { signal }),
   );

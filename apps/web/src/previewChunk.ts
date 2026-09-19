@@ -10,6 +10,8 @@ export type PreviewChunkLimits = {
 /** Shared default /api/file count. Prefer resolvePreviewChunk(meta.limits). */
 export const PREVIEW_CHUNK = LIMITS.previewChunk;
 
+let liveLimits: PreviewChunkLimits | undefined;
+
 function positiveInt(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 1
     ? Math.floor(value)
@@ -26,4 +28,20 @@ export function resolvePreviewChunk(
   const max = positiveInt(limits?.previewChunkMax, LIMITS.previewChunkMax);
   const chunk = positiveInt(limits?.previewChunk, LIMITS.previewChunk);
   return Math.min(chunk, max);
+}
+
+/** Call when `/api/meta` arrives or clears so file fetches can follow live limits. */
+export function setLivePreviewLimits(
+  limits: PreviewChunkLimits | null | undefined,
+): void {
+  liveLimits = limits ?? undefined;
+}
+
+export function hasLivePreviewLimits(): boolean {
+  return liveLimits !== undefined;
+}
+
+/** Resolved count from the latest meta.limits, or shared default if meta is gone. */
+export function livePreviewChunk(): number {
+  return resolvePreviewChunk(liveLimits);
 }

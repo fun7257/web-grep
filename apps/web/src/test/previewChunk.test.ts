@@ -1,6 +1,12 @@
 import { LIMITS } from "@web-grep/shared";
-import { describe, expect, it } from "vitest";
-import { PREVIEW_CHUNK, resolvePreviewChunk } from "../previewChunk.ts";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  hasLivePreviewLimits,
+  livePreviewChunk,
+  PREVIEW_CHUNK,
+  resolvePreviewChunk,
+  setLivePreviewLimits,
+} from "../previewChunk.ts";
 
 describe("resolvePreviewChunk", () => {
   it("uses the shared default when meta has no chunk fields", () => {
@@ -32,5 +38,21 @@ describe("resolvePreviewChunk", () => {
     expect(resolvePreviewChunk({ previewChunkMax: 0 })).toBe(
       LIMITS.previewChunk,
     );
+  });
+});
+
+describe("live preview limits", () => {
+  afterEach(() => {
+    setLivePreviewLimits(undefined);
+  });
+
+  it("follows setLivePreviewLimits and ignores previewLines", () => {
+    expect(hasLivePreviewLimits()).toBe(false);
+    expect(livePreviewChunk()).toBe(LIMITS.previewChunk);
+    setLivePreviewLimits({ previewChunk: 80, previewLines: 201 });
+    expect(hasLivePreviewLimits()).toBe(true);
+    expect(livePreviewChunk()).toBe(80);
+    setLivePreviewLimits({ previewChunk: 500, previewChunkMax: 90 });
+    expect(livePreviewChunk()).toBe(90);
   });
 });

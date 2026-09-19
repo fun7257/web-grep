@@ -701,7 +701,11 @@ function AppShell() {
         target={contextTarget}
         terms={hlTerms}
         opts={hlOpts}
-        previewChunk={resolvePreviewChunk(token.meta?.limits)}
+        previewChunk={
+          token.meta === null
+            ? null
+            : resolvePreviewChunk(token.meta.limits)
+        }
         onClose={() => {
           setContextTarget(null);
         }}

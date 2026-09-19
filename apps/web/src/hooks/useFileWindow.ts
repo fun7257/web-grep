@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
-import { fetchFileWindow, PREVIEW_CHUNK } from "../api/fileClient.ts";
+import { fetchFileWindow } from "../api/fileClient.ts";
+import { livePreviewChunk } from "../previewChunk.ts";
 import { isAbortError, SearchHttpError } from "../api/http.ts";
 import { mergeLines, type WindowLine } from "../fileWindow.ts";
 import type { Translate } from "../i18n/index.ts";
@@ -50,7 +51,7 @@ export function useFileWindow(t: Translate) {
       setErrorCode(null);
       try {
         const win = await fetchFileWindow(
-          { ...query, count: query.count ?? PREVIEW_CHUNK },
+          { ...query, count: query.count ?? livePreviewChunk() },
           opts.signal,
         );
         if (pathRef.current !== openedPath || gen !== genRef.current) {
