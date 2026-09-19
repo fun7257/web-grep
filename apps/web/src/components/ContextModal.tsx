@@ -2,13 +2,13 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SseHit } from "@web-grep/shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { PREVIEW_CHUNK } from "../api/fileClient.ts";
 import {
   parseGotoLine,
   pickGotoLine,
 } from "../fileWindow.ts";
 import { DEFAULT_HL_OPTS, type HlOpts, type HlTermInput } from "../highlight.ts";
 import { useFileWindow } from "../hooks/useFileWindow.ts";
+import { useLivePreviewChunk } from "../hooks/useLivePreviewChunk.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import { AppModal } from "./AppModal.tsx";
 import { HighlightedText } from "./ResultRow.tsx";
@@ -55,14 +55,19 @@ export function ContextModal({
   target,
   terms = [],
   opts = DEFAULT_HL_OPTS,
+  previewChunk = null,
   onClose,
 }: {
   open: boolean;
   target: ContextTarget | null;
   terms?: HlTermInput[];
   opts?: HlOpts;
+  previewChunk?: number | null;
   onClose: () => void;
 }) {
+  const liveChunk = useLivePreviewChunk();
+  const chunk = liveChunk ?? previewChunk;
+  const chunkReady = chunk != null;
   const { t } = useLocale();
   const path = target?.path ?? null;
   const highlightLine = target?.highlightLine;
@@ -120,6 +125,9 @@ export function ContextModal({
       fetchAcRef.current = null;
       return;
     }
+    if (!chunkReady) {
+      return;
+    }
     const signal = replaceSignal();
     const from = highlightLine !== undefined ? highlightLine : 1;
     setFocusedLine(highlightLine);
@@ -128,7 +136,7 @@ export function ContextModal({
     focusReq.current = highlightLine ?? null;
     focusAlign.current = "start";
     void loadSlice(
-      { path, from, count: PREVIEW_CHUNK },
+      { path, from, count: chunk },
       { mode: "replace", signal },
     );
     return () => {
@@ -141,6 +149,10 @@ export function ContextModal({
     loadingRef,
     open,
     path,
+    chunk,
+    chunkReady,
+    liveChunk,
+    previewChunk,
     reset,
   ]);
 
@@ -160,7 +172,13 @@ export function ContextModal({
   const virtualItems = virtualizer.getVirtualItems();
 
   useEffect(() => {
-    if (!open || path === null || loadingRef.current || lines.length === 0) {
+    if (
+      !open ||
+      path === null ||
+      !chunkReady ||
+      loadingRef.current ||
+      lines.length === 0
+    ) {
       return;
     }
     const first = virtualItems[0];
@@ -176,7 +194,7 @@ export function ContextModal({
         anchorN.current = shown ?? firstN;
       }
       void loadSlice(
-        { path, from, count: PREVIEW_CHUNK },
+        { path, from, count: chunk },
         { mode: "merge", dir, signal: activeSignal() },
       );
     };
@@ -187,7 +205,7 @@ export function ContextModal({
       firstN > 1 &&
       first.index <= 8
     ) {
-      load(Math.max(1, firstN - PREVIEW_CHUNK), "up");
+      load(Math.max(1, firstN - chunk), "up");
     }
   }, [
     eof,
@@ -197,6 +215,9 @@ export function ContextModal({
     loadingRef,
     open,
     path,
+    chunk,
+    chunkReady,
+    previewChunk,
     virtualItems,
   ]);
 
@@ -253,12 +274,12 @@ export function ContextModal({
     }
     const pageEarlier = (): void => {
       const firstN = linesRef.current[0]?.n ?? 1;
-      if (firstN <= 1 || loadingRef.current) {
+      if (firstN <= 1 || loadingRef.current || !chunkReady) {
         return;
       }
       anchorN.current = firstN;
       void loadSlice(
-        { path, from: Math.max(1, firstN - PREVIEW_CHUNK), count: PREVIEW_CHUNK },
+        { path, from: Math.max(1, firstN - chunk), count: chunk },
         { mode: "merge", dir: "up", signal: activeSignal() },
       );
     };
@@ -271,10 +292,10 @@ export function ContextModal({
     return () => {
       el.removeEventListener("wheel", onWheel);
     };
-  }, [lines.length, loadSlice, loadingRef, open, path]);
+  }, [chunk, chunkReady, lines.length, loadSlice, loadingRef, open, path]);
 
   const jumpToLine = (requested: number): void => {
-    if (path === null) {
+    if (path === null || !chunkReady) {
       return;
     }
     if (lines.length === 0 && !loading && !binary) {
@@ -286,7 +307,7 @@ export function ContextModal({
     const signal = replaceSignal();
     void (async () => {
       let next = await loadSlice(
-        { path, from: requested, count: PREVIEW_CHUNK },
+        { path, from: requested, count: chunk },
         { mode: "replace", signal },
       );
       if (pathRef.current !== openedPath || signal.aborted) {
@@ -298,7 +319,7 @@ export function ContextModal({
       const exact = next.some((line) => line.n === requested);
       if (!exact) {
         next = await loadSlice(
-          { path, tail: true, count: PREVIEW_CHUNK },
+          { path, tail: true, count: chunk },
           { mode: "replace", signal },
         );
         if (pathRef.current !== openedPath || signal.aborted || next === null) {
@@ -420,7 +441,7 @@ export function ContextModal({
         <p className="context-status">{error}</p>
       ) : binary ? (
         <p className="context-status">{t("previewBinary")}</p>
-      ) : lines.length === 0 && loading ? (
+      ) : lines.length === 0 && (loading || (open && !chunkReady)) ? (
         <p className="context-status">{t("loading")}</p>
       ) : lines.length === 0 ? (
         <p className="context-empty">{t("previewFileEmpty")}</p>

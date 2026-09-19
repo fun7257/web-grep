@@ -8,6 +8,7 @@ import {
 import { readToken, writeToken } from "../api/headers.ts";
 import { isAbortError, SearchHttpError } from "../api/http.ts";
 import { loadMetaResponse } from "../api/metaClient.ts";
+import { setLivePreviewLimits } from "../previewChunk.ts";
 
 export type AuthState = {
   promptOpen: boolean;
@@ -55,6 +56,7 @@ export function useAuth(): AuthState {
         return;
       }
       setMeta(result.meta);
+      setLivePreviewLimits(result.meta.limits);
       if (result.meta.authRequired && readToken() === "") {
         setPromptOpen(true);
         setHasSession(false);
@@ -91,6 +93,7 @@ export function useAuth(): AuthState {
     void boot(ac.signal);
     return () => {
       ac.abort();
+      setLivePreviewLimits(undefined);
     };
   }, [boot]);
 
@@ -109,6 +112,7 @@ export function useAuth(): AuthState {
     writeToken("");
     setHasSession(false);
     setMeta(null);
+    setLivePreviewLimits(undefined);
     setPromptOpen(true);
     try {
       await logoutSession();

@@ -1,0 +1,58 @@
+import { LIMITS } from "@web-grep/shared";
+
+export type PreviewChunkLimits = {
+  previewChunk?: number | undefined;
+  previewChunkMax?: number | undefined;
+  /** Legacy meta field; ignored for /api/file request size. */
+  previewLines?: number | undefined;
+};
+
+/** Shared default /api/file count. Prefer resolvePreviewChunk(meta.limits). */
+export const PREVIEW_CHUNK = LIMITS.previewChunk;
+
+let liveLimits: PreviewChunkLimits | undefined;
+const liveListeners = new Set<() => void>();
+
+function positiveInt(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 1
+    ? Math.floor(value)
+    : fallback;
+}
+
+/**
+ * Per-request preview size. Uses meta `previewChunk` / `previewChunkMax`
+ * when present; otherwise shared LIMITS. Never reads legacy `previewLines`.
+ */
+export function resolvePreviewChunk(
+  limits?: PreviewChunkLimits | null,
+): number {
+  const max = positiveInt(limits?.previewChunkMax, LIMITS.previewChunkMax);
+  const chunk = positiveInt(limits?.previewChunk, LIMITS.previewChunk);
+  return Math.min(chunk, max);
+}
+
+/** Call when `/api/meta` arrives or clears so file fetches can follow live limits. */
+export function setLivePreviewLimits(
+  limits: PreviewChunkLimits | null | undefined,
+): void {
+  liveLimits = limits ?? undefined;
+  for (const listener of liveListeners) {
+    listener();
+  }
+}
+
+export function subscribeLivePreviewLimits(listener: () => void): () => void {
+  liveListeners.add(listener);
+  return () => {
+    liveListeners.delete(listener);
+  };
+}
+
+export function hasLivePreviewLimits(): boolean {
+  return liveLimits !== undefined;
+}
+
+/** Resolved count from the latest meta.limits, or shared default if meta is gone. */
+export function livePreviewChunk(): number {
+  return resolvePreviewChunk(liveLimits);
+}

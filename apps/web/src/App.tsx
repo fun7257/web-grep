@@ -25,6 +25,7 @@ import { useSearch } from "./hooks/useSearch.ts";
 import { copyText } from "./copyText.ts";
 import { parseGlobs } from "./globs.ts";
 import type { HlTermInput } from "./highlight.ts";
+import { resolvePreviewChunk } from "./previewChunk.ts";
 import { useAuth } from "./hooks/useAuth.ts";
 import { useBatchedHits } from "./hooks/useBatchedHits.ts";
 import {
@@ -700,6 +701,11 @@ function AppShell() {
         target={contextTarget}
         terms={hlTerms}
         opts={hlOpts}
+        previewChunk={
+          token.meta === null
+            ? null
+            : resolvePreviewChunk(token.meta.limits)
+        }
         onClose={() => {
           setContextTarget(null);
         }}

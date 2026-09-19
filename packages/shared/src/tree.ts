@@ -15,15 +15,6 @@ export const TreeQuerySchema = z.object({
 });
 export type TreeQuery = z.output<typeof TreeQuerySchema>;
 
-/** Same filters as `/api/tree` (`path`, `mtimeAfter`, `exclude`, `include`). */
-export const CountQuerySchema = TreeQuerySchema;
-export type CountQuery = TreeQuery;
-
-export const CountResponseSchema = z.object({
-  count: z.number().int().nonnegative(),
-});
-export type CountResponse = z.output<typeof CountResponseSchema>;
-
 export const TreeEntrySchema = z.object({
   name: z.string().min(1),
   path: z.string(),

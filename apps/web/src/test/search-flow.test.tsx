@@ -8,8 +8,10 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LIMITS } from "@web-grep/shared";
 import { TOKEN_STORAGE_KEY } from "../api/headers.ts";
 import { App } from "../App.tsx";
+import { setLivePreviewLimits } from "../previewChunk.ts";
 
 
 const META = {
@@ -24,6 +26,8 @@ const META = {
     timeoutMs: 30_000,
     previewBytes: 1_048_576,
     previewLines: 201,
+    previewChunk: 160,
+    previewChunkMax: 400,
     queryMaxChars: 512,
   },
   defaultLocale: "zh-CN",
@@ -150,7 +154,9 @@ function fileWindowForUrl(url: string) {
   const path = parsed.searchParams.get("path") ?? "";
   const line = Number(parsed.searchParams.get("line") ?? "1");
   const from = Number(parsed.searchParams.get("from") ?? String(line));
-  const count = Number(parsed.searchParams.get("count") ?? "160");
+  const count = Number(
+    parsed.searchParams.get("count") ?? String(LIMITS.previewChunk),
+  );
   const last = from + Math.min(count, 8) - 1;
   const lines = [];
   for (let n = from; n <= last; n++) {
@@ -174,6 +180,9 @@ function mockFetch(
     authRequired?: boolean;
     treeEntries?: { name: string; path: string; dir: boolean }[];
     engine?: "rg" | "none";
+    limits?: Partial<{
+      [K in keyof (typeof META)["limits"]]: number;
+    }>;
   },
 ): ReturnType<typeof vi.fn> {
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
@@ -211,14 +220,12 @@ function mockFetch(
         jsonResponse(200, {
           ...META,
           engine: auth?.engine ?? META.engine,
+          limits: { ...META.limits, ...auth?.limits },
         }),
       );
     }
     if (url.includes("/api/auth/logout")) {
       return Promise.resolve(jsonResponse(200, { ok: true }));
-    }
-    if (url.includes("/api/count")) {
-      return Promise.resolve(jsonResponse(200, { count: 1 }));
     }
     if (url.includes("/api/tree")) {
       if (auth?.authRequired === true) {
@@ -361,6 +368,7 @@ describe("search flow", () => {
 
   afterEach(() => {
     cleanup();
+    setLivePreviewLimits(undefined);
     window.history.replaceState({}, "", "/");
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
@@ -1262,8 +1270,50 @@ describe("search flow", () => {
       .map((call) => requestUrl(call[0] as RequestInfo))
       .filter((url) => url.includes("/api/file"));
     expect(fileUrls.some((url) => url.includes("from=1"))).toBe(true);
+    expect(
+      fileUrls.some((url) => {
+        const count = new URL(url, "http://localhost").searchParams.get(
+          "count",
+        );
+        return count === String(LIMITS.previewChunk);
+      }),
+    ).toBe(true);
     expect(screen.getByLabelText("Go to line")).toBeTruthy();
     expect(dialog.querySelectorAll(".preview-line").length).toBeGreaterThan(0);
+  });
+
+  it("uses meta previewChunk for /api/file count and ignores previewLines", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+        limits: { previewChunk: 80, previewLines: 201 },
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(treeName("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(treeName("ok.txt"));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    await waitFor(() => {
+      expect(dialog.textContent).toMatch(/ok\.txt line 1/);
+    });
+    const fileCounts = (): (string | null)[] =>
+      fetchMock.mock.calls
+        .map((call) => requestUrl(call[0] as RequestInfo))
+        .filter((url) => url.includes("/api/file"))
+        .map((url) =>
+          new URL(url, "http://localhost").searchParams.get("count"),
+        );
+    await waitFor(() => {
+      expect(fileCounts().length).toBeGreaterThan(0);
+    });
+    expect(fileCounts()[0]).toBe("80");
+    expect(fileCounts().every((count) => count === "80")).toBe(true);
+    expect(fileCounts().some((count) => count === "201")).toBe(false);
+    expect(fileCounts().some((count) => count === "160")).toBe(false);
   });
 
   it("jumps to a line in the tree file preview", async () => {
@@ -1466,7 +1516,9 @@ describe("search flow", () => {
             lines: [],
           });
         }
-        const count = Number(parsed.searchParams.get("count") ?? "160");
+        const count = Number(
+          parsed.searchParams.get("count") ?? String(LIMITS.previewChunk),
+        );
         const last = Math.min(from + Math.min(count, 8) - 1, lastLine);
         const lines = [];
         for (let n = from; n <= last; n++) {

@@ -1,19 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   AuthStatusSchema,
-  CountQuerySchema,
-  CountResponseSchema,
   ErrorCodeSchema,
-  LoginRequestSchema,
-  LoginResponseSchema,
   FileQuerySchema,
   FileSliceQuerySchema,
   FileWindowResponseSchema,
   HealthResponseSchema,
   JsonErrorSchema,
   LIMITS,
-  mapLegacyErrorCode,
+  LoginRequestSchema,
+  LoginResponseSchema,
   MetaResponseSchema,
+  mapLegacyErrorCode,
   SearchRequestSchema,
   SseMetaSchema,
   TreeListingSchema,
@@ -103,10 +101,7 @@ describe("SearchRequestSchema", () => {
   it("accepts object andTerms with per-term modifiers", () => {
     const parsed = SearchRequestSchema.parse({
       query: "Hello",
-      andTerms: [
-        { query: "world.*", regex: true },
-        "plain",
-      ],
+      andTerms: [{ query: "world.*", regex: true }, "plain"],
     });
     expect(parsed.andTerms).toEqual([
       { query: "world.*", regex: true },
@@ -194,6 +189,26 @@ describe("MetaResponseSchema", () => {
     expect(
       MetaResponseSchema.safeParse({ ...base, engine: "literal" }).success,
     ).toBe(false);
+  });
+
+  it("accepts #28 previewChunk / previewChunkMax and still parses without them", () => {
+    const without = MetaResponseSchema.parse({ ...base, engine: "rg" });
+    expect(without.limits.previewChunk).toBeUndefined();
+    expect(without.limits.previewChunkMax).toBeUndefined();
+    expect(without.limits.previewLines).toBe(201);
+
+    const fromServer = MetaResponseSchema.parse({
+      ...base,
+      engine: "rg",
+      limits: {
+        ...base.limits,
+        previewChunk: LIMITS.previewChunk,
+        previewChunkMax: LIMITS.previewChunkMax,
+      },
+    });
+    expect(fromServer.limits.previewChunk).toBe(LIMITS.previewChunk);
+    expect(fromServer.limits.previewChunkMax).toBe(LIMITS.previewChunkMax);
+    expect(fromServer.limits.previewLines).toBe(201);
   });
 });
 
@@ -287,23 +302,6 @@ describe("TreeQuerySchema", () => {
     expect(parsed.exclude).toEqual(["*.test.ts", "dist/**"]);
     expect(parsed.include).toEqual(["src/**"]);
     expect(parsed.mtimeAfter).toBe(1_726_300_000_000);
-  });
-});
-
-describe("Count schemas", () => {
-  it("parses the same query filters as tree", () => {
-    const parsed = CountQuerySchema.parse({
-      path: "apps",
-      exclude: ["node_modules/**"],
-    });
-    expect(parsed.path).toBe("apps");
-    expect(parsed.exclude).toEqual(["node_modules/**"]);
-    expect(parsed.include).toBeUndefined();
-  });
-
-  it("parses { count }", () => {
-    expect(CountResponseSchema.parse({ count: 12 })).toEqual({ count: 12 });
-    expect(CountResponseSchema.safeParse({ count: -1 }).success).toBe(false);
   });
 });
 
