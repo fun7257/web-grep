@@ -206,6 +206,30 @@ func TestTreeListsRoot(t *testing.T) {
 	}
 }
 
+func TestHandlerRegistersDocumentedAPIRoutes(t *testing.T) {
+	s, _ := testServer(t, fakeEngine{})
+	h := s.Handler()
+	cases := []struct {
+		method, url, body string
+	}{
+		{"GET", "http://127.0.0.1:8787/api/health", ""},
+		{"GET", "http://127.0.0.1:8787/api/auth/status", ""},
+		{"POST", "http://127.0.0.1:8787/api/auth/login", `{}`},
+		{"POST", "http://127.0.0.1:8787/api/auth/logout", ""},
+		{"GET", "http://127.0.0.1:8787/api/meta", ""},
+		{"POST", "http://127.0.0.1:8787/api/search", `{"query":"hello"}`},
+		{"GET", "http://127.0.0.1:8787/api/file?path=ok.txt&line=1", ""},
+		{"GET", "http://127.0.0.1:8787/api/tree", ""},
+		{"GET", "http://127.0.0.1:8787/api/count", ""},
+	}
+	for _, tc := range cases {
+		rec := do(t, h, tc.method, tc.url, tc.body, nil)
+		if rec.Code == http.StatusNotFound {
+			t.Fatalf("%s %s: route missing (%d %s)", tc.method, tc.url, rec.Code, rec.Body.String())
+		}
+	}
+}
+
 func TestHealthAndForbiddenHost(t *testing.T) {
 	s, _ := testServer(t, nil)
 	h := s.Handler()

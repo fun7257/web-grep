@@ -84,15 +84,6 @@ func (s *Service) AbortAll() {
 	}
 }
 
-func (s *Service) Cancel(id string) {
-	s.mu.Lock()
-	c, ok := s.inflight[id]
-	s.mu.Unlock()
-	if ok && c != nil {
-		c()
-	}
-}
-
 func (s *Service) Preflight(req Request) Preflight {
 	if s.Kind == "none" || s.Engine == nil {
 		return Preflight{Status: 503, Code: "ENGINE", Message: "ripgrep is not available"}
