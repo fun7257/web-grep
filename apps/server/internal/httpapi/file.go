@@ -17,7 +17,8 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")
 		return
 	}
-	count := preview.DefaultCount
+	cfg := s.Config()
+	count := cfg.FilePreviewCount()
 	if raw := q.Get("count"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n < 1 {
@@ -25,6 +26,9 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		count = n
+	}
+	if max := cfg.FilePreviewCountMax(); count > max {
+		count = max
 	}
 	tail := q.Get("tail") == "1" || q.Get("tail") == "true"
 	from := 0
@@ -51,7 +55,7 @@ func (s *Server) file(w http.ResponseWriter, r *http.Request) {
 			from = 1
 		}
 	}
-	win, err := preview.ReadSlice(s.Config(), preview.Query{Path: path, From: from, Count: count, Tail: tail})
+	win, err := preview.ReadSlice(cfg, preview.Query{Path: path, From: from, Count: count, Tail: tail})
 	if err != nil {
 		var pe *preview.Error
 		if errors.As(err, &pe) {

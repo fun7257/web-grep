@@ -196,7 +196,7 @@ func clearConfigEnv(t *testing.T) {
 	keys := []string{
 		ConfigEnvKey, EnvRoot, EnvHost, EnvPort, EnvPublicHost, EnvToken, EnvRg,
 		EnvWebDist, EnvDev, EnvLogLevel, EnvMaxResults, EnvMaxResultsHard,
-		EnvTimeoutMs, EnvPreviewLines, EnvThreads, EnvMaxConcurrent,
+		EnvTimeoutMs, EnvPreviewLines, EnvPreviewChunk, EnvPreviewChunkMax, EnvThreads, EnvMaxConcurrent,
 		EnvSearchZip, EnvFollowSymlinks, EnvNoIgnore, EnvAllowSecrets,
 	}
 	for _, k := range keys {

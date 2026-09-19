@@ -16,26 +16,28 @@ const (
 )
 
 type rawFile struct {
-	Root           string   `yaml:"root"`
-	Host           string   `yaml:"host"`
-	Port           *int     `yaml:"port"`
-	PublicHost     hostList `yaml:"public_host"`
-	Token          string   `yaml:"token"`
-	Rg             string   `yaml:"rg"`
-	WebDist        string   `yaml:"web_dist"`
-	Dev            *bool    `yaml:"dev"`
-	LogLevel       string   `yaml:"log_level"`
-	MaxResults     *int     `yaml:"max_results"`
-	MaxResultsHard *int     `yaml:"max_results_hard"`
-	TimeoutMs      *int     `yaml:"timeout_ms"`
-	PreviewLines   *int     `yaml:"preview_lines"`
-	Threads        *int     `yaml:"threads"`
-	MaxConcurrent  *int     `yaml:"max_concurrent"`
-	SearchZip      *bool    `yaml:"search_zip"`
-	FollowSymlinks *bool    `yaml:"follow_symlinks"`
-	NoIgnore       *bool    `yaml:"no_ignore"`
-	AllowSecrets   *bool    `yaml:"allow_secrets"`
-	PublicPath     string   `yaml:"public_path"`
+	Root            string   `yaml:"root"`
+	Host            string   `yaml:"host"`
+	Port            *int     `yaml:"port"`
+	PublicHost      hostList `yaml:"public_host"`
+	Token           string   `yaml:"token"`
+	Rg              string   `yaml:"rg"`
+	WebDist         string   `yaml:"web_dist"`
+	Dev             *bool    `yaml:"dev"`
+	LogLevel        string   `yaml:"log_level"`
+	MaxResults      *int     `yaml:"max_results"`
+	MaxResultsHard  *int     `yaml:"max_results_hard"`
+	TimeoutMs       *int     `yaml:"timeout_ms"`
+	PreviewLines    *int     `yaml:"preview_lines"`
+	PreviewChunk    *int     `yaml:"preview_chunk"`
+	PreviewChunkMax *int     `yaml:"preview_chunk_max"`
+	Threads         *int     `yaml:"threads"`
+	MaxConcurrent   *int     `yaml:"max_concurrent"`
+	SearchZip       *bool    `yaml:"search_zip"`
+	FollowSymlinks  *bool    `yaml:"follow_symlinks"`
+	NoIgnore        *bool    `yaml:"no_ignore"`
+	AllowSecrets    *bool    `yaml:"allow_secrets"`
+	PublicPath      string   `yaml:"public_path"`
 }
 
 type hostList []string
@@ -170,6 +172,12 @@ func applyEnv(raw *rawFile) error {
 		return err
 	}
 	if err := envInt(EnvPreviewLines, &raw.PreviewLines); err != nil {
+		return err
+	}
+	if err := envInt(EnvPreviewChunk, &raw.PreviewChunk); err != nil {
+		return err
+	}
+	if err := envInt(EnvPreviewChunkMax, &raw.PreviewChunkMax); err != nil {
 		return err
 	}
 	if err := envInt(EnvThreads, &raw.Threads); err != nil {
