@@ -1,5 +1,11 @@
 import * as z from "zod";
 
+export const HealthResponseSchema = z.object({
+  ok: z.boolean(),
+  engine: z.enum(["rg", "none"]),
+});
+export type HealthResponse = z.output<typeof HealthResponseSchema>;
+
 export const MetaResponseSchema = z.object({
   engine: z.enum(["rg", "none"]),
   rgVersion: z.string().nullable(),
