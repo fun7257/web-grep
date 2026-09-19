@@ -45,38 +45,33 @@ export function shouldFlushListHits(
  */
 export function useBatchedHits(hits: SseHit[], status: SearchStatus): SseHit[] {
   const [published, setPublished] = useState<SseHit[]>(hits);
-  const publishedRef = useRef(published);
   const hitsRef = useRef(hits);
   const timerRef = useRef(0);
 
-  publishedRef.current = published;
-  hitsRef.current = hits;
-
   useEffect(() => {
+    hitsRef.current = hits;
+
     const flush = (): void => {
       if (timerRef.current !== 0) {
         window.clearTimeout(timerRef.current);
         timerRef.current = 0;
       }
-      const next = hitsRef.current;
-      if (publishedRef.current !== next) {
-        setPublished(next);
-      }
+      setPublished(hitsRef.current);
     };
 
-    if (shouldFlushListHits(publishedRef.current, hits, status)) {
+    if (shouldFlushListHits(published, hits, status)) {
       flush();
       return;
     }
 
-    if (hits.length === publishedRef.current.length) {
+    if (hits.length === published.length) {
       return;
     }
 
     if (timerRef.current === 0) {
       timerRef.current = window.setTimeout(flush, HIT_BATCH_MS);
     }
-  }, [hits, status]);
+  }, [hits, published, status]);
 
   useEffect(() => {
     return () => {
