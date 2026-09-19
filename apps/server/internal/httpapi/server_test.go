@@ -876,3 +876,126 @@ func TestLiveRipgrep(t *testing.T) {
 		t.Fatal(rec.Body.String())
 	}
 }
+
+func TestFileTailQuery(t *testing.T) {
+	s, root := testServer(t, nil)
+	var lines []byte
+	for i := 1; i <= 10; i++ {
+		lines = append(lines, fmt.Sprintf("line-%d\n", i)...)
+	}
+	if err := os.WriteFile(filepath.Join(root, "ok.txt"), lines, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rec := do(t, s.Handler(), "GET", "http://127.0.0.1:8787/api/file?path=ok.txt&tail=1&count=3", "", nil)
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var win struct {
+		StartLine int  `json:"startLine"`
+		LineCount int  `json:"lineCount"`
+		Eof       bool `json:"eof"`
+		Lines     []struct {
+			N    int    `json:"n"`
+			Text string `json:"text"`
+		} `json:"lines"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &win); err != nil {
+		t.Fatal(err)
+	}
+	if !win.Eof || win.LineCount != 3 || win.StartLine != 8 {
+		t.Fatalf("tail window %+v", win)
+	}
+	if len(win.Lines) != 3 || win.Lines[0].N != 8 || win.Lines[2].Text != "line-10" {
+		t.Fatalf("tail lines %+v", win.Lines)
+	}
+}
+
+func TestTreeAndCountIncludeExclude(t *testing.T) {
+	s, root := testServer(t, nil)
+	if err := os.WriteFile(filepath.Join(root, "keep.ts"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "skip.js"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "keep.test.ts"), []byte("a\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	treeRec := do(t, s.Handler(), "GET", "http://127.0.0.1:8787/api/tree?include=*.ts&exclude=*.test.ts", "", nil)
+	if treeRec.Code != 200 {
+		t.Fatal(treeRec.Code, treeRec.Body.String())
+	}
+	var listing struct {
+		Entries []struct {
+			Name string `json:"name"`
+		} `json:"entries"`
+	}
+	if err := json.Unmarshal(treeRec.Body.Bytes(), &listing); err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, e := range listing.Entries {
+		names[e.Name] = true
+	}
+	if !names["keep.ts"] {
+		t.Fatalf("keep.ts missing: %+v", listing.Entries)
+	}
+	if names["skip.js"] || names["keep.test.ts"] {
+		t.Fatalf("filters leaked: %+v", listing.Entries)
+	}
+
+	countRec := do(t, s.Handler(), "GET", "http://127.0.0.1:8787/api/count?include=*.ts&exclude=*.test.ts", "", nil)
+	if countRec.Code != 200 {
+		t.Fatal(countRec.Code, countRec.Body.String())
+	}
+	var counted struct {
+		Count int `json:"count"`
+	}
+	if err := json.Unmarshal(countRec.Body.Bytes(), &counted); err != nil {
+		t.Fatal(err)
+	}
+	if counted.Count != 1 {
+		t.Fatalf("count=%d want 1", counted.Count)
+	}
+}
+
+func TestHealthIgnoresApiVersionHeader(t *testing.T) {
+	s, _ := testServer(t, nil)
+	rec := do(t, s.Handler(), "GET", "http://127.0.0.1:8787/api/health", "", map[string]string{
+		"X-Api-Version": "1",
+	})
+	if rec.Code != 200 {
+		t.Fatal(rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Ok     bool   `json:"ok"`
+		Engine string `json:"engine"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !body.Ok || (body.Engine != "rg" && body.Engine != "none") {
+		t.Fatalf("health %+v", body)
+	}
+}
+
+func TestSearchAndTermsRejectsMoreThanSixteen(t *testing.T) {
+	s, _ := testServer(t, fakeEngine{})
+	terms := make([]string, 17)
+	for i := range terms {
+		terms[i] = fmt.Sprintf("t%d", i)
+	}
+	raw, err := json.Marshal(map[string]any{"query": "foo", "andTerms": terms})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search", string(raw), nil)
+	if rec.Code != 400 {
+		t.Fatalf("got %d %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]string
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	if body["code"] != "INVALID_QUERY" {
+		t.Fatalf("%v", body)
+	}
+}

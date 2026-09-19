@@ -3,7 +3,7 @@
 前后端分离开发的**唯一接口标准**。字段名、错误码、SSE 事件以 `packages/shared` 的 Zod schema 为准；Go 服务必须与之逐字段对齐。
 
 - 契约包：`@web-grep/shared`
-- 当前版本：`1`（请求可带 `X-Api-Version: 1`，缺省视为 1）
+- 当前版本：`1`。请求头 `X-Api-Version` **尚未实现**（Go 不读该头，带不带行为相同）；缺省即 v1。
 - 传输：HTTP/1.1，JSON UTF-8；搜索为 SSE
 - 基址：开发时 Vite `http://127.0.0.1:5173` 把 `/api` 代理到 Go `http://127.0.0.1:8787`
 
@@ -65,11 +65,13 @@ HTTP JSON（SSE 尚未开始时）：
 
 ### `GET /api/health`（公开）
 
+响应 `HealthResponseSchema`：
+
 ```json
 { "ok": true, "engine": "rg" }
 ```
 
-`engine`：`rg` | `none`。
+`engine`：`rg` | `none`。与搜索 SSE `meta.engine`、`GET /api/meta` 的 `engine` 同一套枚举（没有 `literal`）。
 
 ### `GET /api/auth/status`（公开）
 
@@ -97,14 +99,15 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `query` | 必填 | 1–8192 字符。UI 多条件 AND 时，前端编成同一行的 `a.*b\|b.*a`（字面量会先转义）；空条件丢弃。单框里的空格是查询内容，不是分隔符。 |
+| `query` | 必填 | 1–8192 字符。第一框。空条件丢弃。单框里的空格是查询内容，不是分隔符。 |
+| `andTerms` | `[]` | 额外 AND 条件，最多 **16** 项。每项是非空字符串，或 `{ query, regex?, caseSensitive?, wordMatch? }`（`query` 1–8192）。与 `query` 同时命中（顺序不限）。**不会**折成一条 `a.*b\|b.*a` 正则；服务端对每一项再跑一轮 rg 过滤。字符串项按字面量、不区分大小写、非整词。对象项未写的修饰符为 false，不从顶层字段继承。当前 UI 把其余框发成对象。 |
 | `path` | `""` | 相对目录；空=整个根 |
 | `globInclude` | `[]` | 用户 glob 或树勾选转成的路径 glob（多项之间 OR） |
-| `globAnd` | `[]` | 与 `globInclude` 求交；树勾选后再套高级选项的包含 glob |
+| `globAnd` | `[]` | 与 `globInclude` 求交。当前 UI 发空数组；不要为了「用上字段」去改搜索范围 |
 | `globExclude` | `[]` | |
-| `regex` | `false` | `false` → rg `-F` |
-| `caseSensitive` | `false` | |
-| `wordMatch` | `false` | |
+| `regex` | `false` | `false` → rg `-F`（只作用于 `query`，不自动套到 `andTerms`） |
+| `caseSensitive` | `false` | 只作用于 `query` |
+| `wordMatch` | `false` | 只作用于 `query` |
 | `hidden` | `true` | `true` → rg `--hidden` |
 | `maxResults` | 服务端配置 | 正整数；省略则用服务端 `max_results` |
 | `mtimeAfter` | 省略=不限 | unix 毫秒。服务端先按文件 mtime 列出文件，再只对这些路径跑 rg |
@@ -125,13 +128,26 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 取消：关掉 fetch（AbortController）。超时：`done.timedOut=true`，不是 `error`。
 
-### `GET /api/count?path=`（设置了密码时需会话）
+### `GET /api/count`（设置了密码时需会话）
 
-`{ "count": 12 }`。统计该路径下的文件数，可选 `mtimeAfter`（unix 毫秒），规则与目录树过滤相同。
+查询串与目录树相同（`CountQuerySchema`，与 `TreeQuerySchema` 同形）：`path`、`mtimeAfter`、可重复的 `include` / `exclude`。
 
-### `GET /api/tree?path=`（设置了密码时需会话）
+响应 `CountResponseSchema`：`{ "count": 12 }`。统计该路径下通过过滤的文件数（不是搜索次数）。当前 UI 未接这个接口。
 
-`path` 省略或空=根。响应 `TreeListingSchema`：
+### `GET /api/tree`（设置了密码时需会话）
+
+查询串 `TreeQuerySchema`：
+
+| 参数 | 说明 |
+| --- | --- |
+| `path` | 相对目录；省略或空=根 |
+| `mtimeAfter` | 可选，unix 毫秒。只列出该时间之后改过的文件，以及下面仍有这类文件的目录 |
+| `include` | 可选，可重复。用户 glob；只保留匹配的文件（以及下面仍有匹配文件的目录）。当前 UI 不发 |
+| `exclude` | 可选，可重复。用户 glob；去掉匹配的文件。当前 UI 排除框发这个参数 |
+
+`include` / `exclude` 用与搜索相同的用户 glob 清洗（含 `!`、`--`、绝对路径、`..` 的项会被丢掉，目录树接口不因此 400）。可与 `mtimeAfter` 同时用。逗号 / 分号 / 空白也会拆成多项。
+
+响应 `TreeListingSchema`：
 
 ```json
 {
@@ -141,7 +157,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 }
 ```
 
-一次性只列一层。`.git` / `node_modules` / `.vite` / 密钥不出现。`truncated=true` 表示该层超过 2000 条被截断。可选 `mtimeAfter`（unix 毫秒）：只列出该时间之后改过的文件，以及下面仍有这类文件的目录。
+一次性只列一层。`.git` / `node_modules` / `.vite` / 密钥不出现。`truncated=true` 表示该层超过 2000 条被截断。
 
 ### `GET /api/file`（设置了密码时需会话）
 
@@ -150,9 +166,10 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 | 参数 | 说明 |
 | --- | --- |
 | `path` | 必填，相对路径 |
-| `from` | 起始行（1-based）。省略则用 `line` 居中 |
+| `from` | 起始行（1-based）。省略且未开 `tail` 时用 `line` 居中 |
 | `count` | 行数，默认 160，最大 400 |
 | `line` | 可选，居中锚点 |
+| `tail` | 可选。`1` / `true` 时从文件末尾取 `count` 行，不要求 `from` / `line`。当前 UI 弹窗跳行失败时会再请求 `tail=1` |
 
 响应 `FileWindowResponseSchema`：一段行窗口，**不是整文件**。
 
@@ -196,9 +213,9 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 ## 6. 版本策略
 
-- 请求头 `X-Api-Version: 1` 可选。
+- 契约版本是 `1`。请求头 `X-Api-Version` **尚未实现**（Go 忽略），不要靠它分流。
 - v1 冻结：上表路径与必填字段。
-- 新增可选 JSON 字段：改 shared，文档加一行，旧前端忽略即可。
+- 新增可选 JSON / 查询字段：改 shared，文档加一行，旧前端忽略即可。
 - 破坏性变更：新路径 `/api/v2/...` 或新版本号，旧 v1 保留到明确下线。
 
 ---
@@ -208,5 +225,5 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 1. 改 Vite proxy 到本地 mock，或在 `apps/web/src/api/*` 用 fixture 短路。
 2. Mock 必须能通过对应 `*Schema.safeParse`。
 3. 搜索 mock 至少覆盖：`meta` → 若干 `hit` → `done`；以及 HTTP 400/401。
-4. 文件 mock 按 `from/count` 切数组，并正确设 `eof`。
+4. 文件 mock 按 `from/count` 切数组（`tail=1` 则取末尾），并正确设 `eof`。
 5. 联调前跑 `pnpm --filter @web-grep/shared test` 与 `go test ./...`。
