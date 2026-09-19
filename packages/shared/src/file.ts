@@ -30,7 +30,6 @@ export const FileSliceQuerySchema = z.object({
     .max(LIMITS.previewChunkMax)
     .optional(),
   line: z.number().int().positive().optional(),
-  tail: z.boolean().optional(),
 });
 export type FileSliceQuery = z.output<typeof FileSliceQuerySchema>;
 

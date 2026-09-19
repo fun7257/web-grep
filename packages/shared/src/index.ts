@@ -23,7 +23,6 @@ export {
   type FileWindowResponse,
   FileWindowResponseSchema,
 } from "./file.ts";
-export { type HealthResponse, HealthResponseSchema } from "./health.ts";
 export { LIMITS } from "./limits.ts";
 export { type MetaResponse, MetaResponseSchema } from "./meta.ts";
 export {
@@ -45,10 +44,6 @@ export {
   SearchRequestSchema,
 } from "./searchRequest.ts";
 export {
-  type CountQuery,
-  CountQuerySchema,
-  type CountResponse,
-  CountResponseSchema,
   type TreeEntry,
   TreeEntrySchema,
   type TreeListing,

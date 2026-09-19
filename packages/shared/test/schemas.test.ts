@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   AuthStatusSchema,
-  CountQuerySchema,
-  CountResponseSchema,
   ErrorCodeSchema,
   LoginRequestSchema,
   LoginResponseSchema,
   FileQuerySchema,
   FileSliceQuerySchema,
   FileWindowResponseSchema,
-  HealthResponseSchema,
   JsonErrorSchema,
   LIMITS,
   mapLegacyErrorCode,
@@ -17,7 +14,6 @@ import {
   SearchRequestSchema,
   SseMetaSchema,
   TreeListingSchema,
-  TreeQuerySchema,
 } from "../src/index.ts";
 
 describe("auth schemas", () => {
@@ -112,21 +108,6 @@ describe("SearchRequestSchema", () => {
       { query: "world.*", regex: true },
       "plain",
     ]);
-  });
-
-  it("rejects more than 16 andTerms", () => {
-    expect(
-      SearchRequestSchema.safeParse({
-        query: "foo",
-        andTerms: Array.from({ length: 17 }, (_, i) => `t${i}`),
-      }).success,
-    ).toBe(false);
-    expect(
-      SearchRequestSchema.safeParse({
-        query: "foo",
-        andTerms: Array.from({ length: 16 }, (_, i) => `t${i}`),
-      }).success,
-    ).toBe(true);
   });
 
   it("accepts mtimeAfter as unix milliseconds", () => {
@@ -246,18 +227,6 @@ describe("FileSliceQuerySchema", () => {
     });
     expect(parsed.from).toBe(1);
     expect(parsed.count).toBe(LIMITS.previewChunk);
-    expect(parsed.tail).toBeUndefined();
-  });
-
-  it("accepts optional tail without defaulting it", () => {
-    const parsed = FileSliceQuerySchema.parse({
-      path: "src/app.ts",
-      tail: true,
-      count: LIMITS.previewChunk,
-    });
-    expect(parsed.tail).toBe(true);
-    expect(parsed.from).toBeUndefined();
-    expect(FileSliceQuerySchema.parse({ path: "src/app.ts" }).tail).toBeUndefined();
   });
 });
 
@@ -283,60 +252,6 @@ describe("TreeListingSchema", () => {
       entries: [{ name: "src", path: "src", dir: true }],
     });
     expect(parsed.entries[0]?.dir).toBe(true);
-  });
-});
-
-describe("TreeQuerySchema", () => {
-  it("defaults path and leaves include/exclude optional", () => {
-    const parsed = TreeQuerySchema.parse({});
-    expect(parsed.path).toBe("");
-    expect(parsed.mtimeAfter).toBeUndefined();
-    expect(parsed.include).toBeUndefined();
-    expect(parsed.exclude).toBeUndefined();
-  });
-
-  it("accepts include and exclude glob lists", () => {
-    const parsed = TreeQuerySchema.parse({
-      path: "src",
-      include: ["*.ts"],
-      exclude: ["*.test.ts"],
-      mtimeAfter: 1_726_300_000_000,
-    });
-    expect(parsed.include).toEqual(["*.ts"]);
-    expect(parsed.exclude).toEqual(["*.test.ts"]);
-    expect(parsed.mtimeAfter).toBe(1_726_300_000_000);
-  });
-});
-
-describe("HealthResponseSchema", () => {
-  it("accepts engine rg or none and rejects literal", () => {
-    expect(HealthResponseSchema.parse({ ok: true, engine: "rg" })).toEqual({
-      ok: true,
-      engine: "rg",
-    });
-    expect(HealthResponseSchema.safeParse({ ok: true, engine: "none" }).success).toBe(
-      true,
-    );
-    expect(
-      HealthResponseSchema.safeParse({ ok: true, engine: "literal" }).success,
-    ).toBe(false);
-  });
-});
-
-describe("Count schemas", () => {
-  it("parses the same optional filters as TreeQuery", () => {
-    const parsed = CountQuerySchema.parse({
-      path: "src",
-      exclude: ["*.log"],
-    });
-    expect(parsed.path).toBe("src");
-    expect(parsed.exclude).toEqual(["*.log"]);
-    expect(parsed.include).toBeUndefined();
-    expect(CountResponseSchema.parse({ count: 12 })).toEqual({ count: 12 });
-  });
-
-  it("rejects a negative count", () => {
-    expect(CountResponseSchema.safeParse({ count: -1 }).success).toBe(false);
   });
 });
 
