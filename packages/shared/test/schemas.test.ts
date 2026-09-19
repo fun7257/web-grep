@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   AuthStatusSchema,
-  CountQuerySchema,
-  CountResponseSchema,
   ErrorCodeSchema,
   FileQuerySchema,
   FileSliceQuerySchema,
@@ -304,23 +302,6 @@ describe("TreeQuerySchema", () => {
     expect(parsed.exclude).toEqual(["*.test.ts", "dist/**"]);
     expect(parsed.include).toEqual(["src/**"]);
     expect(parsed.mtimeAfter).toBe(1_726_300_000_000);
-  });
-});
-
-describe("Count schemas", () => {
-  it("parses the same query filters as tree", () => {
-    const parsed = CountQuerySchema.parse({
-      path: "apps",
-      exclude: ["node_modules/**"],
-    });
-    expect(parsed.path).toBe("apps");
-    expect(parsed.exclude).toEqual(["node_modules/**"]);
-    expect(parsed.include).toBeUndefined();
-  });
-
-  it("parses { count }", () => {
-    expect(CountResponseSchema.parse({ count: 12 })).toEqual({ count: 12 });
-    expect(CountResponseSchema.safeParse({ count: -1 }).success).toBe(false);
   });
 });
 

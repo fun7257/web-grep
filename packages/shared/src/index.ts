@@ -49,10 +49,6 @@ export {
   SearchRequestSchema,
 } from "./searchRequest.ts";
 export {
-  type CountQuery,
-  CountQuerySchema,
-  type CountResponse,
-  CountResponseSchema,
   type TreeEntry,
   TreeEntrySchema,
   type TreeListing,

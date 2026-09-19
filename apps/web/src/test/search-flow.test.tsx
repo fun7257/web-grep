@@ -227,9 +227,6 @@ function mockFetch(
     if (url.includes("/api/auth/logout")) {
       return Promise.resolve(jsonResponse(200, { ok: true }));
     }
-    if (url.includes("/api/count")) {
-      return Promise.resolve(jsonResponse(200, { count: 1 }));
-    }
     if (url.includes("/api/tree")) {
       if (auth?.authRequired === true) {
         const headers = init?.headers as Record<string, string> | undefined;
@@ -1312,8 +1309,9 @@ describe("search flow", () => {
         );
     await waitFor(() => {
       expect(fileCounts().length).toBeGreaterThan(0);
-      expect(fileCounts().every((count) => count === "80")).toBe(true);
     });
+    expect(fileCounts()[0]).toBe("80");
+    expect(fileCounts().every((count) => count === "80")).toBe(true);
     expect(fileCounts().some((count) => count === "201")).toBe(false);
     expect(fileCounts().some((count) => count === "160")).toBe(false);
   });
