@@ -15,6 +15,11 @@ import (
 var errInvalidListingQuery = errors.New("invalid request")
 
 func (s *Server) tree(w http.ResponseWriter, r *http.Request) {
+	release, ok := s.acquireRead(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	rel, filter, err := parseListingQuery(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")
@@ -31,6 +36,11 @@ func (s *Server) tree(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) count(w http.ResponseWriter, r *http.Request) {
+	release, ok := s.acquireRead(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	rel, filter, err := parseListingQuery(r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")

@@ -16,28 +16,31 @@ const (
 )
 
 type rawFile struct {
-	Root            string   `yaml:"root"`
-	Host            string   `yaml:"host"`
-	Port            *int     `yaml:"port"`
-	PublicHost      hostList `yaml:"public_host"`
-	Token           string   `yaml:"token"`
-	Rg              string   `yaml:"rg"`
-	WebDist         string   `yaml:"web_dist"`
-	Dev             *bool    `yaml:"dev"`
-	LogLevel        string   `yaml:"log_level"`
-	MaxResults      *int     `yaml:"max_results"`
-	MaxResultsHard  *int     `yaml:"max_results_hard"`
-	TimeoutMs       *int     `yaml:"timeout_ms"`
-	PreviewLines    *int     `yaml:"preview_lines"`
-	PreviewChunk    *int     `yaml:"preview_chunk"`
-	PreviewChunkMax *int     `yaml:"preview_chunk_max"`
-	Threads         *int     `yaml:"threads"`
-	MaxConcurrent   *int     `yaml:"max_concurrent"`
-	SearchZip       *bool    `yaml:"search_zip"`
-	FollowSymlinks  *bool    `yaml:"follow_symlinks"`
-	NoIgnore        *bool    `yaml:"no_ignore"`
-	AllowSecrets    *bool    `yaml:"allow_secrets"`
-	PublicPath      string   `yaml:"public_path"`
+	Root              string   `yaml:"root"`
+	Host              string   `yaml:"host"`
+	Port              *int     `yaml:"port"`
+	PublicHost        hostList `yaml:"public_host"`
+	Token             string   `yaml:"token"`
+	Rg                string   `yaml:"rg"`
+	WebDist           string   `yaml:"web_dist"`
+	Dev               *bool    `yaml:"dev"`
+	LogLevel          string   `yaml:"log_level"`
+	MaxResults        *int     `yaml:"max_results"`
+	MaxResultsHard    *int     `yaml:"max_results_hard"`
+	TimeoutMs         *int     `yaml:"timeout_ms"`
+	PreviewLines      *int     `yaml:"preview_lines"`
+	PreviewChunk      *int     `yaml:"preview_chunk"`
+	PreviewChunkMax   *int     `yaml:"preview_chunk_max"`
+	Threads           *int     `yaml:"threads"`
+	MaxConcurrent     *int     `yaml:"max_concurrent"`
+	ReadMaxConcurrent *int     `yaml:"read_max_concurrent"`
+	ReadRateLimit     *int     `yaml:"read_rate_limit"`
+	ReadRateWindowMs  *int     `yaml:"read_rate_window_ms"`
+	SearchZip         *bool    `yaml:"search_zip"`
+	FollowSymlinks    *bool    `yaml:"follow_symlinks"`
+	NoIgnore          *bool    `yaml:"no_ignore"`
+	AllowSecrets      *bool    `yaml:"allow_secrets"`
+	PublicPath        string   `yaml:"public_path"`
 }
 
 type hostList []string
@@ -184,6 +187,15 @@ func applyEnv(raw *rawFile) error {
 		return err
 	}
 	if err := envInt(EnvMaxConcurrent, &raw.MaxConcurrent); err != nil {
+		return err
+	}
+	if err := envInt(EnvReadMaxConcurrent, &raw.ReadMaxConcurrent); err != nil {
+		return err
+	}
+	if err := envInt(EnvReadRateLimit, &raw.ReadRateLimit); err != nil {
+		return err
+	}
+	if err := envInt(EnvReadRateWindowMs, &raw.ReadRateWindowMs); err != nil {
 		return err
 	}
 	if err := envBool(EnvSearchZip, &raw.SearchZip); err != nil {

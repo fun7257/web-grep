@@ -38,6 +38,9 @@ timeout_ms: 0 # 0 = 不超时
 # preview_chunk: 160          # GET /api/file 默认 count；WEB_GREP_PREVIEW_CHUNK
 # preview_chunk_max: 400      # GET /api/file count 上限；WEB_GREP_PREVIEW_CHUNK_MAX
 # preview_lines: 201          # 已弃用，不影响文件预览行数
+# read_max_concurrent: 32     # 同时进行的 tree/count/file；WEB_GREP_READ_MAX_CONCURRENT
+# read_rate_limit: 120        # 每客户端窗口内次数；WEB_GREP_READ_RATE_LIMIT
+# read_rate_window_ms: 10000  # 窗口毫秒；WEB_GREP_READ_RATE_WINDOW_MS
 search_zip: true
 follow_symlinks: true
 no_ignore: true # 忽略 gitignore，日志才能搜全

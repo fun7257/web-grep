@@ -11,6 +11,11 @@ import (
 )
 
 func (s *Server) file(w http.ResponseWriter, r *http.Request) {
+	release, ok := s.acquireRead(w, r)
+	if !ok {
+		return
+	}
+	defer release()
 	q := r.URL.Query()
 	path := q.Get("path")
 	if path == "" || len(path) > config.PathMaxChars {

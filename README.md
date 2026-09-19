@@ -74,7 +74,7 @@ Primary config is `config.yaml` (see `config.example.yaml`). Path: `-config`, el
 | `dev` | `WEB_GREP_DEV` | `false` | Skip serving the SPA (`pnpm dev` sets `1`). |
 | `log_level` | `WEB_GREP_LOG_LEVEL` | `info` | `debug \| info \| warn \| error` |
 
-其余搜索参数（`max_results`、`timeout_ms`、`no_ignore` 等）见 `config.example.yaml`。
+其余搜索参数（`max_results`、`timeout_ms`、`no_ignore` 等）见 `config.example.yaml`。`GET /api/tree` / `/api/count` / `/api/file` 另有读接口限额：`read_max_concurrent`（默认 32）、`read_rate_limit`（默认 120 / `read_rate_window_ms` 默认 10s）。超限返回 HTTP 429 `BUSY`。搜索仍只用 `max_concurrent`。
 
 - Loopback bind can start without `token`.
 - Binding `0.0.0.0` without `token` **or** `public_host` fails at boot.

@@ -15,6 +15,7 @@ import (
 	"web-grep/internal/config"
 	"web-grep/internal/httpapi"
 	"web-grep/internal/logx"
+	"web-grep/internal/ratelimit"
 	"web-grep/internal/rg"
 	"web-grep/internal/search"
 	"web-grep/internal/stats"
@@ -68,6 +69,7 @@ func run() error {
 		Engine:   kind,
 		WebDist:  webDist,
 		Sessions: sessions,
+		Reads:    ratelimit.New(),
 	}
 	srv.SetConfig(cfg)
 	if s, ok := version.(string); ok {

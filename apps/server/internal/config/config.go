@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -16,7 +17,12 @@ const (
 	MaxResultsHard       = 0
 	TimeoutMsDefault     = 0
 	MaxConcurrentDefault = 8
-	PreviewBytes         = 0
+	// Read-API limits cover GET /api/tree, /api/count, and /api/file.
+	// Defaults are large enough for normal clicking / preview scroll.
+	ReadMaxConcurrentDefault = 32
+	ReadRateLimitDefault     = 120
+	ReadRateWindowMsDefault  = 10_000
+	PreviewBytes             = 0
 	// PreviewLines is the legacy yaml/env default. Accepted for compatibility;
 	// it does not drive GET /api/file line counts (use PreviewChunk / PreviewChunkMax).
 	PreviewLines     = 201
@@ -27,57 +33,63 @@ const (
 )
 
 const (
-	EnvRoot            = "WEB_GREP_ROOT"
-	EnvHost            = "WEB_GREP_HOST"
-	EnvPort            = "WEB_GREP_PORT"
-	EnvPublicHost      = "WEB_GREP_PUBLIC_HOST"
-	EnvToken           = "WEB_GREP_TOKEN"
-	EnvRg              = "WEB_GREP_RG"
-	EnvWebDist         = "WEB_GREP_WEB_DIST"
-	EnvDev             = "WEB_GREP_DEV"
-	EnvLogLevel        = "WEB_GREP_LOG_LEVEL"
-	EnvMaxResults      = "WEB_GREP_MAX_RESULTS"
-	EnvMaxResultsHard  = "WEB_GREP_MAX_RESULTS_HARD"
-	EnvTimeoutMs       = "WEB_GREP_TIMEOUT_MS"
-	EnvPreviewLines    = "WEB_GREP_PREVIEW_LINES" // deprecated; does not affect GET /api/file
-	EnvPreviewChunk    = "WEB_GREP_PREVIEW_CHUNK"
-	EnvPreviewChunkMax = "WEB_GREP_PREVIEW_CHUNK_MAX"
-	EnvThreads         = "WEB_GREP_THREADS"
-	EnvMaxConcurrent   = "WEB_GREP_MAX_CONCURRENT"
-	EnvSearchZip       = "WEB_GREP_SEARCH_ZIP"
-	EnvFollowSymlinks  = "WEB_GREP_FOLLOW_SYMLINKS"
-	EnvNoIgnore        = "WEB_GREP_NO_IGNORE"
-	EnvAllowSecrets    = "WEB_GREP_ALLOW_SECRETS"
-	EnvPublicPath      = "WEB_GREP_PUBLIC_PATH"
+	EnvRoot              = "WEB_GREP_ROOT"
+	EnvHost              = "WEB_GREP_HOST"
+	EnvPort              = "WEB_GREP_PORT"
+	EnvPublicHost        = "WEB_GREP_PUBLIC_HOST"
+	EnvToken             = "WEB_GREP_TOKEN"
+	EnvRg                = "WEB_GREP_RG"
+	EnvWebDist           = "WEB_GREP_WEB_DIST"
+	EnvDev               = "WEB_GREP_DEV"
+	EnvLogLevel          = "WEB_GREP_LOG_LEVEL"
+	EnvMaxResults        = "WEB_GREP_MAX_RESULTS"
+	EnvMaxResultsHard    = "WEB_GREP_MAX_RESULTS_HARD"
+	EnvTimeoutMs         = "WEB_GREP_TIMEOUT_MS"
+	EnvPreviewLines      = "WEB_GREP_PREVIEW_LINES" // deprecated; does not affect GET /api/file
+	EnvPreviewChunk      = "WEB_GREP_PREVIEW_CHUNK"
+	EnvPreviewChunkMax   = "WEB_GREP_PREVIEW_CHUNK_MAX"
+	EnvThreads           = "WEB_GREP_THREADS"
+	EnvMaxConcurrent     = "WEB_GREP_MAX_CONCURRENT"
+	EnvReadMaxConcurrent = "WEB_GREP_READ_MAX_CONCURRENT"
+	EnvReadRateLimit     = "WEB_GREP_READ_RATE_LIMIT"
+	EnvReadRateWindowMs  = "WEB_GREP_READ_RATE_WINDOW_MS"
+	EnvSearchZip         = "WEB_GREP_SEARCH_ZIP"
+	EnvFollowSymlinks    = "WEB_GREP_FOLLOW_SYMLINKS"
+	EnvNoIgnore          = "WEB_GREP_NO_IGNORE"
+	EnvAllowSecrets      = "WEB_GREP_ALLOW_SECRETS"
+	EnvPublicPath        = "WEB_GREP_PUBLIC_PATH"
 )
 
 type Config struct {
-	RootReal        string
-	RootLabel       string
-	Host            string
-	Port            int
-	PublicHosts     []string
-	TokenHash       string
-	ConfigPath      string
-	sealToken       bool
-	AllowSecrets    bool
-	FollowSymlinks  bool
-	NoIgnore        bool
-	MaxResults      int
-	MaxResultsHard  int
-	TimeoutMs       int
-	PreviewBytes    int
-	PreviewLines    int // deprecated; accepted; unused for GET /api/file
-	PreviewChunk    int
-	PreviewChunkMax int
-	Threads         int
-	MaxConcurrent   int
-	SearchZip       bool
-	RgPath          string
-	LogLevel        string
-	Dev             bool
-	WebDist         string
-	PublicPath      string
+	RootReal          string
+	RootLabel         string
+	Host              string
+	Port              int
+	PublicHosts       []string
+	TokenHash         string
+	ConfigPath        string
+	sealToken         bool
+	AllowSecrets      bool
+	FollowSymlinks    bool
+	NoIgnore          bool
+	MaxResults        int
+	MaxResultsHard    int
+	TimeoutMs         int
+	PreviewBytes      int
+	PreviewLines      int // deprecated; accepted; unused for GET /api/file
+	PreviewChunk      int
+	PreviewChunkMax   int
+	Threads           int
+	MaxConcurrent     int
+	ReadMaxConcurrent int
+	ReadRateLimit     int
+	ReadRateWindowMs  int
+	SearchZip         bool
+	RgPath            string
+	LogLevel          string
+	Dev               bool
+	WebDist           string
+	PublicPath        string
 }
 
 func Load(explicit string) (Config, error) {
@@ -151,6 +163,18 @@ func Load(explicit string) (Config, error) {
 	if maxConc < 1 || maxConc > 64 {
 		return Config{}, fmt.Errorf("invalid max_concurrent: %d", maxConc)
 	}
+	readMax := intOr(raw.ReadMaxConcurrent, ReadMaxConcurrentDefault)
+	if readMax < 1 || readMax > 1024 {
+		return Config{}, fmt.Errorf("invalid read_max_concurrent: %d", readMax)
+	}
+	readRate := intOr(raw.ReadRateLimit, ReadRateLimitDefault)
+	if readRate < 1 || readRate > 1_000_000 {
+		return Config{}, fmt.Errorf("invalid read_rate_limit: %d", readRate)
+	}
+	readWindow := intOr(raw.ReadRateWindowMs, ReadRateWindowMsDefault)
+	if readWindow < 100 || readWindow > 3_600_000 {
+		return Config{}, fmt.Errorf("invalid read_rate_window_ms: %d", readWindow)
+	}
 	level := strings.TrimSpace(raw.LogLevel)
 	if level == "" {
 		level = "info"
@@ -170,32 +194,35 @@ func Load(explicit string) (Config, error) {
 	}
 	tokenHash, wasPlain := parseToken(raw.Token)
 	cfg := Config{
-		RootReal:        rootReal,
-		RootLabel:       filepath.Base(rootReal),
-		Host:            host,
-		Port:            port,
-		PublicHosts:     append([]string(nil), raw.PublicHost...),
-		TokenHash:       tokenHash,
-		ConfigPath:      path,
-		sealToken:       wasPlain && path != "" && !tokenFromEnv,
-		AllowSecrets:    boolOr(raw.AllowSecrets, false),
-		FollowSymlinks:  boolOr(raw.FollowSymlinks, true),
-		NoIgnore:        boolOr(raw.NoIgnore, true),
-		MaxResults:      maxRes,
-		MaxResultsHard:  maxHard,
-		TimeoutMs:       timeout,
-		PreviewBytes:    0,
-		PreviewLines:    previewLines,
-		PreviewChunk:    previewChunk,
-		PreviewChunkMax: previewChunkMax,
-		Threads:         threads,
-		MaxConcurrent:   maxConc,
-		SearchZip:       boolOr(raw.SearchZip, true),
-		RgPath:          rgPath,
-		LogLevel:        level,
-		Dev:             boolOr(raw.Dev, false),
-		WebDist:         strings.TrimSpace(raw.WebDist),
-		PublicPath:      publicPath,
+		RootReal:          rootReal,
+		RootLabel:         filepath.Base(rootReal),
+		Host:              host,
+		Port:              port,
+		PublicHosts:       append([]string(nil), raw.PublicHost...),
+		TokenHash:         tokenHash,
+		ConfigPath:        path,
+		sealToken:         wasPlain && path != "" && !tokenFromEnv,
+		AllowSecrets:      boolOr(raw.AllowSecrets, false),
+		FollowSymlinks:    boolOr(raw.FollowSymlinks, true),
+		NoIgnore:          boolOr(raw.NoIgnore, true),
+		MaxResults:        maxRes,
+		MaxResultsHard:    maxHard,
+		TimeoutMs:         timeout,
+		PreviewBytes:      0,
+		PreviewLines:      previewLines,
+		PreviewChunk:      previewChunk,
+		PreviewChunkMax:   previewChunkMax,
+		Threads:           threads,
+		MaxConcurrent:     maxConc,
+		ReadMaxConcurrent: readMax,
+		ReadRateLimit:     readRate,
+		ReadRateWindowMs:  readWindow,
+		SearchZip:         boolOr(raw.SearchZip, true),
+		RgPath:            rgPath,
+		LogLevel:          level,
+		Dev:               boolOr(raw.Dev, false),
+		WebDist:           strings.TrimSpace(raw.WebDist),
+		PublicPath:        publicPath,
 	}
 	if err := AssertBindPolicy(cfg); err != nil {
 		return Config{}, err
@@ -328,6 +355,34 @@ func (c Config) FilePreviewCountMax() int {
 		return PreviewChunkMax
 	}
 	return n
+}
+
+// EffectiveReadMaxConcurrent is the global in-flight cap for tree/count/file.
+// Hand-built Configs with ReadMaxConcurrent <= 0 fall back to 32.
+func (c Config) EffectiveReadMaxConcurrent() int {
+	if c.ReadMaxConcurrent <= 0 {
+		return ReadMaxConcurrentDefault
+	}
+	return c.ReadMaxConcurrent
+}
+
+// EffectiveReadRateLimit is the per-client request cap inside the rate window.
+// Hand-built Configs with ReadRateLimit <= 0 fall back to 120.
+func (c Config) EffectiveReadRateLimit() int {
+	if c.ReadRateLimit <= 0 {
+		return ReadRateLimitDefault
+	}
+	return c.ReadRateLimit
+}
+
+// EffectiveReadRateWindow is the sliding window for EffectiveReadRateLimit.
+// Hand-built Configs with ReadRateWindowMs <= 0 fall back to 10s.
+func (c Config) EffectiveReadRateWindow() time.Duration {
+	ms := c.ReadRateWindowMs
+	if ms <= 0 {
+		ms = ReadRateWindowMsDefault
+	}
+	return time.Duration(ms) * time.Millisecond
 }
 
 func expandHome(raw string) string {

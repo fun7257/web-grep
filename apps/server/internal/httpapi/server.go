@@ -8,6 +8,7 @@ import (
 
 	"web-grep/internal/auth"
 	"web-grep/internal/config"
+	"web-grep/internal/ratelimit"
 	"web-grep/internal/search"
 )
 
@@ -18,6 +19,7 @@ type Server struct {
 	Version  string
 	WebDist  string
 	Sessions *auth.Sessions
+	Reads    *ratelimit.Limiter
 }
 
 // Config returns a consistent snapshot. Concurrent SetConfig swaps are
