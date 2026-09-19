@@ -18,8 +18,6 @@ const (
 	MaxConcurrentDefault = 8
 	PreviewBytes         = 0
 	PreviewLines         = 201
-	BeforeAfterDefault   = 20
-	BeforeAfterMax       = 100
 	LineTextMaxChars     = 65_536
 	HeartbeatMs          = 5_000
 )
