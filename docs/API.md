@@ -48,7 +48,7 @@ HTTP JSON（SSE 尚未开始时）：
 | `INVALID_PATH` | 400/404 | 路径越界、不存在 |
 | `INVALID_GLOB` | 400 | glob 含 `!`、`--`、绝对路径、`..` |
 | `DENIED` | 403 | 命中密钥/黑名单（如 `.env`） |
-| `BUSY` | 429 | 超过上限。搜索：并发默认 8 路（`max_concurrent` / `WEB_GREP_MAX_CONCURRENT`）。`GET /api/tree`、`GET /api/count`、`GET /api/file`：全局同时进行默认 32 路（`read_max_concurrent` / `WEB_GREP_READ_MAX_CONCURRENT`），并且每个客户端（有效会话令牌，否则 TCP 对端 IP）在窗口内默认 120 次（`read_rate_limit` / `WEB_GREP_READ_RATE_LIMIT`，窗口 `read_rate_window_ms` 默认 10000）。JSON `{ "code": "BUSY", "message": "…" }`，在读文件 / 列目录之前返回。登录没有这项限制。 |
+| `BUSY` | 429 | 超过上限。搜索：并发默认 8 路（`max_concurrent` / `WEB_GREP_MAX_CONCURRENT`）。`GET /api/tree`、`GET /api/file`：全局同时进行默认 32 路（`read_max_concurrent` / `WEB_GREP_READ_MAX_CONCURRENT`），并且每个客户端（有效会话令牌，否则 TCP 对端 IP）在窗口内默认 120 次（`read_rate_limit` / `WEB_GREP_READ_RATE_LIMIT`，窗口 `read_rate_window_ms` 默认 10000）。JSON `{ "code": "BUSY", "message": "…" }`，在读文件 / 列目录之前返回。登录没有这项限制。 |
 | `ENGINE` | 503 | 没有可用的 `rg` |
 | `UNAUTHORIZED` | 401 | 未登录或会话无效 |
 | `INVALID_AUTH` | 400/401 | 密码不合法或错误 |
@@ -128,12 +128,6 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 取消：关掉 fetch（AbortController）。超时：`done.timedOut=true`，不是 `error`。
 
-### `GET /api/count`（设置了密码时需会话）
-
-查询串与目录树相同（`CountQuerySchema`，与 `TreeQuerySchema` 同形）：`path`、`mtimeAfter`、可重复的 `include` / `exclude`。
-
-响应 `CountResponseSchema`：`{ "count": 12 }`。统计该路径下通过过滤的文件数（不是搜索次数）。当前 UI 未接这个接口。超过读接口上限时 HTTP 429 `BUSY`（见第 2 节），不改响应成功形状。
-
 ### `GET /api/tree`（设置了密码时需会话）
 
 查询串 `TreeQuerySchema`：
@@ -157,7 +151,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 }
 ```
 
-一次性只列一层。`.git` / `node_modules` / `.vite` / 密钥不出现。`truncated=true` 表示该层超过 2000 条被截断。超过读接口上限时 HTTP 429 `BUSY`（与 count / file 共用同一套限额）。
+一次性只列一层。`.git` / `node_modules` / `.vite` / 密钥不出现。`truncated=true` 表示该层超过 2000 条被截断。超过读接口上限时 HTTP 429 `BUSY`（与 file 共用同一套限额）。
 
 ### `GET /api/file`（设置了密码时需会话）
 
@@ -188,7 +182,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 - `eof=true`：这是文件末尾，不要再请求 `from=hi+1`。
 - `binary=true`：`lines` 为空，不要当文本渲染。
 - 前端虚拟列表：可视区靠近已加载边界时再请求相邻切片；**禁止**因新切片把 scrollTop 重置到第一行。
-- 超过读接口上限时 HTTP 429 `BUSY`（与 tree / count 共用同一套限额）。`preview_chunk` / 切片语义不变。
+- 超过读接口上限时 HTTP 429 `BUSY`（与 tree 共用同一套限额）。`preview_chunk` / 切片语义不变。
 
 ---
 

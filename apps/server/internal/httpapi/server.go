@@ -42,7 +42,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/search", s.search)
 	mux.HandleFunc("GET /api/file", s.file)
 	mux.HandleFunc("GET /api/tree", s.tree)
-	mux.HandleFunc("GET /api/count", s.count)
 	if s.WebDist != "" {
 		mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusNotFound, "INTERNAL", "not found")

@@ -103,45 +103,6 @@ func TestListSortsFilesByMtimeDescending(t *testing.T) {
 	}
 }
 
-func TestCountFilesRespectsMtime(t *testing.T) {
-	root := t.TempDir()
-	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	oldFile := filepath.Join(root, "old.log")
-	newFile := filepath.Join(root, "sub", "new.log")
-	if err := os.WriteFile(oldFile, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(newFile, []byte("y"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	oldTime := time.Now().Add(-48 * time.Hour)
-	newTime := time.Now().Add(-time.Hour)
-	if err := os.Chtimes(oldFile, oldTime, oldTime); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chtimes(newFile, newTime, newTime); err != nil {
-		t.Fatal(err)
-	}
-	root, err := filepath.EvalSymlinks(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	all, err := CountFiles(root, "", false, Filter{})
-	if err != nil || all != 2 {
-		t.Fatalf("all=%d err=%v", all, err)
-	}
-	recent, err := CountFiles(root, "", false, Filter{After: time.Now().Add(-2 * time.Hour)})
-	if err != nil || recent != 1 {
-		t.Fatalf("recent=%d err=%v", recent, err)
-	}
-	sub, err := CountFiles(root, "sub", false, Filter{})
-	if err != nil || sub != 1 {
-		t.Fatalf("sub=%d err=%v", sub, err)
-	}
-}
-
 func TestListHidesOldFilesAndEmptyDirs(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "olddir"), 0o755); err != nil {
@@ -240,16 +201,6 @@ func TestListFiltersIncludeAndExcludeGlobs(t *testing.T) {
 	}
 	if _, ok := got["keep.test.ts"]; ok {
 		t.Fatal("keep.test.ts should be excluded")
-	}
-	n, err := CountFiles(root, "", false, Filter{
-		Include: []string{"*.ts"},
-		Exclude: []string{"*.test.ts"},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n != 2 {
-		t.Fatalf("count=%d want 2 (keep.ts + src/app.ts)", n)
 	}
 }
 

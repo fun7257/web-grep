@@ -230,7 +230,6 @@ func TestHandlerRegistersDocumentedAPIRoutes(t *testing.T) {
 		{"POST", "http://127.0.0.1:8787/api/search", `{"query":"hello"}`},
 		{"GET", "http://127.0.0.1:8787/api/file?path=ok.txt&line=1", ""},
 		{"GET", "http://127.0.0.1:8787/api/tree", ""},
-		{"GET", "http://127.0.0.1:8787/api/count", ""},
 	}
 	for _, tc := range cases {
 		rec := do(t, h, tc.method, tc.url, tc.body, nil)
@@ -972,7 +971,15 @@ func TestFileTailQuery(t *testing.T) {
 	}
 }
 
-func TestTreeAndCountIncludeExclude(t *testing.T) {
+func TestCountRouteIsGone(t *testing.T) {
+	s, _ := testServer(t, fakeEngine{})
+	rec := do(t, s.Handler(), "GET", "http://127.0.0.1:8787/api/count", "", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET /api/count should be gone, got %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTreeIncludeExclude(t *testing.T) {
 	s, root := testServer(t, nil)
 	if err := os.WriteFile(filepath.Join(root, "keep.ts"), []byte("a\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -1004,20 +1011,6 @@ func TestTreeAndCountIncludeExclude(t *testing.T) {
 	}
 	if names["skip.js"] || names["keep.test.ts"] {
 		t.Fatalf("filters leaked: %+v", listing.Entries)
-	}
-
-	countRec := do(t, s.Handler(), "GET", "http://127.0.0.1:8787/api/count?include=*.ts&exclude=*.test.ts", "", nil)
-	if countRec.Code != 200 {
-		t.Fatal(countRec.Code, countRec.Body.String())
-	}
-	var counted struct {
-		Count int `json:"count"`
-	}
-	if err := json.Unmarshal(countRec.Body.Bytes(), &counted); err != nil {
-		t.Fatal(err)
-	}
-	if counted.Count != 1 {
-		t.Fatalf("count=%d want 1", counted.Count)
 	}
 }
 

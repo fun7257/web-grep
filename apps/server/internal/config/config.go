@@ -17,7 +17,7 @@ const (
 	MaxResultsHard       = 0
 	TimeoutMsDefault     = 0
 	MaxConcurrentDefault = 8
-	// Read-API limits cover GET /api/tree, /api/count, and /api/file.
+	// Read-API limits cover GET /api/tree and GET /api/file.
 	// Defaults are large enough for normal clicking / preview scroll.
 	ReadMaxConcurrentDefault = 32
 	ReadRateLimitDefault     = 120
@@ -357,7 +357,7 @@ func (c Config) FilePreviewCountMax() int {
 	return n
 }
 
-// EffectiveReadMaxConcurrent is the global in-flight cap for tree/count/file.
+// EffectiveReadMaxConcurrent is the global in-flight cap for tree/file.
 // Hand-built Configs with ReadMaxConcurrent <= 0 fall back to 32.
 func (c Config) EffectiveReadMaxConcurrent() int {
 	if c.ReadMaxConcurrent <= 0 {
