@@ -1,18 +1,12 @@
 import type { SearchRequestInput, SseHit } from "@web-grep/shared";
 import { useCallback, useEffect, useReducer, useRef } from "react";
-import { SearchHttpError, streamSearch } from "../api/searchClient.ts";
+import { isAbortError, SearchHttpError } from "../api/http.ts";
+import { streamSearch } from "../api/searchClient.ts";
 import {
   initialSearchState,
   type SearchState,
   searchReducer,
 } from "../state/searchReducer.ts";
-
-function isAbortError(err: unknown): boolean {
-  return (
-    (err instanceof DOMException && err.name === "AbortError") ||
-    (err instanceof Error && err.name === "AbortError")
-  );
-}
 
 export type UseSearch = SearchState & {
   searchCount: number;

@@ -325,11 +325,10 @@ describe("shipped stylesheet tokens", () => {
 
   it("uses tone tokens instead of white overlays on chrome that shows in light theme", () => {
     const selectors = [
-      ".q-x:hover",
       ".tree-twist:hover",
       '.view-toggle button[aria-pressed="true"]',
       ".fmt-md code",
-      ".result-row.grouped",
+      ".result-log.selected",
     ];
     for (const selector of selectors) {
       const body = ruleBody(selector);
@@ -366,7 +365,7 @@ describe("shipped stylesheet tokens", () => {
       expect(body, selector).toContain("var(--duration)");
       expect(body, selector).toContain("var(--ease)");
     }
-    expect(ruleBody(".result-row")).not.toMatch(/transform|animation:/);
+    expect(ruleBody(".result-log")).not.toMatch(/transform|animation:/);
     expect(ruleBody(".result-virtual-row")).not.toMatch(/animation:/);
   });
 

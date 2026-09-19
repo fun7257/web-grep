@@ -84,6 +84,7 @@ export function ContextModal({
   const [gotoDraft, setGotoDraft] = useState("");
   const [gotoNotice, setGotoNotice] = useState<GotoNotice | null>(null);
   const linesRef = useRef(lines);
+  const fetchAcRef = useRef<AbortController | null>(null);
   const anchorN = useRef<number | null>(null);
   const focusReq = useRef<number | null>(null);
   const focusAlign = useRef<"start" | "center" | "end">("start");
@@ -91,6 +92,20 @@ export function ContextModal({
   const [focusTick, setFocusTick] = useState(0);
   pathRef.current = path;
   linesRef.current = lines;
+
+  const replaceSignal = (): AbortSignal => {
+    fetchAcRef.current?.abort();
+    const ac = new AbortController();
+    fetchAcRef.current = ac;
+    return ac.signal;
+  };
+
+  const activeSignal = (): AbortSignal => {
+    if (fetchAcRef.current === null || fetchAcRef.current.signal.aborted) {
+      fetchAcRef.current = new AbortController();
+    }
+    return fetchAcRef.current.signal;
+  };
 
   useEffect(() => {
     if (!open || path === null) {
@@ -101,9 +116,11 @@ export function ContextModal({
       loadingRef.current = false;
       focusReq.current = null;
       focusTries.current = 0;
+      fetchAcRef.current?.abort();
+      fetchAcRef.current = null;
       return;
     }
-    const ac = new AbortController();
+    const signal = replaceSignal();
     const from = highlightLine !== undefined ? highlightLine : 1;
     setFocusedLine(highlightLine);
     setGotoDraft("");
@@ -112,10 +129,10 @@ export function ContextModal({
     focusAlign.current = "start";
     void loadSlice(
       { path, from, count: PREVIEW_CHUNK },
-      { mode: "replace", signal: ac.signal },
+      { mode: "replace", signal },
     );
     return () => {
-      ac.abort();
+      fetchAcRef.current?.abort();
     };
   }, [
     allowGotoLine,
@@ -160,7 +177,7 @@ export function ContextModal({
       }
       void loadSlice(
         { path, from, count: PREVIEW_CHUNK },
-        { mode: "merge", dir },
+        { mode: "merge", dir, signal: activeSignal() },
       );
     };
     if (!eof && last.index >= lines.length - 12) {
@@ -242,7 +259,7 @@ export function ContextModal({
       anchorN.current = firstN;
       void loadSlice(
         { path, from: Math.max(1, firstN - PREVIEW_CHUNK), count: PREVIEW_CHUNK },
-        { mode: "merge", dir: "up" },
+        { mode: "merge", dir: "up", signal: activeSignal() },
       );
     };
     const onWheel = (event: WheelEvent): void => {
@@ -266,12 +283,13 @@ export function ContextModal({
     }
     anchorN.current = null;
     const openedPath = path;
+    const signal = replaceSignal();
     void (async () => {
       let next = await loadSlice(
         { path, from: requested, count: PREVIEW_CHUNK },
-        { mode: "replace" },
+        { mode: "replace", signal },
       );
-      if (pathRef.current !== openedPath) {
+      if (pathRef.current !== openedPath || signal.aborted) {
         return;
       }
       if (next === null) {
@@ -281,9 +299,9 @@ export function ContextModal({
       if (!exact) {
         next = await loadSlice(
           { path, tail: true, count: PREVIEW_CHUNK },
-          { mode: "replace" },
+          { mode: "replace", signal },
         );
-        if (pathRef.current !== openedPath || next === null) {
+        if (pathRef.current !== openedPath || signal.aborted || next === null) {
           return;
         }
       }

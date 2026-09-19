@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { SearchHttpError } from "../api/searchClient.ts";
-import { fetchTree, type TreeEntry } from "../api/treeClient.ts";
+import { SearchHttpError } from "../api/http.ts";
+import {
+  fetchRootTreeRetry,
+  fetchTree,
+  type TreeEntry,
+} from "../api/treeClient.ts";
 import { formatSearchCount } from "../searchCount.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import {
@@ -339,43 +343,35 @@ export function FileTree({
       setError(null);
       return;
     }
-    let cancelled = false;
+    const ac = new AbortController();
     const exclude = parseGlobs(excludeFilter);
     void (async () => {
-      for (let attempt = 0; attempt < 16 && !cancelled; attempt++) {
-        try {
-          const listing = await fetchTree(
-            "",
-            new AbortController().signal,
-            mtimeAfter,
-            exclude,
-          );
-          if (cancelled) {
-            return;
-          }
-          setRoot(listing.entries);
-          setError(null);
-          return;
-        } catch (err) {
-          if (cancelled) {
-            return;
-          }
+      const result = await fetchRootTreeRetry(
+        ac.signal,
+        mtimeAfter,
+        exclude,
+        (err) => {
           if (err instanceof SearchHttpError) {
             onAuthFailure?.(err);
-            if (err.status === 401 || err.status === 403) {
-              setError(err.body.message);
-              return;
-            }
           }
-          await new Promise((r) => setTimeout(r, 250));
-        }
+        },
+      );
+      if (ac.signal.aborted || (!result.ok && result.kind === "aborted")) {
+        return;
       }
-      if (!cancelled) {
-        setError(t("treeError"));
+      if (result.ok) {
+        setRoot(result.listing.entries);
+        setError(null);
+        return;
       }
+      if (result.kind === "auth") {
+        setError(result.err.body.message);
+        return;
+      }
+      setError(t("treeError"));
     })();
     return () => {
-      cancelled = true;
+      ac.abort();
     };
   }, [excludeFilter, mtimeAfter, onAuthFailure, sessionReady, t, tick]);
 

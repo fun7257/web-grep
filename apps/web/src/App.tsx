@@ -92,7 +92,6 @@ function AppShell() {
   const [contextTarget, setContextTarget] = useState<ContextTarget | null>(
     null,
   );
-  const [browsePath, setBrowsePath] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<TimeRange | null>(loadTimeRange);
   const [searchHistory, setSearchHistory] = useState(loadSearchHistory);
   const [nav, setNav] = useState<{ stack: SearchNavEntry[]; index: number }>({
@@ -193,7 +192,6 @@ function AppShell() {
   }
 
   const selectHit = useCallback((index: number) => {
-    setBrowsePath(null);
     setSelectedIndex(index);
   }, []);
 
@@ -310,7 +308,6 @@ function AppShell() {
     setInfoCue(null);
     setShareOpen(false);
     setContextTarget(null);
-    setBrowsePath(null);
     setParts([]);
     setFields([newPart("")]);
     setSelectedIndex(0);
@@ -442,7 +439,7 @@ function AppShell() {
         open={treeOpen}
         onToggle={toggleTree}
         rootLabel={token.meta?.rootLabel ?? t("treeTitle")}
-        activePath={browsePath ?? selectedHit?.path ?? null}
+        activePath={selectedHit?.path ?? null}
         picks={picks}
         style={
           treeOpen
@@ -655,11 +652,10 @@ function AppShell() {
         className="preview-pane"
         ref={previewRef}
         tabIndex={-1}
-        aria-hidden={selectedHit === null && browsePath === null}
+        aria-hidden={selectedHit === null}
       >
         <FilePreview
           hit={selectedHit}
-          browsePath={browsePath}
           pendingSelect={sharePending}
           terms={hlTerms}
           opts={hlOpts}
@@ -674,10 +670,6 @@ function AppShell() {
                 matches: selectedHit.matches,
                 allowGotoLine: true,
               });
-              return;
-            }
-            if (browsePath !== null) {
-              setContextTarget({ path: browsePath, allowGotoLine: true });
             }
           }}
           onSearchSelected={searchSelected}
