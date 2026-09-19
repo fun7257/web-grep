@@ -2,7 +2,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SseHit } from "@web-grep/shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { PREVIEW_CHUNK } from "../api/fileClient.ts";
+import { PREVIEW_CHUNK } from "../previewChunk.ts";
 import {
   parseGotoLine,
   pickGotoLine,
@@ -55,12 +55,14 @@ export function ContextModal({
   target,
   terms = [],
   opts = DEFAULT_HL_OPTS,
+  previewChunk = PREVIEW_CHUNK,
   onClose,
 }: {
   open: boolean;
   target: ContextTarget | null;
   terms?: HlTermInput[];
   opts?: HlOpts;
+  previewChunk?: number;
   onClose: () => void;
 }) {
   const { t } = useLocale();
@@ -128,7 +130,7 @@ export function ContextModal({
     focusReq.current = highlightLine ?? null;
     focusAlign.current = "start";
     void loadSlice(
-      { path, from, count: PREVIEW_CHUNK },
+      { path, from, count: previewChunk },
       { mode: "replace", signal },
     );
     return () => {
@@ -141,6 +143,7 @@ export function ContextModal({
     loadingRef,
     open,
     path,
+    previewChunk,
     reset,
   ]);
 
@@ -176,7 +179,7 @@ export function ContextModal({
         anchorN.current = shown ?? firstN;
       }
       void loadSlice(
-        { path, from, count: PREVIEW_CHUNK },
+        { path, from, count: previewChunk },
         { mode: "merge", dir, signal: activeSignal() },
       );
     };
@@ -187,7 +190,7 @@ export function ContextModal({
       firstN > 1 &&
       first.index <= 8
     ) {
-      load(Math.max(1, firstN - PREVIEW_CHUNK), "up");
+      load(Math.max(1, firstN - previewChunk), "up");
     }
   }, [
     eof,
@@ -197,6 +200,7 @@ export function ContextModal({
     loadingRef,
     open,
     path,
+    previewChunk,
     virtualItems,
   ]);
 
@@ -258,7 +262,7 @@ export function ContextModal({
       }
       anchorN.current = firstN;
       void loadSlice(
-        { path, from: Math.max(1, firstN - PREVIEW_CHUNK), count: PREVIEW_CHUNK },
+        { path, from: Math.max(1, firstN - previewChunk), count: previewChunk },
         { mode: "merge", dir: "up", signal: activeSignal() },
       );
     };
@@ -271,7 +275,7 @@ export function ContextModal({
     return () => {
       el.removeEventListener("wheel", onWheel);
     };
-  }, [lines.length, loadSlice, loadingRef, open, path]);
+  }, [lines.length, loadSlice, loadingRef, open, path, previewChunk]);
 
   const jumpToLine = (requested: number): void => {
     if (path === null) {
@@ -286,7 +290,7 @@ export function ContextModal({
     const signal = replaceSignal();
     void (async () => {
       let next = await loadSlice(
-        { path, from: requested, count: PREVIEW_CHUNK },
+        { path, from: requested, count: previewChunk },
         { mode: "replace", signal },
       );
       if (pathRef.current !== openedPath || signal.aborted) {
@@ -298,7 +302,7 @@ export function ContextModal({
       const exact = next.some((line) => line.n === requested);
       if (!exact) {
         next = await loadSlice(
-          { path, tail: true, count: PREVIEW_CHUNK },
+          { path, tail: true, count: previewChunk },
           { mode: "replace", signal },
         );
         if (pathRef.current !== openedPath || signal.aborted || next === null) {

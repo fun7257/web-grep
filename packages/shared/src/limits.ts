@@ -7,6 +7,7 @@ export const LIMITS = {
   maxResultsHard: 1_000_000_000,
   timeoutMsDefault: 0,
   previewBytes: 0,
+  /** Legacy meta-only value. Not the /api/file request chunk. */
   previewLines: 201,
   previewChunk: 160,
   previewChunkMax: 400,

@@ -19,6 +19,8 @@ export const MetaResponseSchema = z.object({
     previewBytes: z.number(),
     previewLines: z.number(),
     queryMaxChars: z.number(),
+    previewChunk: z.number().optional(),
+    previewChunkMax: z.number().optional(),
   }),
   defaultLocale: z.literal("zh-CN"),
   authRequired: z.boolean(),

@@ -4,16 +4,16 @@ import {
   CountQuerySchema,
   CountResponseSchema,
   ErrorCodeSchema,
-  LoginRequestSchema,
-  LoginResponseSchema,
   FileQuerySchema,
   FileSliceQuerySchema,
   FileWindowResponseSchema,
   HealthResponseSchema,
   JsonErrorSchema,
   LIMITS,
-  mapLegacyErrorCode,
+  LoginRequestSchema,
+  LoginResponseSchema,
   MetaResponseSchema,
+  mapLegacyErrorCode,
   SearchRequestSchema,
   SseMetaSchema,
   TreeListingSchema,
@@ -103,10 +103,7 @@ describe("SearchRequestSchema", () => {
   it("accepts object andTerms with per-term modifiers", () => {
     const parsed = SearchRequestSchema.parse({
       query: "Hello",
-      andTerms: [
-        { query: "world.*", regex: true },
-        "plain",
-      ],
+      andTerms: [{ query: "world.*", regex: true }, "plain"],
     });
     expect(parsed.andTerms).toEqual([
       { query: "world.*", regex: true },
@@ -194,6 +191,26 @@ describe("MetaResponseSchema", () => {
     expect(
       MetaResponseSchema.safeParse({ ...base, engine: "literal" }).success,
     ).toBe(false);
+  });
+
+  it("keeps current limits without previewChunk and accepts them when present", () => {
+    const without = MetaResponseSchema.parse({ ...base, engine: "rg" });
+    expect(without.limits.previewChunk).toBeUndefined();
+    expect(without.limits.previewChunkMax).toBeUndefined();
+    expect(without.limits.previewLines).toBe(201);
+
+    const withChunk = MetaResponseSchema.parse({
+      ...base,
+      engine: "rg",
+      limits: {
+        ...base.limits,
+        previewChunk: 80,
+        previewChunkMax: 200,
+      },
+    });
+    expect(withChunk.limits.previewChunk).toBe(80);
+    expect(withChunk.limits.previewChunkMax).toBe(200);
+    expect(withChunk.limits.previewLines).toBe(201);
   });
 });
 

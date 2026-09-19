@@ -2,9 +2,10 @@ import {
   type FileWindowResponse,
   FileWindowResponseSchema,
 } from "@web-grep/shared";
+import { PREVIEW_CHUNK } from "../previewChunk.ts";
 import { fetchJson, SearchHttpError } from "./http.ts";
 
-export const PREVIEW_CHUNK = 160;
+export { PREVIEW_CHUNK };
 
 export async function fetchFileWindow(
   query: {
