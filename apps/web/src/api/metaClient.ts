@@ -8,9 +8,7 @@ export type MetaLoadResult =
 export async function loadMetaResponse(
   signal?: AbortSignal,
 ): Promise<MetaLoadResult> {
-  const res = await fetchApi("/api/meta", {
-    ...(signal !== undefined ? { signal } : {}),
-  });
+  const res = await fetchApi("/api/meta", { signal });
   if (!res.ok) {
     return {
       ok: false,

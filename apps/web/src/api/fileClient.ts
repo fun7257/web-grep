@@ -27,9 +27,7 @@ export async function fetchFileWindow(
   }
   params.set("count", String(query.count ?? PREVIEW_CHUNK));
   const parsed = FileWindowResponseSchema.safeParse(
-    await fetchJson(`/api/file?${params.toString()}`, {
-      ...(signal !== undefined ? { signal } : {}),
-    }),
+    await fetchJson(`/api/file?${params.toString()}`, { signal }),
   );
   if (!parsed.success) {
     throw new SearchHttpError(500, {

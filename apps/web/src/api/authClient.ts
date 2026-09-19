@@ -10,11 +10,7 @@ import { fetchApi, fetchJson, readJsonError } from "./http.ts";
 export async function fetchAuthStatus(
   signal?: AbortSignal,
 ): Promise<AuthStatus> {
-  return AuthStatusSchema.parse(
-    await fetchJson("/api/auth/status", {
-      ...(signal !== undefined ? { signal } : {}),
-    }),
-  );
+  return AuthStatusSchema.parse(await fetchJson("/api/auth/status", { signal }));
 }
 
 export async function loginWithPassword(
@@ -27,7 +23,7 @@ export async function loginWithPassword(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      ...(signal !== undefined ? { signal } : {}),
+      signal,
     }),
   );
 }
@@ -35,7 +31,7 @@ export async function loginWithPassword(
 export async function logoutSession(signal?: AbortSignal): Promise<void> {
   const res = await fetchApi("/api/auth/logout", {
     method: "POST",
-    ...(signal !== undefined ? { signal } : {}),
+    signal,
   });
   if (!res.ok && res.status !== 401) {
     throw await readJsonError(res);

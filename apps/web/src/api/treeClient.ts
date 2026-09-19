@@ -46,7 +46,7 @@ function treePath(
 export async function fetchTree(
   path: string,
   signal: AbortSignal,
-  mtimeAfter?: number | undefined,
+  mtimeAfter?: number,
   exclude: string[] = [],
 ): Promise<TreeListing> {
   const parsed = TreeListingSchema.safeParse(

@@ -55,7 +55,7 @@ export type FetchApiInit = {
   method?: string;
   headers?: Record<string, string>;
   body?: BodyInit | null;
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 };
 
 export function fetchApi(
