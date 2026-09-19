@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   hasLivePreviewLimits,
   livePreviewChunk,
+  livePreviewChunkMax,
   PREVIEW_CHUNK,
   resolvePreviewChunk,
   setLivePreviewLimits,
@@ -55,6 +56,7 @@ describe("live preview limits", () => {
     expect(livePreviewChunk()).toBe(80);
     setLivePreviewLimits({ previewChunk: 500, previewChunkMax: 90 });
     expect(livePreviewChunk()).toBe(90);
+    expect(livePreviewChunkMax()).toBe(90);
   });
 
   it("notifies subscribers when live limits change", () => {

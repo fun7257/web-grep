@@ -17,6 +17,25 @@ export function mergeLines(
   return [...byN.values()].sort((a, b) => a.n - b.n);
 }
 
+export function rangeForLine(
+  line: number,
+  chunk: number,
+  maxCount: number = chunk,
+): { from: number; count: number } {
+  const cap = Math.max(1, Math.floor(maxCount));
+  const size = Math.min(Math.max(1, Math.floor(chunk)), cap);
+  if (!Number.isInteger(line) || line <= 1) {
+    return { from: 1, count: size };
+  }
+  const leadWanted = Math.min(size, line - 1);
+  let count = leadWanted + size;
+  if (count > cap) {
+    const lead = Math.min(leadWanted, cap - 1);
+    return { from: line - lead, count: cap };
+  }
+  return { from: line - leadWanted, count };
+}
+
 export function parseGotoLine(raw: string): number | null {
   const n = Number.parseInt(raw.trim(), 10);
   if (!Number.isInteger(n) || n < 1) {

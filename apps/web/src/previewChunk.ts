@@ -56,3 +56,8 @@ export function hasLivePreviewLimits(): boolean {
 export function livePreviewChunk(): number {
   return resolvePreviewChunk(liveLimits);
 }
+
+/** Cap for a single /api/file count. */
+export function livePreviewChunkMax(): number {
+  return positiveInt(liveLimits?.previewChunkMax, LIMITS.previewChunkMax);
+}

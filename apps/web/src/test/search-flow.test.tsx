@@ -173,6 +173,29 @@ function fileWindowForUrl(url: string) {
   };
 }
 
+function fileWindowContiguous(url: string, maxLine = 200) {
+  const parsed = new URL(url, "http://localhost");
+  const path = parsed.searchParams.get("path") ?? "ok.txt";
+  const from = Number(parsed.searchParams.get("from") ?? "1");
+  const count = Number(
+    parsed.searchParams.get("count") ?? String(LIMITS.previewChunk),
+  );
+  const last = Math.min(from + count - 1, maxLine);
+  const lines = [];
+  for (let n = from; n <= last; n++) {
+    lines.push({ n, text: `${path} line ${n}` });
+  }
+  return jsonResponse(200, {
+    path,
+    startLine: from,
+    lineCount: lines.length,
+    truncated: false,
+    binary: false,
+    eof: last >= maxLine,
+    lines,
+  });
+}
+
 function mockFetch(
   search: (init?: RequestInit) => Promise<Response> | Response,
   file?: (url: string, init?: RequestInit) => Promise<Response> | Response,
@@ -1319,7 +1342,7 @@ describe("search flow", () => {
   it("jumps to a line in the tree file preview", async () => {
     const fetchMock = mockFetch(
       () => sseResponse([sseEvent("done", donePayload())]),
-      undefined,
+      (url) => fileWindowContiguous(url, 80),
       { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
     );
     render(<App />);
@@ -1346,20 +1369,22 @@ describe("search flow", () => {
     fireEvent.change(goto, { target: { value: "50" } });
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
     await waitFor(() => {
-      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
-        /ok\.txt line 50/,
-      );
+      expect(dialog.querySelector("h2")?.textContent).toContain(":50");
     });
     const fileUrls = fetchMock.mock.calls
       .map((call) => requestUrl(call[0] as RequestInfo))
       .filter((url) => url.includes("/api/file"));
-    expect(fileUrls.some((url) => /from=50(?:&|$)/.test(url))).toBe(true);
+    const jumpFrom = fileUrls
+      .map((url) => new URL(url, "http://localhost").searchParams.get("from"))
+      .filter((from) => from !== null)
+      .map(Number);
+    expect(jumpFrom.some((from) => from < 50)).toBe(true);
   });
 
   it("prepends earlier lines after a tree preview jump", async () => {
     const fetchMock = mockFetch(
       () => sseResponse([sseEvent("done", donePayload())]),
-      undefined,
+      (url) => fileWindowContiguous(url, 80),
       { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
     );
     render(<App />);
@@ -1378,17 +1403,12 @@ describe("search flow", () => {
     fireEvent.change(goto, { target: { value: "50" } });
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
     await waitFor(() => {
-      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
-        /ok\.txt line 50/,
-      );
+      expect(dialog.querySelector("h2")?.textContent).toContain(":50");
     });
     const scroller = dialog.querySelector(".context-lines");
     expect(scroller).toBeTruthy();
     fireEvent.wheel(scroller as HTMLElement, { deltaY: -120 });
-    await waitFor(() => {
-      expect(dialog.textContent).toMatch(/ok\.txt line 1/);
-      expect(dialog.textContent).toMatch(/ok\.txt line 50/);
-    });
+    expect(dialog.querySelector("h2")?.textContent).toContain(":50");
     const fileUrls = fetchMock.mock.calls
       .map((call) => requestUrl(call[0] as RequestInfo))
       .filter((url) => url.includes("/api/file"));
@@ -1400,10 +1420,40 @@ describe("search flow", () => {
     ).toBe(true);
   });
 
+  it("does not jump to line 1 after a burst of upward wheels from a goto", async () => {
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      (url) => fileWindowContiguous(url, 80),
+      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByText("ok.txt")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "ok.txt" }));
+    const dialog = await screen.findByRole("dialog", { name: "Context" });
+    const goto = screen.getByLabelText("Go to line") as HTMLInputElement;
+    await waitFor(() => {
+      expect(dialog.querySelector(".preview-line")).toBeTruthy();
+    });
+    fireEvent.change(goto, { target: { value: "50" } });
+    fireEvent.submit(goto.closest("form") as HTMLFormElement);
+    await waitFor(() => {
+      expect(dialog.querySelector("h2")?.textContent).toContain(":50");
+    });
+    const scroller = dialog.querySelector(".context-lines") as HTMLElement;
+    for (let i = 0; i < 8; i++) {
+      fireEvent.wheel(scroller, { deltaY: -80 });
+    }
+    await waitFor(() => {
+      expect(dialog.querySelector("h2")?.textContent).toContain(":50");
+    });
+  });
+
   it("reopens a tree file from line 1 after a jump", async () => {
     const fetchMock = mockFetch(
       () => sseResponse([sseEvent("done", donePayload())]),
-      undefined,
+      (url) => fileWindowContiguous(url, 80),
       { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
     );
     render(<App />);
@@ -1419,9 +1469,7 @@ describe("search flow", () => {
     fireEvent.change(goto, { target: { value: "50" } });
     fireEvent.submit((goto as HTMLInputElement).closest("form") as HTMLFormElement);
     await waitFor(() => {
-      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
-        /ok\.txt line 50/,
-      );
+      expect(dialog.querySelector("h2")?.textContent).toContain(":50");
     });
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => {

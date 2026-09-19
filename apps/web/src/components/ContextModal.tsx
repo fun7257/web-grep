@@ -5,10 +5,12 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   parseGotoLine,
   pickGotoLine,
+  rangeForLine,
 } from "../fileWindow.ts";
 import { DEFAULT_HL_OPTS, type HlOpts, type HlTermInput } from "../highlight.ts";
 import { useFileWindow } from "../hooks/useFileWindow.ts";
 import { useLivePreviewChunk } from "../hooks/useLivePreviewChunk.ts";
+import { livePreviewChunkMax } from "../previewChunk.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import { AppModal } from "./AppModal.tsx";
 import { HighlightedText } from "./ResultRow.tsx";
@@ -90,7 +92,10 @@ export function ContextModal({
   const [gotoNotice, setGotoNotice] = useState<GotoNotice | null>(null);
   const linesRef = useRef(lines);
   const fetchAcRef = useRef<AbortController | null>(null);
-  const anchorN = useRef<number | null>(null);
+  const pendingUp = useRef<{
+    prevFirst: number;
+    scrollTop: number;
+  } | null>(null);
   const focusReq = useRef<number | null>(null);
   const focusAlign = useRef<"start" | "center" | "end">("start");
   const focusTries = useRef(0);
@@ -121,6 +126,7 @@ export function ContextModal({
       loadingRef.current = false;
       focusReq.current = null;
       focusTries.current = 0;
+      pendingUp.current = null;
       fetchAcRef.current?.abort();
       fetchAcRef.current = null;
       return;
@@ -129,14 +135,17 @@ export function ContextModal({
       return;
     }
     const signal = replaceSignal();
-    const from = highlightLine !== undefined ? highlightLine : 1;
+    const around =
+      highlightLine !== undefined
+        ? rangeForLine(highlightLine, chunk, livePreviewChunkMax())
+        : { from: 1, count: chunk };
     setFocusedLine(highlightLine);
     setGotoDraft("");
     setGotoNotice(null);
     focusReq.current = highlightLine ?? null;
     focusAlign.current = "start";
     void loadSlice(
-      { path, from, count: chunk },
+      { path, from: around.from, count: around.count },
       { mode: "replace", signal },
     );
     return () => {
@@ -188,28 +197,40 @@ export function ContextModal({
     }
     const firstN = lines[0]?.n ?? 1;
     const lastN = lines[lines.length - 1]?.n ?? 1;
-    const load = (from: number, dir: "up" | "down"): void => {
-      if (dir === "up") {
-        const shown = lines[first.index]?.n;
-        anchorN.current = shown ?? firstN;
-      }
-      void loadSlice(
-        { path, from, count: chunk },
-        { mode: "merge", dir, signal: activeSignal() },
-      );
-    };
-    if (!eof && last.index >= lines.length - 12) {
-      load(lastN + 1, "down");
-    } else if (
-      focusedLine === undefined &&
+    if (
+      focusReq.current === null &&
       firstN > 1 &&
-      first.index <= 8
+      first.index <= 8 &&
+      pendingUp.current === null
     ) {
-      load(Math.max(1, firstN - chunk), "up");
+      const from = Math.max(1, firstN - chunk);
+      if (from < firstN) {
+        pendingUp.current = {
+          prevFirst: firstN,
+          scrollTop: listRef.current?.scrollTop ?? 0,
+        };
+        void loadSlice(
+          { path, from, count: firstN - from },
+          { mode: "merge", dir: "up", signal: activeSignal() },
+        ).then((next) => {
+          const pending = pendingUp.current;
+          if (pending === null) {
+            return;
+          }
+          const first = next?.[0]?.n ?? pending.prevFirst;
+          if (next === null || first >= pending.prevFirst) {
+            pendingUp.current = null;
+          }
+        });
+      }
+    } else if (!eof && last.index >= lines.length - 12) {
+      void loadSlice(
+        { path, from: lastN + 1, count: chunk },
+        { mode: "merge", dir: "down", signal: activeSignal() },
+      );
     }
   }, [
     eof,
-    focusedLine,
     lines,
     loadSlice,
     loadingRef,
@@ -222,16 +243,24 @@ export function ContextModal({
   ]);
 
   useLayoutEffect(() => {
-    const n = anchorN.current;
-    if (n === null) {
+    const pending = pendingUp.current;
+    if (pending === null) {
       return;
     }
-    const index = lines.findIndex((line) => line.n === n);
-    if (index >= 0) {
-      virtualizer.scrollToIndex(index, { align: "start" });
+    const list = listRef.current;
+    if (list === null) {
+      pendingUp.current = null;
+      return;
     }
-    anchorN.current = null;
-  }, [lines, virtualizer]);
+    const newFirst = lines[0]?.n ?? pending.prevFirst;
+    const added = pending.prevFirst - newFirst;
+    if (added <= 0) {
+      pendingUp.current = null;
+      return;
+    }
+    list.scrollTop = pending.scrollTop + added * LINE_ROW;
+    pendingUp.current = null;
+  }, [lines]);
 
   useLayoutEffect(() => {
     const n = focusReq.current;
@@ -244,6 +273,9 @@ export function ContextModal({
     }
     const align = focusAlign.current;
     const root = listRef.current;
+    if (pendingUp.current !== null) {
+      return;
+    }
     if (align === "start" && index === 0 && root !== null) {
       root.scrollTop = 0;
       virtualizer.scrollToOffset(0);
@@ -274,14 +306,32 @@ export function ContextModal({
     }
     const pageEarlier = (): void => {
       const firstN = linesRef.current[0]?.n ?? 1;
-      if (firstN <= 1 || loadingRef.current || !chunkReady) {
+      if (
+        firstN <= 1 ||
+        loadingRef.current ||
+        !chunkReady ||
+        focusReq.current !== null
+      ) {
         return;
       }
-      anchorN.current = firstN;
+      const from = Math.max(1, firstN - chunk);
+      if (from >= firstN) {
+        return;
+      }
+      pendingUp.current = { prevFirst: firstN, scrollTop: el.scrollTop };
       void loadSlice(
-        { path, from: Math.max(1, firstN - chunk), count: chunk },
+        { path, from, count: firstN - from },
         { mode: "merge", dir: "up", signal: activeSignal() },
-      );
+      ).then((next) => {
+        const pending = pendingUp.current;
+        if (pending === null) {
+          return;
+        }
+        const first = next?.[0]?.n ?? pending.prevFirst;
+        if (next === null || first >= pending.prevFirst) {
+          pendingUp.current = null;
+        }
+      });
     };
     const onWheel = (event: WheelEvent): void => {
       if (event.deltaY < 0 && el.scrollTop <= 0) {
@@ -302,12 +352,17 @@ export function ContextModal({
       setGotoNotice({ kind: "empty" });
       return;
     }
-    anchorN.current = null;
+    pendingUp.current = null;
     const openedPath = path;
     const signal = replaceSignal();
     void (async () => {
+      const around = rangeForLine(
+        requested,
+        chunk,
+        livePreviewChunkMax(),
+      );
       let next = await loadSlice(
-        { path, from: requested, count: chunk },
+        { path, from: around.from, count: around.count },
         { mode: "replace", signal },
       );
       if (pathRef.current !== openedPath || signal.aborted) {
@@ -317,7 +372,12 @@ export function ContextModal({
         return;
       }
       const exact = next.some((line) => line.n === requested);
-      if (!exact) {
+      const lastLoaded = next[next.length - 1];
+      const pastEof =
+        !exact &&
+        (next.length === 0 ||
+          (lastLoaded !== undefined && lastLoaded.n < requested));
+      if (pastEof) {
         next = await loadSlice(
           { path, tail: true, count: chunk },
           { mode: "replace", signal },
@@ -348,9 +408,6 @@ export function ContextModal({
         });
       }
       setFocusTick((tick) => tick + 1);
-      if (listRef.current !== null && chosen === requested) {
-        listRef.current.scrollTop = 0;
-      }
     })();
   };
 
