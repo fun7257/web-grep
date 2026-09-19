@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	DefaultCount = 160
-	MaxCount     = 400
+	// DefaultCount / MaxCount remain as the config-key defaults (preview_chunk / preview_chunk_max).
+	DefaultCount = config.PreviewChunk
+	MaxCount     = config.PreviewChunkMax
 	sniffBytes   = 8 * 1024
 	readBufSize  = 256 * 1024
 	indexEvery   = 4096
@@ -77,10 +78,10 @@ func ReadSlice(cfg config.Config, q Query) (Window, error) {
 	}
 	count := q.Count
 	if count <= 0 {
-		count = DefaultCount
+		count = cfg.FilePreviewCount()
 	}
-	if count > MaxCount {
-		count = MaxCount
+	if max := cfg.FilePreviewCountMax(); count > max {
+		count = max
 	}
 
 	resolved, err := sandbox.ResolveUnderRoot(cfg.RootReal, q.Path)

@@ -17,59 +17,67 @@ const (
 	TimeoutMsDefault     = 0
 	MaxConcurrentDefault = 8
 	PreviewBytes         = 0
-	PreviewLines         = 201
-	LineTextMaxChars     = 65_536
-	HeartbeatMs          = 5_000
+	// PreviewLines is the legacy yaml/env default. Accepted for compatibility;
+	// it does not drive GET /api/file line counts (use PreviewChunk / PreviewChunkMax).
+	PreviewLines     = 201
+	PreviewChunk     = 160
+	PreviewChunkMax  = 400
+	LineTextMaxChars = 65_536
+	HeartbeatMs      = 5_000
 )
 
 const (
-	EnvRoot           = "WEB_GREP_ROOT"
-	EnvHost           = "WEB_GREP_HOST"
-	EnvPort           = "WEB_GREP_PORT"
-	EnvPublicHost     = "WEB_GREP_PUBLIC_HOST"
-	EnvToken          = "WEB_GREP_TOKEN"
-	EnvRg             = "WEB_GREP_RG"
-	EnvWebDist        = "WEB_GREP_WEB_DIST"
-	EnvDev            = "WEB_GREP_DEV"
-	EnvLogLevel       = "WEB_GREP_LOG_LEVEL"
-	EnvMaxResults     = "WEB_GREP_MAX_RESULTS"
-	EnvMaxResultsHard = "WEB_GREP_MAX_RESULTS_HARD"
-	EnvTimeoutMs      = "WEB_GREP_TIMEOUT_MS"
-	EnvPreviewLines   = "WEB_GREP_PREVIEW_LINES"
-	EnvThreads        = "WEB_GREP_THREADS"
-	EnvMaxConcurrent  = "WEB_GREP_MAX_CONCURRENT"
-	EnvSearchZip      = "WEB_GREP_SEARCH_ZIP"
-	EnvFollowSymlinks = "WEB_GREP_FOLLOW_SYMLINKS"
-	EnvNoIgnore       = "WEB_GREP_NO_IGNORE"
-	EnvAllowSecrets   = "WEB_GREP_ALLOW_SECRETS"
-	EnvPublicPath     = "WEB_GREP_PUBLIC_PATH"
+	EnvRoot            = "WEB_GREP_ROOT"
+	EnvHost            = "WEB_GREP_HOST"
+	EnvPort            = "WEB_GREP_PORT"
+	EnvPublicHost      = "WEB_GREP_PUBLIC_HOST"
+	EnvToken           = "WEB_GREP_TOKEN"
+	EnvRg              = "WEB_GREP_RG"
+	EnvWebDist         = "WEB_GREP_WEB_DIST"
+	EnvDev             = "WEB_GREP_DEV"
+	EnvLogLevel        = "WEB_GREP_LOG_LEVEL"
+	EnvMaxResults      = "WEB_GREP_MAX_RESULTS"
+	EnvMaxResultsHard  = "WEB_GREP_MAX_RESULTS_HARD"
+	EnvTimeoutMs       = "WEB_GREP_TIMEOUT_MS"
+	EnvPreviewLines    = "WEB_GREP_PREVIEW_LINES" // deprecated; does not affect GET /api/file
+	EnvPreviewChunk    = "WEB_GREP_PREVIEW_CHUNK"
+	EnvPreviewChunkMax = "WEB_GREP_PREVIEW_CHUNK_MAX"
+	EnvThreads         = "WEB_GREP_THREADS"
+	EnvMaxConcurrent   = "WEB_GREP_MAX_CONCURRENT"
+	EnvSearchZip       = "WEB_GREP_SEARCH_ZIP"
+	EnvFollowSymlinks  = "WEB_GREP_FOLLOW_SYMLINKS"
+	EnvNoIgnore        = "WEB_GREP_NO_IGNORE"
+	EnvAllowSecrets    = "WEB_GREP_ALLOW_SECRETS"
+	EnvPublicPath      = "WEB_GREP_PUBLIC_PATH"
 )
 
 type Config struct {
-	RootReal       string
-	RootLabel      string
-	Host           string
-	Port           int
-	PublicHosts    []string
-	TokenHash      string
-	ConfigPath     string
-	sealToken      bool
-	AllowSecrets   bool
-	FollowSymlinks bool
-	NoIgnore       bool
-	MaxResults     int
-	MaxResultsHard int
-	TimeoutMs      int
-	PreviewBytes   int
-	PreviewLines   int
-	Threads        int
-	MaxConcurrent  int
-	SearchZip      bool
-	RgPath         string
-	LogLevel       string
-	Dev            bool
-	WebDist        string
-	PublicPath     string
+	RootReal        string
+	RootLabel       string
+	Host            string
+	Port            int
+	PublicHosts     []string
+	TokenHash       string
+	ConfigPath      string
+	sealToken       bool
+	AllowSecrets    bool
+	FollowSymlinks  bool
+	NoIgnore        bool
+	MaxResults      int
+	MaxResultsHard  int
+	TimeoutMs       int
+	PreviewBytes    int
+	PreviewLines    int // deprecated; accepted; unused for GET /api/file
+	PreviewChunk    int
+	PreviewChunkMax int
+	Threads         int
+	MaxConcurrent   int
+	SearchZip       bool
+	RgPath          string
+	LogLevel        string
+	Dev             bool
+	WebDist         string
+	PublicPath      string
 }
 
 func Load(explicit string) (Config, error) {
@@ -124,6 +132,17 @@ func Load(explicit string) (Config, error) {
 	if previewLines < 1 || previewLines > 10_000 {
 		return Config{}, fmt.Errorf("invalid preview_lines: %d", previewLines)
 	}
+	previewChunk := intOr(raw.PreviewChunk, PreviewChunk)
+	if previewChunk < 1 || previewChunk > 10_000 {
+		return Config{}, fmt.Errorf("invalid preview_chunk: %d", previewChunk)
+	}
+	previewChunkMax := intOr(raw.PreviewChunkMax, PreviewChunkMax)
+	if previewChunkMax < 1 || previewChunkMax > 10_000 {
+		return Config{}, fmt.Errorf("invalid preview_chunk_max: %d", previewChunkMax)
+	}
+	if previewChunk > previewChunkMax {
+		previewChunk = previewChunkMax
+	}
 	threads := intOr(raw.Threads, 0)
 	if threads < 0 || threads > 1024 {
 		return Config{}, fmt.Errorf("invalid threads: %d", threads)
@@ -151,30 +170,32 @@ func Load(explicit string) (Config, error) {
 	}
 	tokenHash, wasPlain := parseToken(raw.Token)
 	cfg := Config{
-		RootReal:       rootReal,
-		RootLabel:      filepath.Base(rootReal),
-		Host:           host,
-		Port:           port,
-		PublicHosts:    append([]string(nil), raw.PublicHost...),
-		TokenHash:      tokenHash,
-		ConfigPath:     path,
-		sealToken:      wasPlain && path != "" && !tokenFromEnv,
-		AllowSecrets:   boolOr(raw.AllowSecrets, false),
-		FollowSymlinks: boolOr(raw.FollowSymlinks, true),
-		NoIgnore:       boolOr(raw.NoIgnore, true),
-		MaxResults:     maxRes,
-		MaxResultsHard: maxHard,
-		TimeoutMs:      timeout,
-		PreviewBytes:   0,
-		PreviewLines:   previewLines,
-		Threads:        threads,
-		MaxConcurrent:  maxConc,
-		SearchZip:      boolOr(raw.SearchZip, true),
-		RgPath:         rgPath,
-		LogLevel:       level,
-		Dev:            boolOr(raw.Dev, false),
-		WebDist:        strings.TrimSpace(raw.WebDist),
-		PublicPath:     publicPath,
+		RootReal:        rootReal,
+		RootLabel:       filepath.Base(rootReal),
+		Host:            host,
+		Port:            port,
+		PublicHosts:     append([]string(nil), raw.PublicHost...),
+		TokenHash:       tokenHash,
+		ConfigPath:      path,
+		sealToken:       wasPlain && path != "" && !tokenFromEnv,
+		AllowSecrets:    boolOr(raw.AllowSecrets, false),
+		FollowSymlinks:  boolOr(raw.FollowSymlinks, true),
+		NoIgnore:        boolOr(raw.NoIgnore, true),
+		MaxResults:      maxRes,
+		MaxResultsHard:  maxHard,
+		TimeoutMs:       timeout,
+		PreviewBytes:    0,
+		PreviewLines:    previewLines,
+		PreviewChunk:    previewChunk,
+		PreviewChunkMax: previewChunkMax,
+		Threads:         threads,
+		MaxConcurrent:   maxConc,
+		SearchZip:       boolOr(raw.SearchZip, true),
+		RgPath:          rgPath,
+		LogLevel:        level,
+		Dev:             boolOr(raw.Dev, false),
+		WebDist:         strings.TrimSpace(raw.WebDist),
+		PublicPath:      publicPath,
 	}
 	if err := AssertBindPolicy(cfg); err != nil {
 		return Config{}, err
@@ -284,6 +305,29 @@ func resolveRoot(raw string) (string, error) {
 		return "", fmt.Errorf("root is not a readable directory: %s", raw)
 	}
 	return real, nil
+}
+
+// FilePreviewCount is GET /api/file's default `count` when the query omits it.
+// Hand-built Configs with PreviewChunk <= 0 fall back to PreviewChunk (160).
+func (c Config) FilePreviewCount() int {
+	n := c.PreviewChunk
+	if n <= 0 {
+		n = PreviewChunk
+	}
+	if max := c.FilePreviewCountMax(); n > max {
+		return max
+	}
+	return n
+}
+
+// FilePreviewCountMax is GET /api/file's max `count` clamp.
+// Hand-built Configs with PreviewChunkMax <= 0 fall back to PreviewChunkMax (400).
+func (c Config) FilePreviewCountMax() int {
+	n := c.PreviewChunkMax
+	if n <= 0 {
+		return PreviewChunkMax
+	}
+	return n
 }
 
 func expandHome(raw string) string {

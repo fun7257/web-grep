@@ -91,7 +91,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 ### `GET /api/meta`（设置了密码时需会话）
 
-见 `MetaResponseSchema`。`rgVersion` 可为 `null`。`rootLabel` 是根目录 basename，不是绝对路径。`previewBytes=0` 表示不限制文件体积。含 `authRequired`、`searchCount`（本实例累计执行的搜索次数，落在配置文件旁的 `search-count`；内存先加，约每 2 秒以及进程退出时刷盘）。
+见 `MetaResponseSchema`。`rgVersion` 可为 `null`。`rootLabel` 是根目录 basename，不是绝对路径。`previewBytes=0` 表示不限制文件体积。`limits.previewChunk` / `limits.previewChunkMax` 是 `GET /api/file` 的默认 `count` 与上限（配置 `preview_chunk` / `preview_chunk_max`，默认 160 / 400）。`limits.previewLines` **已弃用**：仍会返回（配置 `preview_lines` / `WEB_GREP_PREVIEW_LINES`），**不**改变文件预览行数。含 `authRequired`、`searchCount`（本实例累计执行的搜索次数，落在配置文件旁的 `search-count`；内存先加，约每 2 秒以及进程退出时刷盘）。
 
 ### `POST /api/search`（设置了密码时需会话）
 
@@ -167,7 +167,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 | --- | --- |
 | `path` | 必填，相对路径 |
 | `from` | 起始行（1-based）。省略且未开 `tail` 时用 `line` 居中 |
-| `count` | 行数，默认 160，最大 400 |
+| `count` | 行数。省略时用服务端 `preview_chunk`（默认 160）；超过 `preview_chunk_max`（默认 400）会被夹住。**不是** `preview_lines` |
 | `line` | 可选，居中锚点 |
 | `tail` | 可选。`1` / `true` 时从文件末尾取 `count` 行，不要求 `from` / `line`。当前 UI 弹窗跳行失败时会再请求 `tail=1` |
 
