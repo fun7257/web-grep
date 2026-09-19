@@ -18,7 +18,7 @@
 - 路径和错误码先稳住，不要改现有 `/api` 路由和 `code`。当前路由：`GET /api/health`、`GET /api/auth/status`、`POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/meta`、`POST /api/search`、`GET /api/tree`、`GET /api/file`。`GET /api/count` 已删，不要加回去。
 - 拉文件行数只认配置 `preview_chunk` / `preview_chunk_max`（环境变量 `WEB_GREP_PREVIEW_CHUNK` / `WEB_GREP_PREVIEW_CHUNK_MAX`）。废弃的 `preview_lines` 只还会出现在 meta 的 `previewLines`，**不能**改变 `GET /api/file`。
 - 并发：搜索走 `max_concurrent`（默认 8，超限 HTTP 429 `BUSY`）。树和文件走 `read_max_concurrent` / `read_rate_limit` / `read_rate_window_ms`（默认 32 路、每客户端 10 秒 120 次）。取消必须释放槽位。
-- 测试：动过的包跑 `go test`。钉死测试要绿：登录会话、取消释放搜索槽、满并发 `BUSY`、`preview_chunk` 针、有 rg 时的真实边沿（`apps/server/internal/httpapi/*pin*.go`）。
+- 测试：动过的包跑 `go test`。钉死测试要绿：登录会话、取消释放搜索槽、满并发 `BUSY`、`preview_chunk` 针、有 rg 时的真实边沿（`httpapi` 里 `TestPin*`）。
 - 没验证过的行为不要写进结论。别顺手大重构。别自己合 main。
 
 ## Front
