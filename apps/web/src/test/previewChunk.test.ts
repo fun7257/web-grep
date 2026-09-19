@@ -6,6 +6,7 @@ import {
   PREVIEW_CHUNK,
   resolvePreviewChunk,
   setLivePreviewLimits,
+  subscribeLivePreviewLimits,
 } from "../previewChunk.ts";
 
 describe("resolvePreviewChunk", () => {
@@ -54,5 +55,17 @@ describe("live preview limits", () => {
     expect(livePreviewChunk()).toBe(80);
     setLivePreviewLimits({ previewChunk: 500, previewChunkMax: 90 });
     expect(livePreviewChunk()).toBe(90);
+  });
+
+  it("notifies subscribers when live limits change", () => {
+    const seen: number[] = [];
+    const stop = subscribeLivePreviewLimits(() => {
+      seen.push(livePreviewChunk());
+    });
+    setLivePreviewLimits({ previewChunk: 80 });
+    expect(seen).toEqual([80]);
+    stop();
+    setLivePreviewLimits({ previewChunk: 40 });
+    expect(seen).toEqual([80]);
   });
 });

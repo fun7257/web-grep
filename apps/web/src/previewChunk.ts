@@ -11,6 +11,7 @@ export type PreviewChunkLimits = {
 export const PREVIEW_CHUNK = LIMITS.previewChunk;
 
 let liveLimits: PreviewChunkLimits | undefined;
+const liveListeners = new Set<() => void>();
 
 function positiveInt(value: number | undefined, fallback: number): number {
   return typeof value === "number" && Number.isFinite(value) && value >= 1
@@ -35,6 +36,16 @@ export function setLivePreviewLimits(
   limits: PreviewChunkLimits | null | undefined,
 ): void {
   liveLimits = limits ?? undefined;
+  for (const listener of liveListeners) {
+    listener();
+  }
+}
+
+export function subscribeLivePreviewLimits(listener: () => void): () => void {
+  liveListeners.add(listener);
+  return () => {
+    liveListeners.delete(listener);
+  };
 }
 
 export function hasLivePreviewLimits(): boolean {

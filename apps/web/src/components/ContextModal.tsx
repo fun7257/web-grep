@@ -2,13 +2,13 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SseHit } from "@web-grep/shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { livePreviewChunk } from "../previewChunk.ts";
 import {
   parseGotoLine,
   pickGotoLine,
 } from "../fileWindow.ts";
 import { DEFAULT_HL_OPTS, type HlOpts, type HlTermInput } from "../highlight.ts";
 import { useFileWindow } from "../hooks/useFileWindow.ts";
+import { useLivePreviewChunk } from "../hooks/useLivePreviewChunk.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import { AppModal } from "./AppModal.tsx";
 import { HighlightedText } from "./ResultRow.tsx";
@@ -65,8 +65,9 @@ export function ContextModal({
   previewChunk?: number | null;
   onClose: () => void;
 }) {
-  const chunk = previewChunk ?? livePreviewChunk();
-  const chunkReady = previewChunk != null;
+  const liveChunk = useLivePreviewChunk();
+  const chunk = liveChunk ?? previewChunk;
+  const chunkReady = chunk != null;
   const { t } = useLocale();
   const path = target?.path ?? null;
   const highlightLine = target?.highlightLine;
@@ -150,6 +151,7 @@ export function ContextModal({
     path,
     chunk,
     chunkReady,
+    liveChunk,
     previewChunk,
     reset,
   ]);

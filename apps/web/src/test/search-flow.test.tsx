@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LIMITS } from "@web-grep/shared";
 import { TOKEN_STORAGE_KEY } from "../api/headers.ts";
 import { App } from "../App.tsx";
+import { setLivePreviewLimits } from "../previewChunk.ts";
 
 
 const META = {
@@ -370,6 +371,7 @@ describe("search flow", () => {
 
   afterEach(() => {
     cleanup();
+    setLivePreviewLimits(undefined);
     window.history.replaceState({}, "", "/");
     vi.unstubAllGlobals();
     vi.restoreAllMocks();

@@ -21,7 +21,7 @@ export const MetaResponseSchema = z.object({
     queryMaxChars: z.number(),
     previewChunk: z.number().optional(),
     previewChunkMax: z.number().optional(),
-  }),
+  }).passthrough(),
   defaultLocale: z.literal("zh-CN"),
   authRequired: z.boolean(),
   searchCount: z.number().int().nonnegative().optional().default(0),
