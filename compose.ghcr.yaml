@@ -1,5 +1,6 @@
 # Pull a published GHCR image (no local build). Same mounts / env as docker-compose.yml.
 # Default tag is :dev (rebuilt and overwritten on every main merge).
+# GHCR :dev / v* / :latest are multi-arch linux/amd64+linux/arm64.
 # Pin a release: WEB_GREP_IMAGE=ghcr.io/fun7257/web-grep:v0.2.0
 #
 #   WEB_GREP_DATA=/var/log WEB_GREP_TOKEN=secret docker compose -f compose.ghcr.yaml up -d

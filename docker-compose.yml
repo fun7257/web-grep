@@ -6,6 +6,7 @@
 #
 # Pre-built GHCR images (no local build): compose.ghcr.yaml / docs/docker.md
 #   docker compose -f compose.ghcr.yaml up -d
+# GHCR :dev / v* / :latest are multi-arch linux/amd64+linux/arm64.
 #
 # Or mount your own yaml (must use root: /data):
 #   - ./config.deploy.yaml:/app/config.yaml
