@@ -7,7 +7,7 @@
 ## 准备
 
 - 宿主机已装 Docker / Compose
-- 在目标架构上构建（本机 Apple Silicon 导出的是 `linux/arm64`，x86 测试机要在那台机器上 `docker build`，或 `--platform linux/amd64`）。GHCR 上由 Actions 推送的镜像是 `linux/amd64`
+- 本地 `docker build` / Compose 按宿主机架构出镜像（Apple Silicon 一般是 `linux/arm64`）。GHCR 上的 `:dev` / `v*` / `:latest` 是 **linux/amd64 + linux/arm64** 多架构清单，Docker 会按机器拉对应层。
 - 登录密码：Compose 用环境变量 `WEB_GREP_TOKEN`；也可以写进自己的 yaml 后用 `docker run` 挂载
 
 ## GHCR 镜像 / Published images

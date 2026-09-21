@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1
 # Single runtime image. Node/Go stages are build-only; you run one container.
+# Multi-arch (linux/amd64 + linux/arm64): Node/Go compile on $BUILDPLATFORM;
+# Go cross-compiles with TARGETOS/TARGETARCH (no ARG defaults — a default
+# would shadow BuildKit and put the wrong binary in the other arch).
 
-# --- build SPA (not shipped) ---
-FROM node:24.21.0-bookworm-slim AS web
+# --- build SPA (not shipped; JS output is arch-independent) ---
+FROM --platform=$BUILDPLATFORM node:24.21.0-bookworm-slim AS web
 WORKDIR /src
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 RUN corepack enable && corepack prepare pnpm@12.4.0 --activate
@@ -19,12 +22,16 @@ RUN pnpm --filter @web-grep/shared build \
  && pnpm --filter @web-grep/web build
 
 # --- build API binary (not shipped) ---
-FROM golang:1.24-bookworm AS go
+FROM --platform=$BUILDPLATFORM golang:1.24-bookworm AS go
 WORKDIR /src
 COPY apps/server/ ./
+# BuildKit injects these per --platform target (or host for a plain docker build).
+ARG TARGETOS
+ARG TARGETARCH
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/web-grep ./cmd/web-grep
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
+    go build -trimpath -ldflags="-s -w" -o /out/web-grep ./cmd/web-grep
 
 # --- run: static Go binary + SPA + musl rg ---
 FROM alpine:3.21

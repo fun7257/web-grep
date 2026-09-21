@@ -5,6 +5,8 @@
 #   2. push tag v*   → ghcr.io/<owner>/<repo>:<tag> and :latest
 #      Version tags (v0.2.0, …) are not rewritten by later builds.
 #      :latest moves only when a new v* tag is pushed.
+#
+# Each tag is one multi-arch manifest list: linux/amd64 + linux/arm64.
 name: Docker
 
 on:
@@ -30,6 +32,11 @@ jobs:
 
       - name: Lowercase image name
         run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+        with:
+          platforms: linux/amd64,linux/arm64
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -62,6 +69,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
