@@ -121,9 +121,7 @@ export const enUS = {
   excludeClear: "Remove",
   copiedPath: "Copied relative path",
   copiedLine: "Copied path with line number",
-  optionFlushed: "Re-searched with the new options",
-  shareRestored:
-    "Restored conditions from the share link and searched automatically",
+  shareRestored: "Restored conditions from the share link",
   sharePendingSelect: "Pending select {path}:{line}",
   hotkeysTitle: "Keyboard Shortcuts",
   close: "Close",

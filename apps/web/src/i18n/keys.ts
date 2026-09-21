@@ -117,7 +117,6 @@ export const MSG_KEYS = [
 
   "copiedPath",
   "copiedLine",
-  "optionFlushed",
   "shareRestored",
   "sharePendingSelect",
   "hotkeysTitle",
