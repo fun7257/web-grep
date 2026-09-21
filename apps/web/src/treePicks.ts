@@ -1,8 +1,11 @@
-import { matchesAnyGlob } from "./globs.ts";
+import { LIMITS } from "@web-grep/shared";
+import { escapeGlobPath, matchesAnyGlob } from "./globs.ts";
 
 export type TreePick = {
   path: string;
   dir: boolean;
+  /** File or folder kept out of a truncated folder pick. */
+  exclude?: boolean;
 };
 
 /** Header chip label: folder picks keep a trailing `/`; file picks do not. */
@@ -30,7 +33,15 @@ function isUnderDir(path: string, dirPath: string): boolean {
 }
 
 function isDirectlyPicked(path: string, picks: TreePick[]): boolean {
-  return picks.some((item) => item.path === path);
+  return picks.some((item) => !item.exclude && item.path === path);
+}
+
+function isDirectlyExcluded(path: string, picks: TreePick[]): boolean {
+  return picks.some((item) => item.exclude === true && item.path === path);
+}
+
+function hasExcludeUnder(dirPath: string, picks: TreePick[]): boolean {
+  return picks.some((item) => item.exclude === true && isUnderDir(item.path, dirPath));
 }
 
 function isCovered(path: string, picks: TreePick[]): boolean {
@@ -54,11 +65,21 @@ export function pickMark(
   isDir: boolean,
   picks: TreePick[],
   listedChildren?: ListedChild[] | null,
+  truncated = false,
 ): PickMark {
+  if (isDirectlyExcluded(path, picks)) {
+    return "off";
+  }
   if (isDirectlyPicked(path, picks)) {
+    if (isDir && hasExcludeUnder(path, picks)) {
+      return "partial";
+    }
     return "on";
   }
   if (isCovered(path, picks)) {
+    if (isDir && hasExcludeUnder(path, picks)) {
+      return "partial";
+    }
     return "covered";
   }
   if (!isDir) {
@@ -67,7 +88,11 @@ export function pickMark(
   if (!picks.some((item) => isUnderDir(item.path, path))) {
     return "off";
   }
-  if (listedChildren != null && allListedSelected(listedChildren, picks)) {
+  if (
+    !truncated &&
+    listedChildren != null &&
+    allListedSelected(listedChildren, picks)
+  ) {
     return "on";
   }
   return "partial";
@@ -128,17 +153,28 @@ export function togglePick(
   next: TreePick,
   listedChildren?: ListedChild[] | null,
   coveringChildren?: ListedChild[] | null,
+  truncated = false,
 ): TreePick[] {
+  if (isDirectlyExcluded(next.path, picks)) {
+    return picks.filter((item) => !(item.exclude && item.path === next.path));
+  }
   if (isDirectlyPicked(next.path, picks)) {
     return picks.filter(
       (item) => item.path !== next.path && !isUnderDir(item.path, next.path),
     );
   }
   if (isCovered(next.path, picks)) {
+    if (truncated) {
+      return [
+        ...picks.filter((item) => !(item.exclude && item.path === next.path)),
+        { path: next.path, dir: next.dir, exclude: true },
+      ];
+    }
     return uncover(picks, next, listedChildren, coveringChildren);
   }
   if (
     next.dir &&
+    !truncated &&
     listedChildren != null &&
     allListedSelected(listedChildren, picks)
   ) {
@@ -153,16 +189,42 @@ export function togglePick(
   return [...picks, next];
 }
 
+function globForPick(item: TreePick): string {
+  const path = escapeGlobPath(item.path);
+  if (!item.dir) {
+    return path;
+  }
+  if (item.path === "") {
+    return "**";
+  }
+  return `${path}/**`;
+}
+
 export function picksToGlobs(picks: TreePick[]): string[] {
-  return picks.map((item) => {
-    if (!item.dir) {
-      return item.path;
+  return picks.filter((item) => !item.exclude).map((item) => globForPick(item));
+}
+
+function pickExcludeGlobs(picks: TreePick[]): string[] {
+  return picks.filter((item) => item.exclude).map((item) => globForPick(item));
+}
+
+export function removePick(picks: TreePick[], path: string): TreePick[] {
+  return picks.filter(
+    (item) => item.path !== path && !isUnderDir(item.path, path),
+  );
+}
+
+function splitByGlobCap(globs: string[]): { kept: string[]; omitted: string[] } {
+  const kept: string[] = [];
+  const omitted: string[] = [];
+  for (const glob of globs) {
+    if (glob.length > LIMITS.globMaxChars) {
+      omitted.push(glob);
+    } else {
+      kept.push(glob);
     }
-    if (item.path === "") {
-      return "**";
-    }
-    return `${item.path}/**`;
-  });
+  }
+  return { kept, omitted };
 }
 
 export function pickMatchesExclude(
@@ -197,9 +259,23 @@ export function picksToSearchGlobs(
   picks: TreePick[],
   extraInclude: string[] = [],
   manualExclude: string[] = [],
-): { globInclude: string[]; globExclude: string[] } {
+): {
+  globInclude: string[];
+  globExclude: string[];
+  omitted: string[];
+  blocked: boolean;
+} {
+  const rawInclude = extraInclude.length > 0 ? extraInclude : picksToGlobs(picks);
+  const rawExclude = [...manualExclude, ...pickExcludeGlobs(picks)];
+  const include = splitByGlobCap(rawInclude);
+  const exclude = splitByGlobCap(rawExclude);
+  const blocked =
+    (rawInclude.length > 0 && include.kept.length === 0) ||
+    exclude.omitted.length > 0;
   return {
-    globInclude: extraInclude.length > 0 ? extraInclude : picksToGlobs(picks),
-    globExclude: [...manualExclude],
+    globInclude: include.kept,
+    globExclude: exclude.kept,
+    omitted: [...include.omitted, ...exclude.omitted],
+    blocked,
   };
 }

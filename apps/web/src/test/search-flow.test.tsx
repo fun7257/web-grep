@@ -202,6 +202,7 @@ function mockFetch(
   auth?: {
     authRequired?: boolean;
     treeEntries?: { name: string; path: string; dir: boolean }[];
+    treeTruncated?: boolean;
     engine?: "rg" | "none";
     limits?: Partial<{
       [K in keyof (typeof META)["limits"]]: number;
@@ -265,7 +266,7 @@ function mockFetch(
           jsonResponse(200, {
             path: "",
             entries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
-            truncated: false,
+            truncated: auth?.treeTruncated ?? false,
           }),
         );
       }
@@ -273,7 +274,7 @@ function mockFetch(
         jsonResponse(200, {
           path: "",
           entries: auth?.treeEntries ?? [],
-          truncated: false,
+          truncated: auth?.treeTruncated ?? false,
         }),
       );
     }
@@ -472,6 +473,43 @@ describe("search flow", () => {
     });
     const parsed = JSON.parse(body) as { globInclude?: string[] };
     expect(parsed.globInclude).toEqual(["ok.txt"]);
+  });
+
+  it("escapes same-named files whose paths contain glob syntax", async () => {
+    let body = "";
+    mockFetch(
+      (init) => {
+        if (typeof init?.body === "string") {
+          body = init.body;
+        }
+        return sseResponse([sseEvent("done", donePayload())]);
+      },
+      undefined,
+      {
+        treeEntries: [
+          { name: "page.tsx", path: "app/[id]/page.tsx", dir: false },
+          { name: "page.tsx", path: "pkg/[id]/page.tsx", dir: false },
+        ],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(document.querySelectorAll(".tree-pick").length).toBe(2);
+    });
+    for (const btn of document.querySelectorAll(".tree-pick")) {
+      fireEvent.click(btn);
+    }
+    expect(screen.getByText("2 selected")).toBeTruthy();
+    typeQuery("needle");
+    clickSearch();
+    await waitFor(() => {
+      expect(body).toMatch(/globInclude/);
+    });
+    const parsed = JSON.parse(body) as { globInclude?: string[] };
+    expect(parsed.globInclude).toEqual([
+      "app/\\[id\\]/page.tsx",
+      "pkg/\\[id\\]/page.tsx",
+    ]);
   });
 
   it("main search also constrains to picked files", async () => {
@@ -3145,6 +3183,86 @@ describe("search flow", () => {
     expect(
       (document.querySelector(".auth-submit") as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it("does not refetch an open folder when the query changes", async () => {
+    const fetchMock = mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [{ name: "logs", path: "logs", dir: true }],
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(treeName("logs")).toBeTruthy();
+    });
+    fireEvent.click(document.querySelector(".tree-twist") as HTMLElement);
+    await waitFor(() => {
+      expect(
+        treeRequestUrls(fetchMock).some((url) => url.includes("path=logs")),
+      ).toBe(true);
+    });
+    const before = treeRequestUrls(fetchMock).length;
+    typeQuery("needle");
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 30);
+    });
+    expect(treeRequestUrls(fetchMock).length).toBe(before);
+  });
+
+  it("shows a retry when a nested folder fails to load", async () => {
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [{ name: "logs", path: "logs", dir: true }],
+      },
+    );
+    const inner = globalThis.fetch as typeof fetch;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      if (
+        requestUrl(input).includes("/api/tree") &&
+        requestUrl(input).includes("path=logs")
+      ) {
+        return Promise.resolve(
+          jsonResponse(500, { code: "INTERNAL", message: "boom" }),
+        );
+      }
+      return inner(input, init);
+    });
+    render(<App />);
+    await waitFor(() => {
+      expect(treeName("logs")).toBeTruthy();
+    });
+    fireEvent.click(document.querySelector(".tree-twist") as HTMLElement);
+    await waitFor(() => {
+      expect(screen.getByText("Could not load this folder")).toBeTruthy();
+    });
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(screen.queryByText("Empty folder")).toBeNull();
+    expect(
+      screen.queryByText(
+        "Could not load the tree; is the Go server on :8787 running?",
+      ),
+    ).toBeNull();
+  });
+
+  it("says when a directory listing is truncated", async () => {
+    mockFetch(
+      () => sseResponse([sseEvent("done", donePayload())]),
+      undefined,
+      {
+        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+        treeTruncated: true,
+      },
+    );
+    render(<App />);
+    await waitFor(() => {
+      expect(
+        screen.getByTitle("This folder has more entries than are shown"),
+      ).toBeTruthy();
+    });
   });
 
   it("retries the file tree after a load error", async () => {

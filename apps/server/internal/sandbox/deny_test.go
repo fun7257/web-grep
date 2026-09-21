@@ -35,6 +35,21 @@ func TestSanitizeUserGlob(t *testing.T) {
 	if err != nil || named != "foo--bar.txt" {
 		t.Fatalf("dash-dash name: %q %v", named, err)
 	}
+	if _, err := SanitizeUserGlob("foo/../bar"); err == nil {
+		t.Fatal("expected parent segment reject")
+	}
+	escaped, err := SanitizeUserGlob(`..\[id\]`)
+	if err != nil || escaped != `..\[id\]` {
+		t.Fatalf("escaped dot-dot name: %q %v", escaped, err)
+	}
+	star, err := SanitizeUserGlob(`..\*`)
+	if err != nil || star != `..\*` {
+		t.Fatalf("escaped star name: %q %v", star, err)
+	}
+	nested, err := SanitizeUserGlob(`sub/..\[id\]/page.tsx`)
+	if err != nil || nested != `sub/..\[id\]/page.tsx` {
+		t.Fatalf("nested escaped name: %q %v", nested, err)
+	}
 }
 
 func TestFilterByGlobs(t *testing.T) {
@@ -71,6 +86,30 @@ func TestFilterByGlobs(t *testing.T) {
 	if len(sameName) != 1 || sameName[0] != "ok.txt" {
 		t.Fatalf("literal pick is exact: %v", sameName)
 	}
+	twoSame := FilterByGlobs(
+		[]string{"a/page.tsx", "b/page.tsx", "c/page.tsx"},
+		[]string{"a/page.tsx", "b/page.tsx"},
+		nil,
+	)
+	if len(twoSame) != 2 || twoSame[0] != "a/page.tsx" || twoSame[1] != "b/page.tsx" {
+		t.Fatalf("two same names: %v", twoSame)
+	}
+	bracketed := FilterByGlobs(
+		[]string{"app/[id]/page.tsx", "pkg/[id]/page.tsx", "app/other/page.tsx"},
+		[]string{`app/\[id\]/page.tsx`, `pkg/\[id\]/page.tsx`},
+		nil,
+	)
+	if len(bracketed) != 2 || bracketed[0] != "app/[id]/page.tsx" || bracketed[1] != "pkg/[id]/page.tsx" {
+		t.Fatalf("escaped bracket picks: %v", bracketed)
+	}
+	bracketDir := FilterByGlobs(
+		[]string{"app/[id]/page.tsx", "app/[id]/nested/x.tsx", "pkg/[id]/page.tsx"},
+		[]string{`app/\[id\]/**`},
+		nil,
+	)
+	if len(bracketDir) != 2 || bracketDir[0] != "app/[id]/page.tsx" || bracketDir[1] != "app/[id]/nested/x.tsx" {
+		t.Fatalf("escaped bracket dir: %v", bracketDir)
+	}
 	picked := FilterByGlobs(files, []string{"src/**"}, nil)
 	and := FilterByGlobs(picked, []string{"*.ts"}, nil)
 	if len(and) != 1 || and[0] != "src/app.ts" {
@@ -93,6 +132,12 @@ func TestToRgGlobAnchorsLiterals(t *testing.T) {
 	}
 	if got := ToRgGlob("/already"); got != "/already" {
 		t.Fatalf("anchored: %q", got)
+	}
+	if got := ToRgGlob(`\[id\].txt`); got != `/\[id\].txt` {
+		t.Fatalf("escaped root literal: %q", got)
+	}
+	if got := ToRgGlob(`app/\[id\]/page.tsx`); got != `app/\[id\]/page.tsx` {
+		t.Fatalf("escaped nested literal: %q", got)
 	}
 }
 

@@ -37,6 +37,7 @@ import {
 import {
   picksToSearchGlobs,
   prunePicksByExclude,
+  removePick,
   type TreePick,
   togglePick,
 } from "./treePicks.ts";
@@ -234,6 +235,13 @@ function AppShell() {
         extraInclude,
         parseGlobs(nextExcludeRaw),
       );
+      if (globs.blocked) {
+        showInfoCue(t("pickTooLong"));
+        return;
+      }
+      if (globs.omitted.length > 0) {
+        showInfoCue(t("pickTooLongSkipped", { n: globs.omitted.length }));
+      }
       const head = ready[0];
 
       const stack: SearchStack = {
@@ -269,12 +277,12 @@ function AppShell() {
       runSearch(
         toRequest(
           stack,
-          extraInclude,
+          [],
           nextTime !== null ? mtimeAfterMs(nextTime) : undefined,
         ),
       );
     },
-    [excludeGlobs, picks, runSearch, timeRange],
+    [excludeGlobs, picks, runSearch, showInfoCue, t, timeRange],
   );
 
   const submit = useCallback(() => {
@@ -441,7 +449,7 @@ function AppShell() {
                 width: `${TREE_RAIL_WIDTH}px`,
               }
         }
-        onTogglePick={(entry, listedChildren, coveringChildren) => {
+        onTogglePick={(entry, listedChildren, coveringChildren, truncated) => {
           const next = togglePick(
             picks,
             {
@@ -450,6 +458,7 @@ function AppShell() {
             },
             listedChildren,
             coveringChildren,
+            truncated,
           );
           setPicks(next);
         }}
@@ -457,9 +466,7 @@ function AppShell() {
           setContextTarget({ path, allowGotoLine: true });
         }}
         onRemovePick={(pick) => {
-          setPicks((current) =>
-            current.filter((item) => item.path !== pick.path),
-          );
+          setPicks((current) => removePick(current, pick.path));
         }}
         onClear={() => {
           setPicks([]);

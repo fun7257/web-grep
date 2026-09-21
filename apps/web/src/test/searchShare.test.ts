@@ -178,6 +178,20 @@ describe("buildShareUrl", () => {
     });
     const parsedPicks = parseShareSearch(new URL(picked).search);
     expect(parsedPicks?.picks).toEqual([{ path: "skip.txt", dir: false }]);
+    const excluded = buildShareUrl("http://127.0.0.1:5173/", {
+      parts: ["hello"],
+      caseSensitive: false,
+      wordMatch: false,
+      regex: false,
+      picks: [
+        { path: "logs", dir: true },
+        { path: "logs/a.log", dir: false, exclude: true },
+      ],
+    });
+    expect(parseShareSearch(new URL(excluded).search)?.picks).toEqual([
+      { path: "logs", dir: true },
+      { path: "logs/a.log", dir: false, exclude: true },
+    ]);
     expect(new URL(picked).searchParams.get("k")).toBeNull();
     const mixed = buildShareUrl("http://127.0.0.1:5173/", {
       parts: ["Hello", "world.*"],

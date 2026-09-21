@@ -62,6 +62,14 @@ describe("pickMark", () => {
     ];
     expect(pickMark("logs", true, picks, null)).toBe("partial");
   });
+
+  it("stays partial when the listing is truncated", () => {
+    const picks = [
+      { path: "logs/a.log", dir: false },
+      { path: "logs/b.log", dir: false },
+    ];
+    expect(pickMark("logs", true, picks, kids, true)).toBe("partial");
+  });
 });
 
 describe("togglePick", () => {
@@ -84,6 +92,16 @@ describe("togglePick", () => {
     expect(togglePick(picks, { path: "logs", dir: true }, kids)).toEqual([
       { path: "logs", dir: true },
     ]);
+  });
+
+  it("promotes a truncated folder instead of clearing the visible files", () => {
+    const picks = [
+      { path: "logs/a.log", dir: false },
+      { path: "logs/b.log", dir: false },
+    ];
+    expect(togglePick(picks, { path: "logs", dir: true }, kids, null, true)).toEqual(
+      [{ path: "logs", dir: true }],
+    );
   });
 
   it("unchecks a file inside a picked folder by exploding siblings", () => {
@@ -124,6 +142,24 @@ describe("picksToGlobs", () => {
       "src/a.ts",
     ]);
   });
+
+  it("escapes glob syntax so same-named files stay literal paths", () => {
+    expect(
+      picksToGlobs([
+        { path: "app/[id]/page.tsx", dir: false },
+        { path: "pkg/[id]/page.tsx", dir: false },
+      ]),
+    ).toEqual(["app/\\[id\\]/page.tsx", "pkg/\\[id\\]/page.tsx"]);
+    expect(picksToGlobs([{ path: "app/[id]", dir: true }])).toEqual([
+      "app/\\[id\\]/**",
+    ]);
+    expect(
+      picksToGlobs([
+        { path: "a/{id}/page.tsx", dir: false },
+        { path: "b/{id}/page.tsx", dir: false },
+      ]),
+    ).toEqual(["a/\\{id\\}/page.tsx", "b/\\{id\\}/page.tsx"]);
+  });
 });
 
 describe("picksToSearchGlobs", () => {
@@ -134,18 +170,26 @@ describe("picksToSearchGlobs", () => {
     expect(picksToSearchGlobs(file)).toEqual({
       globInclude: ["ok.txt"],
       globExclude: [],
+      omitted: [],
+      blocked: false,
     });
     expect(picksToSearchGlobs(folder)).toEqual({
       globInclude: ["logs/**"],
       globExclude: [],
+      omitted: [],
+      blocked: false,
     });
     expect(picksToSearchGlobs([])).toEqual({
       globInclude: [],
       globExclude: [],
+      omitted: [],
+      blocked: false,
     });
     expect(picksToSearchGlobs(file, [], ["*.test.ts"])).toEqual({
       globInclude: ["ok.txt"],
       globExclude: ["*.test.ts"],
+      omitted: [],
+      blocked: false,
     });
   });
 
@@ -153,7 +197,51 @@ describe("picksToSearchGlobs", () => {
     expect(picksToSearchGlobs(file, ["src/a.ts"], ["*.test.ts"])).toEqual({
       globInclude: ["src/a.ts"],
       globExclude: ["*.test.ts"],
+      omitted: [],
+      blocked: false,
     });
+  });
+
+  it("keeps a truncated folder and excludes the unchecked file", () => {
+    const picks = [{ path: "logs", dir: true }];
+    const next = togglePick(
+      picks,
+      { path: "logs/a.log", dir: false },
+      kids,
+      kids,
+      true,
+    );
+    expect(next).toEqual([
+      { path: "logs", dir: true },
+      { path: "logs/a.log", dir: false, exclude: true },
+    ]);
+    expect(pickMark("logs", true, next, kids, true)).toBe("partial");
+    expect(pickMark("logs/a.log", false, next)).toBe("off");
+    expect(pickMark("logs/b.log", false, next)).toBe("covered");
+    expect(picksToSearchGlobs(next)).toEqual({
+      globInclude: ["logs/**"],
+      globExclude: ["logs/a.log"],
+      omitted: [],
+      blocked: false,
+    });
+    expect(
+      togglePick(next, { path: "logs/a.log", dir: false }, kids, kids, true),
+    ).toEqual(picks);
+  });
+
+  it("skips one overlong include and blocks when every include is overlong", () => {
+    const long = "a/".padEnd(300, "x");
+    const picks = [
+      { path: "ok.txt", dir: false },
+      { path: long, dir: false },
+    ];
+    const mixed = picksToSearchGlobs(picks);
+    expect(mixed.globInclude).toEqual(["ok.txt"]);
+    expect(mixed.blocked).toBe(false);
+    expect(mixed.omitted).toHaveLength(1);
+    const only = picksToSearchGlobs([{ path: long, dir: false }]);
+    expect(only.blocked).toBe(true);
+    expect(only.globInclude).toEqual([]);
   });
 });
 

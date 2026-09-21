@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { SearchHttpError } from "../api/http.ts";
 import {
   fetchRootTreeRetry,
@@ -47,14 +47,37 @@ type NodeProps = {
   excludeGlobs?: string[];
   parentListed?: TreeEntry[] | null;
   coveringListed?: TreeEntry[] | null;
+  ancestorTruncated?: boolean;
   onTogglePick: (
     entry: TreeEntry,
     listedChildren?: TreeEntry[] | null,
     coveringChildren?: TreeEntry[] | null,
+    truncated?: boolean,
   ) => void;
   onOpenFile?: (path: string) => void;
   onAuthFailure?: (err: SearchHttpError) => void;
 };
+
+function FolderLoadError({
+  depth,
+  onRetry,
+}: {
+  depth: number;
+  onRetry: () => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <div
+      className="tree-error"
+      style={{ paddingLeft: `${0.55 + depth * 0.78}rem` }}
+    >
+      <div>{t("treeFolderError")}</div>
+      <button type="button" className="tree-retry" onClick={onRetry}>
+        {t("treeRetry")}
+      </button>
+    </div>
+  );
+}
 
 function TreeNode({
   entry,
@@ -65,6 +88,7 @@ function TreeNode({
   excludeGlobs = [],
   parentListed = null,
   coveringListed = null,
+  ancestorTruncated = false,
   onTogglePick,
   onOpenFile,
   onAuthFailure,
@@ -74,6 +98,9 @@ function TreeNode({
   const [children, setChildren] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [denied, setDenied] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [truncated, setTruncated] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => {
     if (!entry.dir || !expanded) {
@@ -83,10 +110,13 @@ function TreeNode({
     const ac = new AbortController();
     setLoading(true);
     setDenied(false);
+    setFailed(false);
     void fetchTree(entry.path, ac.signal, mtimeAfter, excludeGlobs)
       .then((listing) => {
         if (!cancelled) {
           setDenied(false);
+          setFailed(false);
+          setTruncated(listing.truncated);
           setChildren(listing.entries);
         }
       })
@@ -96,9 +126,15 @@ function TreeNode({
         }
         if (err instanceof SearchHttpError) {
           onAuthFailure?.(err);
-          setDenied(err.body.code === "DENIED");
+          if (err.body.code === "DENIED") {
+            setDenied(true);
+            setFailed(false);
+            setTruncated(false);
+            setChildren([]);
+            return;
+          }
         }
-        setChildren([]);
+        setFailed(true);
       })
       .finally(() => {
         if (!cancelled) {
@@ -116,6 +152,7 @@ function TreeNode({
     expanded,
     mtimeAfter,
     onAuthFailure,
+    reload,
   ]);
 
   const expand = (): void => {
@@ -130,6 +167,7 @@ function TreeNode({
     entry.dir,
     picks,
     entry.dir ? children : null,
+    truncated,
   );
   const current = !entry.dir && activePath === entry.path;
   const hidden = entry.name.startsWith(".");
@@ -150,7 +188,12 @@ function TreeNode({
       mark === "on" && entry.dir && children !== null
         ? children
         : coveringListed;
-    onTogglePick(entry, entry.dir ? children : parentListed, covering);
+    onTogglePick(
+      entry,
+      entry.dir ? children : parentListed,
+      covering,
+      truncated || ancestorTruncated,
+    );
   };
 
   return (
@@ -220,36 +263,66 @@ function TreeNode({
               </span>
               <span className="tree-name">{t("treeDenied")}</span>
             </div>
+          ) : failed && children === null ? (
+            <FolderLoadError
+              depth={depth + 1}
+              onRetry={() => {
+                setReload((count) => count + 1);
+              }}
+            />
           ) : loading && children === null ? (
             <TreeSkeleton depth={depth + 1} />
-          ) : (children ?? []).length === 0 ? (
-            <div
-              className="tree-row empty-folder"
-              style={{ paddingLeft: `${1.15 + depth * 0.78}rem` }}
-            >
-              <span className="tree-name">{t("treeEmptyFolder")}</span>
-            </div>
           ) : (
-            (children ?? []).map((child) => (
-              <TreeNode
-                key={child.path}
-                entry={child}
-                depth={depth + 1}
-                activePath={activePath}
-                picks={picks}
-                mtimeAfter={mtimeAfter}
-                excludeGlobs={excludeGlobs}
-                parentListed={children}
-                coveringListed={
-                  mark === "on" && entry.dir && children !== null
-                    ? children
-                    : coveringListed
-                }
-                onTogglePick={onTogglePick}
-                {...(onOpenFile !== undefined ? { onOpenFile } : {})}
-                {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
-              />
-            ))
+            <>
+              {failed ? (
+                <FolderLoadError
+                  depth={depth + 1}
+                  onRetry={() => {
+                    setReload((count) => count + 1);
+                  }}
+                />
+              ) : null}
+              {(children ?? []).length === 0 ? (
+                <div
+                  className="tree-row empty-folder"
+                  style={{ paddingLeft: `${1.15 + depth * 0.78}rem` }}
+                >
+                  <span className="tree-name">{t("treeEmptyFolder")}</span>
+                </div>
+              ) : (
+                (children ?? []).map((child) => (
+                  <TreeNode
+                    key={child.path}
+                    entry={child}
+                    depth={depth + 1}
+                    activePath={activePath}
+                    picks={picks}
+                    mtimeAfter={mtimeAfter}
+                    excludeGlobs={excludeGlobs}
+                    parentListed={children}
+                    coveringListed={
+                      mark === "on" && entry.dir && children !== null
+                        ? children
+                        : coveringListed
+                    }
+                    ancestorTruncated={truncated || ancestorTruncated}
+                    onTogglePick={onTogglePick}
+                    {...(onOpenFile !== undefined ? { onOpenFile } : {})}
+                    {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
+                  />
+                ))
+              )}
+              {truncated ? (
+                <div
+                  className="tree-row tree-truncated"
+                  style={{ paddingLeft: `${1.15 + depth * 0.78}rem` }}
+                >
+                  <span className="tree-name" title={t("treeTruncated")}>
+                    {t("treeTruncated")}
+                  </span>
+                </div>
+              ) : null}
+            </>
           )}
         </div>
       ) : null}
@@ -289,6 +362,7 @@ export function FileTree({
     entry: TreeEntry,
     listedChildren?: TreeEntry[] | null,
     coveringChildren?: TreeEntry[] | null,
+    truncated?: boolean,
   ) => void;
   onOpenFile?: (path: string) => void;
   onRemovePick?: (pick: TreePick) => void;
@@ -306,9 +380,11 @@ export function FileTree({
 }) {
   const { t } = useLocale();
   const [root, setRoot] = useState<TreeEntry[] | null>(null);
+  const [rootTruncated, setRootTruncated] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
-  const n = picks.length;
+  const shownPicks = picks.filter((pick) => !pick.exclude);
+  const n = shownPicks.length;
   const canClear =
     picks.length > 0 || excludeGlobs.trim() !== "" || timeRange !== null;
   const label = rootLabel || t("treeTitle");
@@ -335,11 +411,15 @@ export function FileTree({
     applyExclude(excludeGlobs);
   }, [excludeGlobs]);
 
-  const excludeList = parseGlobs(excludeFilter);
+  const excludeList = useMemo(
+    () => parseGlobs(excludeFilter),
+    [excludeFilter],
+  );
 
   useEffect(() => {
     if (!sessionReady) {
       setRoot(null);
+      setRootTruncated(false);
       setError(null);
       return;
     }
@@ -361,6 +441,7 @@ export function FileTree({
       }
       if (result.ok) {
         setRoot(result.listing.entries);
+        setRootTruncated(result.listing.truncated);
         setError(null);
         return;
       }
@@ -421,9 +502,9 @@ export function FileTree({
                 <span>{t("treeClear")}</span>
               </button>
             </div>
-            {picks.length > 0 ? (
+            {shownPicks.length > 0 ? (
               <div className="tree-picked-chips">
-                {picks.map((pick) => (
+                {shownPicks.map((pick) => (
                   <span key={pick.path} className="pick-chip">
                     <span
                       className="pick-chip-name"
@@ -549,21 +630,30 @@ export function FileTree({
                 </p>
               </div>
             ) : (
-              root.map((entry) => (
-                <TreeNode
-                  key={`${entry.path}:${mtimeAfter ?? "all"}:${excludeFilter}`}
-                  entry={entry}
-                  depth={0}
-                  activePath={activePath}
-                  picks={picks}
-                  mtimeAfter={mtimeAfter}
-                  excludeGlobs={excludeList}
-                  parentListed={root}
-                  onTogglePick={onTogglePick}
-                  {...(onOpenFile !== undefined ? { onOpenFile } : {})}
-                  {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
-                />
-              ))
+              <>
+                {root.map((entry) => (
+                  <TreeNode
+                    key={`${entry.path}:${mtimeAfter ?? "all"}:${excludeFilter}`}
+                    entry={entry}
+                    depth={0}
+                    activePath={activePath}
+                    picks={picks}
+                    mtimeAfter={mtimeAfter}
+                    excludeGlobs={excludeList}
+                    parentListed={root}
+                    onTogglePick={onTogglePick}
+                    {...(onOpenFile !== undefined ? { onOpenFile } : {})}
+                    {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
+                  />
+                ))}
+                {rootTruncated ? (
+                  <div className="tree-row tree-truncated">
+                    <span className="tree-name" title={t("treeTruncated")}>
+                    {t("treeTruncated")}
+                  </span>
+                  </div>
+                ) : null}
+              </>
             )}
           </div>
           <div className="tree-foot">

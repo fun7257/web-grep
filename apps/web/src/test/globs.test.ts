@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { matchesAnyGlob, matchesUserGlob, parseGlobs } from "../globs.ts";
+import {
+  escapeGlobPath,
+  matchesAnyGlob,
+  matchesUserGlob,
+  parseGlobs,
+} from "../globs.ts";
 
 describe("parseGlobs", () => {
   it("splits on commas, semicolons, and spaces", () => {
@@ -26,6 +31,16 @@ describe("matchesUserGlob", () => {
   it("matches recursive folder globs", () => {
     expect(matchesUserGlob("logs/a.log", "logs/**")).toBe(true);
     expect(matchesUserGlob("src/a.log", "logs/**")).toBe(false);
+  });
+
+  it("treats escaped brackets and braces as literals", () => {
+    const pattern = escapeGlobPath("app/[id]");
+    expect(pattern).toBe("app/\\[id\\]");
+    expect(matchesUserGlob("app/[id]/page.tsx", `${pattern}/**`)).toBe(true);
+    expect(matchesUserGlob("app/other/page.tsx", `${pattern}/**`)).toBe(false);
+    expect(matchesUserGlob("a/{id}/page.tsx", `${escapeGlobPath("a/{id}")}/**`)).toBe(
+      true,
+    );
   });
 });
 

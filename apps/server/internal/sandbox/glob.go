@@ -128,6 +128,10 @@ func ToRgGlob(g string) string {
 
 func hasGlobMeta(pat string) bool {
 	for i := 0; i < len(pat); i++ {
+		if pat[i] == '\\' && i+1 < len(pat) {
+			i++
+			continue
+		}
 		switch pat[i] {
 		case '*', '?', '[':
 			return true

@@ -125,6 +125,11 @@ export function parseShareSearch(search: string): ShareState | null {
       path: item === "." ? "" : item,
       dir: true,
     })),
+    ...trimmedList(params.getAll("e")).map((item) => ({
+      path: item,
+      dir: false,
+      exclude: true,
+    })),
   ];
   const globalMods: SearchModifiers = {
     caseSensitive: params.get("s") === "1",
@@ -199,7 +204,9 @@ export function buildShareUrl(href: string, state: ShareState): string {
     url.searchParams.set("x", excludeGlobs);
   }
   for (const pick of state.picks ?? []) {
-    if (pick.dir) {
+    if (pick.exclude) {
+      url.searchParams.append("e", pick.path);
+    } else if (pick.dir) {
       url.searchParams.append("d", pick.path === "" ? "." : pick.path);
     } else {
       url.searchParams.append("f", pick.path);

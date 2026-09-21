@@ -10,13 +10,28 @@ function escapeRegex(value: string): string {
 }
 
 function hasGlobMeta(pat: string): boolean {
-  return /[*?\[]/.test(pat);
+  for (let i = 0; i < pat.length; i++) {
+    if (pat[i] === "\\" && i + 1 < pat.length) {
+      i += 1;
+      continue;
+    }
+    const ch = pat[i];
+    if (ch === "*" || ch === "?" || ch === "[") {
+      return true;
+    }
+  }
+  return false;
 }
 
 function globToRegExp(pat: string): RegExp {
   let out = "^";
   let i = 0;
   while (i < pat.length) {
+    if (pat[i] === "\\" && i + 1 < pat.length) {
+      out += escapeRegex(pat[i + 1] ?? "");
+      i += 2;
+      continue;
+    }
     if (pat[i] === "*" && pat[i + 1] === "*") {
       if (pat[i + 2] === "/") {
         out += "(?:.*/)?";
@@ -38,6 +53,17 @@ function globToRegExp(pat: string): RegExp {
     i += 1;
   }
   return new RegExp(`${out}$`);
+}
+
+// Tree picks are literal paths. ripgrep globs treat these as syntax,
+// so an unescaped `[id]` or `{id}` segment matches nothing.
+const globMeta = /[\\*?[\]{}!]/g;
+
+export function escapeGlobPath(path: string): string {
+  return path
+    .split("/")
+    .map((segment) => segment.replace(globMeta, (ch) => `\\${ch}`))
+    .join("/");
 }
 
 function userGlobRegExp(pattern: string): RegExp | null {

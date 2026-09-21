@@ -93,14 +93,51 @@ func SanitizeUserGlob(glob string) (string, error) {
 	if filepath.IsAbs(trimmed) {
 		return "", ErrInvalidGlob
 	}
-	for _, seg := range strings.FieldsFunc(trimmed, func(r rune) bool {
-		return r == '/' || r == '\\'
-	}) {
-		if seg == ".." {
-			return "", ErrInvalidGlob
-		}
+	if globHasDotDot(trimmed) {
+		return "", ErrInvalidGlob
 	}
 	return trimmed, nil
+}
+
+// globHasDotDot rejects parent segments. Backslash is an escape, not a
+// separator, so an escaped name like ..\[id\] is not ".." .
+func globHasDotDot(pat string) bool {
+	segStart := 0
+	for i := 0; i < len(pat); i++ {
+		if pat[i] == '\\' && i+1 < len(pat) {
+			i++
+			continue
+		}
+		if pat[i] == '/' {
+			if globSegmentIsDotDot(pat[segStart:i]) {
+				return true
+			}
+			segStart = i + 1
+		}
+	}
+	return globSegmentIsDotDot(pat[segStart:])
+}
+
+func globSegmentIsDotDot(seg string) bool {
+	var b strings.Builder
+	for i := 0; i < len(seg); i++ {
+		if seg[i] == '\\' && i+1 < len(seg) {
+			b.WriteByte(seg[i+1])
+			i++
+			continue
+		}
+		b.WriteByte(seg[i])
+	}
+	raw := b.String()
+	if raw == ".." {
+		return true
+	}
+	for _, part := range strings.Split(raw, "/") {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
 }
 
 func globToRegexp(pat string) *regexp.Regexp {
@@ -108,6 +145,11 @@ func globToRegexp(pat string) *regexp.Regexp {
 	b.WriteByte('^')
 	i := 0
 	for i < len(pat) {
+		if pat[i] == '\\' && i+1 < len(pat) {
+			b.WriteString(regexp.QuoteMeta(pat[i+1 : i+2]))
+			i += 2
+			continue
+		}
 		if i+1 < len(pat) && pat[i] == '*' && pat[i+1] == '*' {
 			if i+2 < len(pat) && pat[i+2] == '/' {
 				b.WriteString("(?:.*/)?")

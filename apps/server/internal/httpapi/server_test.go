@@ -878,6 +878,92 @@ func TestLiveRipgrepMtimeAndGlobInclude(t *testing.T) {
 	}
 }
 
+func TestLiveRipgrepSameNameIncludes(t *testing.T) {
+	bin := rg.Detect("")
+	if bin == "" {
+		t.Skip("rg not available")
+	}
+	root := t.TempDir()
+	for _, rel := range []string{
+		"a/page.tsx",
+		"b/page.tsx",
+		"c/page.tsx",
+		"app/[id]/page.tsx",
+		"pkg/[id]/page.tsx",
+		"app/other/page.tsx",
+	} {
+		abs := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(abs, []byte("hello-needle\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	root, _ = filepath.EvalSymlinks(root)
+	cfg := config.Config{
+		RootReal: root, RootLabel: "t", Host: "127.0.0.1", Port: 8787,
+		MaxResults: 10000, TimeoutMs: 5000, NoIgnore: true,
+	}
+	s := newTestServer(cfg, rg.Engine{Bin: bin}, "rg")
+
+	t.Run("plain", func(t *testing.T) {
+		rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
+			`{"query":"hello-needle","globInclude":["a/page.tsx","b/page.tsx"]}`, nil)
+		if rec.Code != 200 {
+			t.Fatal(rec.Body.String())
+		}
+		paths := liveHitPaths(t, rec.Body.String())
+		for _, want := range []string{"a/page.tsx", "b/page.tsx"} {
+			if !slices.Contains(paths, want) {
+				t.Fatalf("missing %s in %v body=%s", want, paths, rec.Body.String())
+			}
+		}
+		if slices.Contains(paths, "c/page.tsx") {
+			t.Fatalf("plain picks leaked c/page.tsx: %v", paths)
+		}
+	})
+
+	t.Run("brackets", func(t *testing.T) {
+		rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
+			`{"query":"hello-needle","globInclude":["app/\\[id\\]/page.tsx","pkg/\\[id\\]/page.tsx"]}`, nil)
+		if rec.Code != 200 {
+			t.Fatal(rec.Body.String())
+		}
+		paths := liveHitPaths(t, rec.Body.String())
+		for _, want := range []string{"app/[id]/page.tsx", "pkg/[id]/page.tsx"} {
+			if !slices.Contains(paths, want) {
+				t.Fatalf("missing %s in %v body=%s", want, paths, rec.Body.String())
+			}
+		}
+		for _, leak := range []string{"app/other/page.tsx", "a/page.tsx"} {
+			if slices.Contains(paths, leak) {
+				t.Fatalf("bracket picks leaked %s: %v", leak, paths)
+			}
+		}
+	})
+}
+
+func liveHitPaths(t *testing.T, body string) []string {
+	t.Helper()
+	var paths []string
+	for _, line := range strings.Split(body, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "data:") {
+			continue
+		}
+		payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+		var hit struct {
+			Path string `json:"path"`
+		}
+		if err := json.Unmarshal([]byte(payload), &hit); err != nil || hit.Path == "" {
+			continue
+		}
+		paths = append(paths, hit.Path)
+	}
+	return paths
+}
+
 func TestLiveRipgrepLiteralGlobDoesNotMatchNested(t *testing.T) {
 	bin := rg.Detect("")
 	if bin == "" {

@@ -3899,10 +3899,26 @@ html[data-theme="light"] .token-prompt {
   color: var(--faint);
 }
 
-.tree-row.empty-folder .tree-name {
+.tree-row.empty-folder .tree-name,
+.tree-row.tree-truncated .tree-name {
   color: var(--faint);
   font-style: italic;
   font-weight: 400;
+}
+
+.tree-row.tree-truncated {
+  height: auto;
+  min-height: var(--tree-row-h);
+  align-items: flex-start;
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+}
+
+.tree-row.tree-truncated .tree-name {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  line-height: 1.4;
 }
 
 .tree-skel-list {
