@@ -2425,6 +2425,8 @@ describe("search flow", () => {
     const regexBtns = screen.getAllByRole("button", { name: ".*" });
     expect(regexBtns.length).toBeGreaterThan(1);
     fireEvent.click(regexBtns[1] as HTMLButtonElement);
+    expect(searchCallCount(fetchMock)).toBe(0);
+    clickSearch();
     await waitFor(() => {
       const body = lastSearchRequest(fetchMock);
       expect(body.query).toBe("hello");

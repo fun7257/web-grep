@@ -33,7 +33,11 @@ function SearchBarHarness({
 function renderBar(initial?: QueryPart[]) {
   const onFlushSearch = vi.fn();
   render(
-    <SearchBarHarness onFlushSearch={onFlushSearch} initial={initial} />,
+    initial === undefined ? (
+      <SearchBarHarness onFlushSearch={onFlushSearch} />
+    ) : (
+      <SearchBarHarness onFlushSearch={onFlushSearch} initial={initial} />
+    ),
   );
   return onFlushSearch;
 }
@@ -117,9 +121,8 @@ describe("SearchBar option toggles", () => {
 
     fireEvent.click(document.querySelector(".search-and-go") as HTMLButtonElement);
     expect(onFlushSearch).toHaveBeenCalledTimes(1);
-    expect(onFlushSearch.mock.calls[0]?.[0]?.map((part) => part.value)).toEqual([
-      "hello",
-      "world",
-    ]);
+    expect(
+      onFlushSearch.mock.calls[0]?.[0]?.map((part: QueryPart) => part.value),
+    ).toEqual(["hello", "world"]);
   });
 });
