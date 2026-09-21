@@ -341,7 +341,6 @@ function AppShell() {
     showInfoCue(t("shareRestored"));
     if (parsed.path !== undefined && parsed.line !== undefined) {
       pendingSelect.current = { path: parsed.path, line: parsed.line };
-      setSharePending({ path: parsed.path, line: parsed.line });
     }
     if (parsed.timeRange !== undefined) {
       setTimeRange(parsed.timeRange);
@@ -349,21 +348,11 @@ function AppShell() {
     } else {
       setTimeRange(null);
     }
-    const extraInclude =
-      nextPicks.length === 0 && parsed.path !== undefined && parsed.path !== ""
-        ? [parsed.path]
-        : [];
-    searchWithParts(
-      parsed.parts.map((value, index) =>
-        newPart(value, parsed.mods?.[index]),
-      ),
-      extraInclude,
-      parsed.timeRange ?? null,
-      nextPicks,
-      nextExclude,
+    const nextFields = parsed.parts.map((value, index) =>
+      newPart(value, parsed.mods?.[index]),
     );
+    setFields(nextFields.length > 0 ? nextFields : [newPart("")]);
   }, [
-    searchWithParts,
     showInfoCue,
     t,
     token.hostForbidden,
@@ -593,9 +582,6 @@ function AppShell() {
           running={search.status === "running"}
           searchLocked={searchLocked}
           onCancel={cancelSearch}
-          onOptionFlush={() => {
-            showInfoCue(t("optionFlushed"));
-          }}
         />
         <div className="pane-head">
           <span className="pane-head-title">

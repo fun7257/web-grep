@@ -1913,20 +1913,27 @@ describe("search flow", () => {
     );
   });
 
-  it("opens a shared link and selects the named hit", async () => {
+  it("opens a shared link and restores draft without searching", async () => {
     window.history.replaceState({}, "", "/?q=hello&p=src%2Fb.ts&n=3");
-    let body = "";
-    mockFetch((init) => {
-      if (typeof init?.body === "string") {
-        body = init.body;
-      }
-      return sseResponse([
+    const fetchMock = mockFetch(() =>
+      sseResponse([
         sseEvent("hit", HIT_A),
         sseEvent("hit", HIT_B),
         sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
-      ]);
-    });
+      ]),
+    );
     render(<App />);
+    await waitFor(() => {
+      expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+        "hello",
+      );
+    });
+    expect(
+      screen.getByText("Restored conditions from the share link"),
+    ).toBeTruthy();
+    expect(searchCallCount(fetchMock)).toBe(0);
+    expect(queryLoc("src/b.ts:3")).toBeNull();
+    clickSearch();
     await waitFor(() => {
       expect(getLoc("src/b.ts:3")).toBeTruthy();
     });
@@ -1935,12 +1942,8 @@ describe("search flow", () => {
         document.querySelector(".preview-line.current")?.textContent,
       ).toMatch(/hello there/);
     });
-    const parsed = JSON.parse(body) as {
-      globInclude?: string[];
-      mtimeAfter?: number;
-    };
-    expect(parsed.globInclude).toEqual(["src/b.ts"]);
-    expect(parsed.mtimeAfter).toBeUndefined();
+    expect(lastSearchRequest(fetchMock).globInclude ?? []).toEqual([]);
+    expect(lastSearchRequest(fetchMock).mtimeAfter).toBeUndefined();
   });
 
   it("opens a shared link with the full file and advanced options", async () => {
@@ -1949,24 +1952,19 @@ describe("search flow", () => {
       "",
       "/?q=hello&p=src%2Fb.ts&n=3&s=1&w=1&r=1&x=*.test.ts",
     );
-    let body = "";
-    mockFetch((init) => {
-      if (typeof init?.body === "string") {
-        body = init.body;
-      }
-      return sseResponse([
+    const fetchMock = mockFetch(() =>
+      sseResponse([
         sseEvent("hit", HIT_A),
         sseEvent("hit", HIT_B),
         sseEvent("done", donePayload({ matchCount: 2, fileCount: 2 })),
-      ]);
-    });
+      ]),
+    );
     render(<App />);
     await waitFor(() => {
-      expect(getLoc("src/b.ts:3")).toBeTruthy();
+      expect(
+        screen.getByRole("button", { name: "Aa" }).getAttribute("aria-pressed"),
+      ).toBe("true");
     });
-    expect(screen.getByRole("button", { name: "Aa" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
     expect(screen.getByRole("button", { name: "\\b" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
@@ -1977,20 +1975,17 @@ describe("search flow", () => {
     expect(
       (screen.getByPlaceholderText("*.test.ts") as HTMLInputElement).value,
     ).toBe("*.test.ts");
-    const parsed = JSON.parse(body) as {
-      query: string;
-      caseSensitive?: boolean;
-      wordMatch?: boolean;
-      regex?: boolean;
-      globInclude?: string[];
-      globAnd?: string[];
-      globExclude?: string[];
-    };
+    expect(searchCallCount(fetchMock)).toBe(0);
+    clickSearch();
+    await waitFor(() => {
+      expect(getLoc("src/b.ts:3")).toBeTruthy();
+    });
+    const parsed = lastSearchRequest(fetchMock);
     expect(parsed.query).toBe("hello");
     expect(parsed.caseSensitive).toBe(true);
     expect(parsed.wordMatch).toBe(true);
     expect(parsed.regex).toBe(true);
-    expect(parsed.globInclude).toEqual(["src/b.ts"]);
+    expect(parsed.globInclude ?? []).toEqual([]);
     expect(parsed.globAnd ?? []).toEqual([]);
     expect(parsed.globExclude).toEqual(["*.test.ts"]);
   });
@@ -2001,17 +1996,12 @@ describe("search flow", () => {
       "",
       "/?q=hello&f=ok.txt&s=1&w=1&r=1&x=*.test.ts&p=src%2Fa.ts&n=1",
     );
-    let body = "";
-    mockFetch(
-      (init) => {
-        if (typeof init?.body === "string") {
-          body = init.body;
-        }
-        return sseResponse([
+    const fetchMock = mockFetch(
+      () =>
+        sseResponse([
           sseEvent("hit", HIT_A),
           sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
-        ]);
-      },
+        ]),
       undefined,
       {
         treeEntries: [
@@ -2025,14 +2015,12 @@ describe("search flow", () => {
       expect(screen.getByText("1 selected")).toBeTruthy();
     });
     expect(screen.queryByPlaceholderText("*.ts, src/**")).toBeNull();
-    const parsed = JSON.parse(body) as {
-      caseSensitive?: boolean;
-      wordMatch?: boolean;
-      regex?: boolean;
-      globInclude?: string[];
-      globAnd?: string[];
-      globExclude?: string[];
-    };
+    expect(searchCallCount(fetchMock)).toBe(0);
+    clickSearch();
+    await waitFor(() => {
+      expect(searchCallCount(fetchMock)).toBe(1);
+    });
+    const parsed = lastSearchRequest(fetchMock);
     expect(parsed.caseSensitive).toBe(true);
     expect(parsed.wordMatch).toBe(true);
     expect(parsed.regex).toBe(true);
@@ -2047,17 +2035,12 @@ describe("search flow", () => {
       "",
       "/?q=hello&q=world&f=skip.txt&t=7d",
     );
-    let body = "";
-    mockFetch(
-      (init) => {
-        if (typeof init?.body === "string") {
-          body = init.body;
-        }
-        return sseResponse([
+    const fetchMock = mockFetch(
+      () =>
+        sseResponse([
           sseEvent("hit", HIT_A),
           sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
-        ]);
-      },
+        ]),
       undefined,
       {
         treeEntries: [{ name: "skip.txt", path: "skip.txt", dir: false }],
@@ -2067,14 +2050,16 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("1 selected")).toBeTruthy();
     });
-    const parsed = JSON.parse(body) as {
-      query: string;
-      regex?: boolean;
-      andTerms?: string[];
-      globInclude?: string[];
-      globExclude?: string[];
-      mtimeAfter?: number;
-    };
+    expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+      "hello",
+    );
+    expect(document.querySelector(".search-add-count")?.textContent).toBe("1");
+    expect(searchCallCount(fetchMock)).toBe(0);
+    clickSearch();
+    await waitFor(() => {
+      expect(searchCallCount(fetchMock)).toBe(1);
+    });
+    const parsed = lastSearchRequest(fetchMock);
     expect(parsed.regex ?? false).toBe(false);
     expect(parsed.query).toBe("hello");
     expect(parsed.andTerms ?? []).toEqual([
@@ -3188,8 +3173,8 @@ describe("search flow", () => {
     });
   });
 
-  it("shows an option-flush info cue when modifiers re-search", async () => {
-    mockFetch(() =>
+  it("does not re-search or show a flush cue when modifiers are toggled", async () => {
+    const fetchMock = mockFetch(() =>
       sseResponse([
         sseEvent("hit", HIT_A),
         sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
@@ -3197,31 +3182,39 @@ describe("search flow", () => {
     );
     render(<App />);
     typeQuery("needle");
-    fireEvent.click(screen.getByRole("button", { name: "Aa" }));
+    clickSearch();
     await waitFor(() => {
-      expect(screen.getByText("Re-searched with the new options")).toBeTruthy();
+      expect(fileRow("src/a.ts")).toBeTruthy();
     });
-    expect(document.querySelector(".info-cue")).toBeTruthy();
+    const searchesAfterFirst = searchCallCount(fetchMock);
+    fireEvent.click(screen.getByRole("button", { name: "Aa" }));
+    fireEvent.click(screen.getByRole("button", { name: "\\b" }));
+    fireEvent.click(screen.getByRole("button", { name: ".*" }));
+    expect(searchCallCount(fetchMock)).toBe(searchesAfterFirst);
+    expect(screen.queryByText("Re-searched with the new options")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Aa" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(fileRow("src/a.ts")).toBeTruthy();
   });
 
-  it("shows a pending path:line cue when restoring a share URL", async () => {
+  it("restores a share URL into the form without searching", async () => {
     window.history.replaceState({}, "", "/?q=hello&p=src%2Fb.ts&n=3");
-    mockFetch((init) => neverSettle(init));
+    const fetchMock = mockFetch((init) => neverSettle(init));
     render(<App />);
     await waitFor(() => {
-      expect(screen.getByText("Pending select src/b.ts:3")).toBeTruthy();
+      expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+        "hello",
+      );
     });
     expect(
-      screen.getByText(
-        "Restored conditions from the share link and searched automatically",
-      ),
+      screen.getByText("Restored conditions from the share link"),
     ).toBeTruthy();
+    expect(screen.queryByText("Pending select src/b.ts:3")).toBeNull();
     expect(
-      screen.getByText("Share link pending select src/b.ts:3"),
-    ).toBeTruthy();
-    expect(document.querySelectorAll(".info-cue").length).toBeGreaterThanOrEqual(
-      2,
-    );
+      screen.queryByText("Share link pending select src/b.ts:3"),
+    ).toBeNull();
+    expect(searchCallCount(fetchMock)).toBe(0);
   });
 
   it("keeps the hit snippet and opens ContextModal for a tree file", async () => {

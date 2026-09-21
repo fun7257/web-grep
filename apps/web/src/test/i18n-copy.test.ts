@@ -12,9 +12,7 @@ describe("i18n catalogs", () => {
   });
 
   it("ships S-URL-1 share-restore copy in zh-CN and en-US", () => {
-    expect(catalogs["zh-CN"].shareRestored).toBe(
-      "已从分享链接恢复条件并自动搜索",
-    );
+    expect(catalogs["zh-CN"].shareRestored).toBe("已从分享链接恢复条件");
     expect(catalogs["zh-CN"].sharePendingSelect).toBe("待选中 {path}:{line}");
     expect(catalogs["zh-CN"].previewSharePending).toBe(
       "分享链接待选中 {path}:{line}",

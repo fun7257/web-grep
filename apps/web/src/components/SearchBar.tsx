@@ -39,7 +39,6 @@ export function SearchBar({
   running = false,
   searchLocked = false,
   onCancel,
-  onOptionFlush,
 }: {
   fields: QueryPart[];
   onFieldsChange: (fields: QueryPart[]) => void;
@@ -57,7 +56,6 @@ export function SearchBar({
   running?: boolean;
   searchLocked?: boolean;
   onCancel?: () => void;
-  onOptionFlush?: () => void;
 }) {
   const { t } = useLocale();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -98,20 +96,9 @@ export function SearchBar({
     index: number,
     patch: Partial<Pick<QueryPart, "caseSensitive" | "wordMatch" | "regex">>,
   ): void => {
-    const next = values.map((item, i) =>
-      i === index ? { ...item, ...patch } : item,
+    onFieldsChange(
+      values.map((item, i) => (i === index ? { ...item, ...patch } : item)),
     );
-    onFieldsChange(next);
-    if (searchLocked) {
-      return;
-    }
-    const ready = next
-      .map((part) => ({ ...part, value: part.value.trim() }))
-      .filter((part) => part.value !== "");
-    if (ready.length > 0) {
-      onFlushSearch(ready);
-      onOptionFlush?.();
-    }
   };
 
   const addField = (): void => {
