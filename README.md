@@ -47,7 +47,7 @@ Open http://127.0.0.1:5173
 
 ## Test / production (Docker) / 测试与生产
 
-前后端打进**同一个镜像**。见 [`docs/docker.md`](docs/docker.md)：`docker compose up --build -d` 或 `docker run`。
+前后端打进**同一个镜像**。见 [`docs/docker.md`](docs/docker.md)：本地 `docker compose up --build -d`（镜像 `web-grep:local`），或 `docker compose -f compose.ghcr.yaml up -d` 拉取 GHCR `:dev` / `:vX.Y.Z`。
 
 Without Docker:
 
