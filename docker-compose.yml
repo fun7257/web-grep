@@ -4,6 +4,9 @@
 #
 #   WEB_GREP_DATA=/var/log WEB_GREP_TOKEN=secret docker compose up --build -d
 #
+# Pre-built GHCR images (no local build): see docs/docker.md
+#   docker pull ghcr.io/fun7257/web-grep:dev
+#
 # Or mount your own yaml (must use root: /data):
 #   - ./config.deploy.yaml:/app/config.yaml
 # Persist search-count next to that file if you care about the badge.
