@@ -1,24 +1,15 @@
-# Test / production: one container serves the SPA and /api.
-# App config is /app/config.yaml inside the image (root: /data).
-# WEB_GREP_* environment variables are optional one-shot overrides.
+# Pull a published GHCR image (no local build). Same mounts / env as docker-compose.yml.
+# Default tag is :dev (rebuilt and overwritten on every main merge).
+# Pin a release: WEB_GREP_IMAGE=ghcr.io/fun7257/web-grep:v0.2.0
 #
-#   WEB_GREP_DATA=/var/log WEB_GREP_TOKEN=secret docker compose up --build -d
-#
-# Pre-built GHCR images (no local build): compose.ghcr.yaml / docs/docker.md
-#   docker compose -f compose.ghcr.yaml up -d
-#
-# Or mount your own yaml (must use root: /data):
-#   - ./config.deploy.yaml:/app/config.yaml
-# Persist search-count next to that file if you care about the badge.
+#   WEB_GREP_DATA=/var/log WEB_GREP_TOKEN=secret docker compose -f compose.ghcr.yaml up -d
 
 name: web-grep
 
 services:
   web-grep:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: web-grep:local
+    image: ${WEB_GREP_IMAGE:-ghcr.io/fun7257/web-grep:dev}
+    pull_policy: always
     user: "${WEB_GREP_UID:-0}:${WEB_GREP_GID:-0}"
     ports:
       - "${WEB_GREP_PORT:-8787}:8787"

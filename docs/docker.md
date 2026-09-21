@@ -49,7 +49,7 @@ echo "$GITHUB_TOKEN" | docker login ghcr.io -u USERNAME --password-stdin
 
 ## Compose（本地构建）
 
-现有本地路径不变：现场构建，镜像名 `web-grep:test`。
+现有本地路径不变：现场构建，镜像名统一为 `web-grep:local`。
 
 ```bash
 WEB_GREP_DATA=/要搜索的宿主机目录 \
@@ -64,31 +64,18 @@ docker compose up --build -d
 
 挂卷规则与上面相同：`root` 必须是容器内 `/data`，不要把本机开发用的 `config.yaml` 挂进去。
 
-环境变量方式（与仓库 `docker-compose.yml` 一致，只是改用已发布镜像、不要 `--build`）：
+仓库根目录的 [`compose.ghcr.yaml`](../compose.ghcr.yaml) 与本地 `docker-compose.yml` 同一套环境变量和 `/data` 挂载，只是拉 GHCR、不构建。默认镜像是 `:dev`；钉版本时加 `WEB_GREP_IMAGE`（不要 `--build`）：
 
-```yaml
-# docker-compose.override 示例；或另存一份 compose 文件
-name: web-grep
-services:
-  web-grep:
-    image: ghcr.io/fun7257/web-grep:dev   # 或 :v0.2.0
-    pull_policy: always
-    user: "${WEB_GREP_UID:-0}:${WEB_GREP_GID:-0}"
-    ports:
-      - "${WEB_GREP_PORT:-8787}:8787"
-    environment:
-      WEB_GREP_TOKEN: ${WEB_GREP_TOKEN:?set WEB_GREP_TOKEN}
-      WEB_GREP_PUBLIC_HOST: ${WEB_GREP_PUBLIC_HOST:-}
-      WEB_GREP_PUBLIC_PATH: ${WEB_GREP_PUBLIC_PATH:-}
-    volumes:
-      - type: bind
-        source: ${WEB_GREP_DATA:?set WEB_GREP_DATA}
-        target: /data
-        read_only: true
-    restart: unless-stopped
+```bash
+WEB_GREP_DATA=/要搜索的宿主机目录 \
+WEB_GREP_TOKEN=登录密码 \
+WEB_GREP_PUBLIC_HOST=测试机IP或域名,127.0.0.1 \
+docker compose -f compose.ghcr.yaml up -d
 ```
 
 ```bash
+# 钉死版本 tag（不要 force-push 已有 git tag）
+WEB_GREP_IMAGE=ghcr.io/fun7257/web-grep:v0.2.0 \
 WEB_GREP_DATA=/要搜索的宿主机目录 \
 WEB_GREP_TOKEN=登录密码 \
 WEB_GREP_PUBLIC_HOST=测试机IP或域名,127.0.0.1 \
@@ -216,4 +203,4 @@ docker rm -f web-grep
 - 时间范围、搜索历史在浏览器里。搜索次数由服务端记在配置文件同目录的 `search-count`（单文件挂载 config 时写在容器 `/app/search-count`，换容器会清零，需要持久化请把该文件或整个 `/app` 配置目录一起挂出来）。
 - 多条件 AND 在页面上加框，空框不搜；空格算进单条条件。
 - 树是空的或权限错误：确认 `WEB_GREP_DATA` 存在且该 uid 可读。
-- 跟 main 用 `ghcr.io/fun7257/web-grep:dev`（每次合并覆盖）。钉版本用 `:vX.Y.Z`。Compose 本地构建仍是 `web-grep:test`。
+- 跟 main 用 `ghcr.io/fun7257/web-grep:dev`（每次合并覆盖）。钉版本用 `:vX.Y.Z`。本地构建统一用 `web-grep:local`（`docker compose up --build` 与 `docker build -t web-grep:local`）。
