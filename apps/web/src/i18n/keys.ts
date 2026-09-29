@@ -106,6 +106,10 @@ export const MSG_KEYS = [
   "resultExpandAll",
   "treePicked",
   "treeClear",
+  "treeExpand",
+  "treeCollapse",
+  "treePick",
+  "treeFilters",
 
   "timeRange",
   "timeRangeHint",

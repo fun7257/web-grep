@@ -110,6 +110,10 @@ export const enUS = {
   resultExpandAll: "Expand all",
   treePicked: "{n} selected",
   treeClear: "Clear conditions",
+  treeExpand: "Expand",
+  treeCollapse: "Collapse",
+  treePick: "Select",
+  treeFilters: "Scope",
 
   timeRange: "Time",
   timeRangeBy: "by modified",

@@ -270,10 +270,12 @@ function mockFetch(
           }),
         );
       }
+      const asked = new URL(url, "http://x").searchParams.get("path") ?? "";
       return Promise.resolve(
         jsonResponse(200, {
-          path: "",
-          entries: auth?.treeEntries ?? [],
+          path: asked,
+          // Real paths are unique per level; only the root lists entries.
+          entries: asked === "" ? (auth?.treeEntries ?? []) : [],
           truncated: auth?.treeTruncated ?? false,
         }),
       );
@@ -696,8 +698,10 @@ describe("search flow", () => {
             0,
       ),
     ).toBe(true);
-    fireEvent.click(treeName("packages"));
+    clickTreePick("packages");
     expect(screen.getByText("1 selected")).toBeTruthy();
+    expect(document.querySelector(".pick-chip")).toBeNull();
+    fireEvent.click(screen.getByText("1 selected"));
     expect(document.querySelectorAll(".pick-chip")).toHaveLength(1);
     const folderChip = document.querySelector(".pick-chip");
     expect(folderChip?.querySelector(".pick-chip-name")?.textContent).toBe(
@@ -735,6 +739,7 @@ describe("search flow", () => {
     });
     clickTreePick("ok.txt");
     expect(screen.getByText("1 selected")).toBeTruthy();
+    fireEvent.click(screen.getByText("1 selected"));
     expect(document.querySelector(".pick-chip-name")?.textContent).toBe(
       "ok.txt",
     );

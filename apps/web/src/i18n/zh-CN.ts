@@ -108,6 +108,10 @@ export const zhCN = {
   resultExpandAll: "全部展开",
   treePicked: "已选 {n}",
   treeClear: "清空条件",
+  treeExpand: "展开",
+  treeCollapse: "收起",
+  treePick: "选中",
+  treeFilters: "范围",
 
   timeRange: "时间",
   timeRangeHint: "只搜这段时间内改过的文件，不是日志行时间。再点一次取消。",

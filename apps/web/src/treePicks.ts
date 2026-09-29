@@ -18,6 +18,12 @@ export function pickChipLabel(pick: TreePick): string {
   return base;
 }
 
+/** Dim second line in the picked list: where the pick lives ("" at root). */
+export function pickParentLabel(pick: TreePick): string {
+  const parts = pick.path.split("/").filter((part) => part !== "");
+  return parts.length > 1 ? `${parts.slice(0, -1).join("/")}/` : "";
+}
+
 export type PickMark = "off" | "on" | "covered" | "partial";
 
 export type ListedChild = {

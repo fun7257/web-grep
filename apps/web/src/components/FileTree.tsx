@@ -14,7 +14,12 @@ import {
   type TimeRange,
 } from "../timeRange.ts";
 import { parseGlobs } from "../globs.ts";
-import { pickChipLabel, pickMark, type TreePick } from "../treePicks.ts";
+import {
+  pickChipLabel,
+  pickMark,
+  pickParentLabel,
+  type TreePick,
+} from "../treePicks.ts";
 import {
   BrandMark,
   FileIcon,
@@ -25,12 +30,14 @@ import {
   IconLock,
   IconLogout,
   IconPanel,
+  IconSliders,
   IconRailExpand,
   IconX,
 } from "./icons.tsx";
 import { LocaleToggle, ThemeToggle } from "./StatusBar.tsx";
 
 export const TREE_OPEN_KEY = "web-grep.treeOpen.v2";
+const TREE_FILTERS_KEY = "web-grep.treeFilters.v1";
 /** Matches `--rail-w` in styles.css (L-RAIL). */
 export const TREE_RAIL_WIDTH = 56;
 
@@ -48,6 +55,7 @@ type NodeProps = {
   parentListed?: TreeEntry[] | null;
   coveringListed?: TreeEntry[] | null;
   ancestorTruncated?: boolean;
+  expandedPaths: Set<string>;
   onTogglePick: (
     entry: TreeEntry,
     listedChildren?: TreeEntry[] | null,
@@ -89,12 +97,15 @@ function TreeNode({
   parentListed = null,
   coveringListed = null,
   ancestorTruncated = false,
+  expandedPaths,
   onTogglePick,
   onOpenFile,
   onAuthFailure,
 }: NodeProps) {
   const { t } = useLocale();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(
+    () => entry.dir && expandedPaths.has(entry.path),
+  );
   const [children, setChildren] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [denied, setDenied] = useState(false);
@@ -159,7 +170,15 @@ function TreeNode({
     if (!entry.dir) {
       return;
     }
-    setExpanded((current) => !current);
+    setExpanded((current) => {
+      const next = !current;
+      if (next) {
+        expandedPaths.add(entry.path);
+      } else {
+        expandedPaths.delete(entry.path);
+      }
+      return next;
+    });
   };
 
   const mark = pickMark(
@@ -201,13 +220,16 @@ function TreeNode({
       <div
         className={rowClass}
         style={{ paddingLeft: `${0.28 + depth * 0.78}rem` }}
+        data-tree-dir={entry.dir ? "1" : "0"}
+        data-tree-expanded={entry.dir ? (expanded ? "1" : "0") : undefined}
       >
         {entry.dir ? (
           <button
             type="button"
             className="tree-twist"
-            aria-label="toggle"
+            aria-label={expanded ? t("treeCollapse") : t("treeExpand")}
             aria-expanded={expanded}
+            tabIndex={-1}
             onClick={expand}
           >
             <IconChevron open={expanded} />
@@ -218,11 +240,17 @@ function TreeNode({
         <button
           type="button"
           className="tree-select"
-          {...(entry.dir || onOpenFile === undefined
-            ? { "aria-pressed": pressed }
-            : {})}
+          {...(entry.dir
+            ? { "aria-expanded": expanded }
+            : onOpenFile === undefined
+              ? { "aria-pressed": pressed }
+              : {})}
           onClick={() => {
-            if (!entry.dir && onOpenFile !== undefined) {
+            if (entry.dir) {
+              expand();
+              return;
+            }
+            if (onOpenFile !== undefined) {
               onOpenFile(entry.path);
               return;
             }
@@ -240,6 +268,8 @@ function TreeNode({
           type="button"
           className="tree-pick"
           aria-pressed={pressed}
+          aria-label={`${t("treePick")} ${entry.name}`}
+          tabIndex={-1}
           onClick={toggleThisPick}
         >
           <span className={mark === "off" ? "tree-check" : "tree-check on"}>
@@ -252,7 +282,14 @@ function TreeNode({
         </button>
       </div>
       {entry.dir && expanded ? (
-        <div className="tree-children">
+        <div
+          className="tree-children"
+          style={
+            {
+              "--guide-x": `${0.28 + depth * 0.78}rem`,
+            } as React.CSSProperties
+          }
+        >
           {denied ? (
             <div
               className="tree-row denied"
@@ -306,6 +343,7 @@ function TreeNode({
                         : coveringListed
                     }
                     ancestorTruncated={truncated || ancestorTruncated}
+                    expandedPaths={expandedPaths}
                     onTogglePick={onTogglePick}
                     {...(onOpenFile !== undefined ? { onOpenFile } : {})}
                     {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
@@ -393,6 +431,33 @@ export function FileTree({
   );
   const [excludeFilter, setExcludeFilter] = useState(excludeGlobs);
   const excludeInputRef = useRef<HTMLInputElement>(null);
+  const [expandedPaths] = useState(() => new Set<string>());
+  const [filtersOpen, toggleFilters] = useFiltersOpen();
+  const [pickedOpen, setPickedOpen] = useState(false);
+  const scopeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pickedOpen) {
+      return;
+    }
+    const onDown = (event: MouseEvent): void => {
+      if (!scopeRef.current?.contains(event.target as Node)) {
+        setPickedOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setPickedOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [pickedOpen]);
+  const activeFilters =
+    (excludeGlobs.trim() !== "" ? 1 : 0) + (timeRange !== null ? 1 : 0);
 
   useEffect(() => {
     setMtimeAfter(timeRange !== null ? mtimeAfterMs(timeRange) : undefined);
@@ -418,6 +483,7 @@ export function FileTree({
 
   useEffect(() => {
     if (!sessionReady) {
+      expandedPaths.clear();
       setRoot(null);
       setRootTruncated(false);
       setError(null);
@@ -454,7 +520,15 @@ export function FileTree({
     return () => {
       ac.abort();
     };
-  }, [excludeFilter, mtimeAfter, onAuthFailure, sessionReady, t, tick]);
+  }, [
+    excludeFilter,
+    expandedPaths,
+    mtimeAfter,
+    onAuthFailure,
+    sessionReady,
+    t,
+    tick,
+  ]);
 
   return (
     <aside
@@ -486,48 +560,79 @@ export function FileTree({
             </button>
           </div>
           <div className="tree-filters">
-            <div className="tree-actions">
-              <div className="tree-picked">
-                <span className="tree-picked-dot" />
-                {t("treePicked", { n })}
-              </div>
+            <div className="tree-scope" ref={scopeRef}>
               <button
                 type="button"
-                className="tree-clear"
+                className={pickedOpen ? "tree-picked is-open" : "tree-picked"}
+                aria-expanded={n > 0 ? pickedOpen : undefined}
+                disabled={n === 0}
+                onClick={() => {
+                  setPickedOpen((current) => !current);
+                }}
+              >
+                <span className="tree-picked-dot" />
+                {t("treePicked", { n })}
+                {n > 0 ? <IconChevron open={pickedOpen} /> : null}
+              </button>
+              {pickedOpen && n > 0 ? (
+                <div className="tree-picked-pop" role="list">
+                  {shownPicks.map((pick) => (
+                    <div key={pick.path} className="pick-chip" role="listitem">
+                      <span
+                        className="pick-chip-name"
+                        title={pick.path}
+                        aria-hidden="true"
+                      >
+                        {pickChipLabel(pick)}
+                      </span>
+                      <span className="pick-chip-path" aria-hidden="true">
+                        {pickParentLabel(pick)}
+                      </span>
+                      <button
+                        type="button"
+                        className="pick-chip-x"
+                        title={t("excludeClear")}
+                        aria-label={t("excludeClear")}
+                        onClick={() => {
+                          onRemovePick?.(pick);
+                        }}
+                      >
+                        <IconX />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className={
+                  filtersOpen
+                    ? "tree-icon-btn tree-scope-end is-on"
+                    : "tree-icon-btn tree-scope-end"
+                }
+                aria-expanded={filtersOpen}
+                aria-label={t("treeFilters")}
+                title={t("treeFilters")}
+                onClick={toggleFilters}
+              >
+                <IconSliders />
+                {activeFilters > 0 ? (
+                  <span className="tree-icon-badge">{activeFilters}</span>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                className="tree-icon-btn tree-clear"
                 disabled={!canClear}
+                aria-label={t("treeClear")}
                 title={t("treeClear")}
                 onClick={onClear}
               >
                 <IconX />
-                <span>{t("treeClear")}</span>
               </button>
             </div>
-            {shownPicks.length > 0 ? (
-              <div className="tree-picked-chips">
-                {shownPicks.map((pick) => (
-                  <span key={pick.path} className="pick-chip">
-                    <span
-                      className="pick-chip-name"
-                      title={pick.path}
-                      aria-hidden="true"
-                    >
-                      {pickChipLabel(pick)}
-                    </span>
-                    <button
-                      type="button"
-                      className="pick-chip-x"
-                      title={t("excludeClear")}
-                      aria-label={t("excludeClear")}
-                      onClick={() => {
-                        onRemovePick?.(pick);
-                      }}
-                    >
-                      <IconX />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
+            {filtersOpen ? (
+              <div className="tree-filters-body">
             <div className="exclude-row">
               <span className="exclude-label">{t("excludeGlobLabel")}</span>
               <div
@@ -600,8 +705,11 @@ export function FileTree({
                 ))}
               </div>
             </div>
+          
+              </div>
+            ) : null}
           </div>
-          <div className="tree-scroll">
+          <div className="tree-scroll" onKeyDown={onTreeKeyDown}>
             {error !== null ? (
               <div className="tree-error">
                 <div>{error}</div>
@@ -642,6 +750,7 @@ export function FileTree({
                     mtimeAfter={mtimeAfter}
                     excludeGlobs={excludeList}
                     parentListed={root}
+                    expandedPaths={expandedPaths}
                     onTogglePick={onTogglePick}
                     {...(onOpenFile !== undefined ? { onOpenFile } : {})}
                     {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
@@ -650,8 +759,8 @@ export function FileTree({
                 {rootTruncated ? (
                   <div className="tree-row tree-truncated">
                     <span className="tree-name" title={t("treeTruncated")}>
-                    {t("treeTruncated")}
-                  </span>
+                      {t("treeTruncated")}
+                    </span>
                   </div>
                 ) : null}
               </>
@@ -746,6 +855,88 @@ export function FileTree({
       )}
     </aside>
   );
+}
+
+function useFiltersOpen(): [boolean, () => void] {
+  const [open, setOpen] = useState(
+    () => localStorage.getItem(TREE_FILTERS_KEY) !== "0",
+  );
+  const toggle = (): void => {
+    setOpen((current) => {
+      const next = !current;
+      localStorage.setItem(TREE_FILTERS_KEY, next ? "1" : "0");
+      return next;
+    });
+  };
+  return [open, toggle];
+}
+
+/** Arrow keys move between rows; Left/Right fold/unfold; Space picks. */
+function onTreeKeyDown(event: React.KeyboardEvent<HTMLElement>): void {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || !target.classList.contains("tree-select")) {
+    return;
+  }
+  const row = target.closest<HTMLElement>(".tree-row");
+  if (row === null) {
+    return;
+  }
+  const rows = [
+    ...event.currentTarget.querySelectorAll<HTMLElement>(
+      ".tree-row .tree-select",
+    ),
+  ];
+  const index = rows.indexOf(target);
+  const focusAt = (i: number): void => {
+    rows[Math.max(0, Math.min(rows.length - 1, i))]?.focus();
+  };
+  const isDir = row.dataset.treeDir === "1";
+  const isOpen = row.dataset.treeExpanded === "1";
+  switch (event.key) {
+    case "ArrowDown":
+      event.preventDefault();
+      focusAt(index + 1);
+      break;
+    case "ArrowUp":
+      event.preventDefault();
+      focusAt(index - 1);
+      break;
+    case "Home":
+      event.preventDefault();
+      focusAt(0);
+      break;
+    case "End":
+      event.preventDefault();
+      focusAt(rows.length - 1);
+      break;
+    case "ArrowRight":
+      if (isDir) {
+        event.preventDefault();
+        if (!isOpen) {
+          row.querySelector<HTMLElement>(".tree-twist")?.click();
+        } else {
+          focusAt(index + 1);
+        }
+      }
+      break;
+    case "ArrowLeft":
+      event.preventDefault();
+      if (isDir && isOpen) {
+        row.querySelector<HTMLElement>(".tree-twist")?.click();
+      } else {
+        const parent = row
+          .closest(".tree-children")
+          ?.parentElement?.querySelector<HTMLElement>(":scope > .tree-row .tree-select");
+        parent?.focus();
+      }
+      break;
+    case " ":
+      event.preventDefault();
+      row.querySelector<HTMLElement>(".tree-pick")?.click();
+      break;
+    default:
+      break;
+  }
 }
 
 function TreeSkeleton({
