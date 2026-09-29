@@ -578,6 +578,7 @@ export function FileTree({
               <span className="tree-time-label">
                 <IconHistory />
                 {t("timeRange")}
+                <span className="tree-time-by">{t("timeRangeBy")}</span>
               </span>
               <div
                 className="tree-time-seg seg"

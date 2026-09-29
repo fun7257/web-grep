@@ -111,6 +111,7 @@ export const zhCN = {
 
   timeRange: "时间",
   timeRangeHint: "只搜这段时间内改过的文件，不是日志行时间。再点一次取消。",
+  timeRangeBy: "按修改时间",
   timeRangeToday: "今天",
   timeRange24h: "24小时",
   timeRange7d: "7天",

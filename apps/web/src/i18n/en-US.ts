@@ -112,6 +112,7 @@ export const enUS = {
   treeClear: "Clear conditions",
 
   timeRange: "Time",
+  timeRangeBy: "by modified",
   timeRangeHint:
     "Only files modified in this window, not log-line time. Click again to clear.",
   timeRangeToday: "Today",

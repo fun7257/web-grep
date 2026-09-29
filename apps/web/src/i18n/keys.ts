@@ -109,6 +109,7 @@ export const MSG_KEYS = [
 
   "timeRange",
   "timeRangeHint",
+  "timeRangeBy",
   "timeRangeToday",
   "timeRange24h",
   "timeRange7d",

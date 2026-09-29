@@ -1168,8 +1168,8 @@ html[data-theme="dark"] .icon,
   box-sizing: border-box;
   min-width: 2.75rem;
   padding: 0 0.4rem;
-  background: var(--accent);
-  color: var(--accent-ink);
+  background: var(--hover);
+  color: var(--text);
   text-align: center;
   font-variant-numeric: tabular-nums;
 }
@@ -1528,6 +1528,12 @@ html[data-theme="dark"] .icon,
   font-weight: 600;
   letter-spacing: 0.02em;
   color: var(--muted);
+}
+
+.tree-time-by {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--faint);
 }
 
 .tree-time-label .icon {
@@ -2153,7 +2159,7 @@ html[data-theme="dark"] .icon,
   margin: 0;
   font-size: var(--fs-xs);
   font-weight: 400;
-  color: var(--faint);
+  color: var(--muted);
   line-height: 1.5;
   max-width: 16rem;
 }
