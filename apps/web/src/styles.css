@@ -4230,3 +4230,16 @@ html[data-theme="light"] .token-prompt {
     transition: none;
   }
 }
+
+.tree-row.tree-more {
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-row.tree-more:hover {
+  color: var(--text);
+}

@@ -114,6 +114,7 @@ export const enUS = {
   treeCollapse: "Collapse",
   treePick: "Select",
   treeFilters: "Scope",
+  treeMore: "Show more ({n} more)",
 
   timeRange: "Time",
   timeRangeBy: "by modified",
