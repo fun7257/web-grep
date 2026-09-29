@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -280,9 +281,15 @@ describe("file tree interaction", () => {
       vi.stubGlobal("IntersectionObserver", FakeObserver);
       stubMany();
       renderTree();
-      await waitFor(() => expect(rows()).toBe(200));
-      fire?.([{ isIntersecting: true }]);
-      await waitFor(() => expect(rows()).toBe(400));
+      await waitFor(() => {
+        expect(rows()).toBe(200);
+        expect(typeof fire).toBe("function");
+      });
+      // Observer callbacks are not React events, so flush the batch inside act.
+      act(() => {
+        fire?.([{ isIntersecting: true }]);
+      });
+      expect(rows()).toBe(400);
     });
   });
 });
