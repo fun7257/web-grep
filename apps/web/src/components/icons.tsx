@@ -241,6 +241,16 @@ export function IconFilter() {
   );
 }
 
+export function IconSliders() {
+  return (
+    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M2.5 5h6M11.5 5h2M2.5 11h2M7.5 11h6" {...stroke} />
+      <circle cx="10" cy="5" r="1.5" {...stroke} />
+      <circle cx="6" cy="11" r="1.5" {...stroke} />
+    </svg>
+  );
+}
+
 export function IconListGroup() {
   return (
     <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">

@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { SearchHttpError } from "../api/http.ts";
 import {
   fetchRootTreeRetry,
@@ -14,7 +21,12 @@ import {
   type TimeRange,
 } from "../timeRange.ts";
 import { parseGlobs } from "../globs.ts";
-import { pickChipLabel, pickMark, type TreePick } from "../treePicks.ts";
+import {
+  pickChipLabel,
+  pickMark,
+  pickParentLabel,
+  type TreePick,
+} from "../treePicks.ts";
 import {
   BrandMark,
   FileIcon,
@@ -25,18 +37,37 @@ import {
   IconLock,
   IconLogout,
   IconPanel,
+  IconSliders,
   IconRailExpand,
   IconX,
 } from "./icons.tsx";
 import { LocaleToggle, ThemeToggle } from "./StatusBar.tsx";
 
 export const TREE_OPEN_KEY = "web-grep.treeOpen.v2";
+const TREE_FILTERS_KEY = "web-grep.treeFilters.v1";
 /** Matches `--rail-w` in styles.css (L-RAIL). */
 export const TREE_RAIL_WIDTH = 56;
 
 function loadOpen(): boolean {
   return localStorage.getItem(TREE_OPEN_KEY) !== "0";
 }
+
+type TreeUi = {
+  /** Row that owns the single Tab stop (roving tabindex). */
+  focusPath: string | null;
+  setFocusPath: (path: string | null) => void;
+  /** Latest value, safe to read inside event handlers between renders. */
+  getFocusPath: () => string | null;
+  /** Path to unfold ancestors for and scroll into view. */
+  revealPath: string | null;
+};
+
+const TreeUiContext = createContext<TreeUi>({
+  focusPath: null,
+  setFocusPath: () => undefined,
+  getFocusPath: () => null,
+  revealPath: null,
+});
 
 type NodeProps = {
   entry: TreeEntry;
@@ -48,6 +79,8 @@ type NodeProps = {
   parentListed?: TreeEntry[] | null;
   coveringListed?: TreeEntry[] | null;
   ancestorTruncated?: boolean;
+  expandedPaths: Set<string>;
+  firstRoot?: boolean;
   onTogglePick: (
     entry: TreeEntry,
     listedChildren?: TreeEntry[] | null,
@@ -89,12 +122,38 @@ function TreeNode({
   parentListed = null,
   coveringListed = null,
   ancestorTruncated = false,
+  expandedPaths,
+  firstRoot = false,
   onTogglePick,
   onOpenFile,
   onAuthFailure,
 }: NodeProps) {
   const { t } = useLocale();
-  const [expanded, setExpanded] = useState(false);
+  const { focusPath, setFocusPath, getFocusPath, revealPath } =
+    useContext(TreeUiContext);
+  const [expanded, setExpanded] = useState(
+    () => entry.dir && expandedPaths.has(entry.path),
+  );
+  // Unfold once per new reveal target (state adjusted during render, not in an effect).
+  const [seenReveal, setSeenReveal] = useState<string | null>(null);
+  if (revealPath !== seenReveal) {
+    setSeenReveal(revealPath);
+    if (
+      entry.dir &&
+      revealPath !== null &&
+      revealPath.startsWith(`${entry.path}/`) &&
+      !expanded
+    ) {
+      expandedPaths.add(entry.path);
+      setExpanded(true);
+    }
+  }
+  const selectRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!entry.dir && revealPath === entry.path) {
+      selectRef.current?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [entry.dir, entry.path, revealPath]);
   const [children, setChildren] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [denied, setDenied] = useState(false);
@@ -159,7 +218,16 @@ function TreeNode({
     if (!entry.dir) {
       return;
     }
-    setExpanded((current) => !current);
+    const next = !expanded;
+    if (next) {
+      expandedPaths.add(entry.path);
+    } else {
+      expandedPaths.delete(entry.path);
+      if (getFocusPath()?.startsWith(`${entry.path}/`)) {
+        setFocusPath(entry.path);
+      }
+    }
+    setExpanded(next);
   };
 
   const mark = pickMark(
@@ -197,17 +265,27 @@ function TreeNode({
   };
 
   return (
-    <div className="tree-node">
+    <div
+      className="tree-node"
+      role="treeitem"
+      aria-label={entry.name}
+      aria-level={depth + 1}
+      aria-selected={checked}
+      {...(entry.dir ? { "aria-expanded": expanded } : {})}
+    >
       <div
         className={rowClass}
         style={{ paddingLeft: `${0.28 + depth * 0.78}rem` }}
+        data-tree-dir={entry.dir ? "1" : "0"}
+        data-tree-expanded={entry.dir ? (expanded ? "1" : "0") : undefined}
       >
         {entry.dir ? (
           <button
             type="button"
             className="tree-twist"
-            aria-label="toggle"
+            aria-label={expanded ? t("treeCollapse") : t("treeExpand")}
             aria-expanded={expanded}
+            tabIndex={-1}
             onClick={expand}
           >
             <IconChevron open={expanded} />
@@ -217,12 +295,27 @@ function TreeNode({
         )}
         <button
           type="button"
+          ref={selectRef}
           className="tree-select"
-          {...(entry.dir || onOpenFile === undefined
-            ? { "aria-pressed": pressed }
-            : {})}
+          tabIndex={
+            focusPath === entry.path || (focusPath === null && firstRoot)
+              ? 0
+              : -1
+          }
+          onFocus={() => {
+            setFocusPath(entry.path);
+          }}
+          {...(entry.dir
+            ? { "aria-expanded": expanded }
+            : onOpenFile === undefined
+              ? { "aria-pressed": pressed }
+              : {})}
           onClick={() => {
-            if (!entry.dir && onOpenFile !== undefined) {
+            if (entry.dir) {
+              expand();
+              return;
+            }
+            if (onOpenFile !== undefined) {
               onOpenFile(entry.path);
               return;
             }
@@ -240,6 +333,8 @@ function TreeNode({
           type="button"
           className="tree-pick"
           aria-pressed={pressed}
+          aria-label={`${t("treePick")} ${entry.name}`}
+          tabIndex={-1}
           onClick={toggleThisPick}
         >
           <span className={mark === "off" ? "tree-check" : "tree-check on"}>
@@ -252,7 +347,15 @@ function TreeNode({
         </button>
       </div>
       {entry.dir && expanded ? (
-        <div className="tree-children">
+        <div
+          className="tree-children"
+          role="group"
+          style={
+            {
+              "--guide-x": `${0.28 + depth * 0.78}rem`,
+            } as React.CSSProperties
+          }
+        >
           {denied ? (
             <div
               className="tree-row denied"
@@ -306,6 +409,7 @@ function TreeNode({
                         : coveringListed
                     }
                     ancestorTruncated={truncated || ancestorTruncated}
+                    expandedPaths={expandedPaths}
                     onTogglePick={onTogglePick}
                     {...(onOpenFile !== undefined ? { onOpenFile } : {})}
                     {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
@@ -393,6 +497,45 @@ export function FileTree({
   );
   const [excludeFilter, setExcludeFilter] = useState(excludeGlobs);
   const excludeInputRef = useRef<HTMLInputElement>(null);
+  const [expandedPaths] = useState(() => new Set<string>());
+  const [filtersOpen, toggleFilters] = useFiltersOpen();
+  const [pickedOpen, setPickedOpen] = useState(false);
+  const [focusPath, setFocusState] = useState<string | null>(null);
+  const focusRef = useRef<string | null>(null);
+  const setFocusPath = (path: string | null): void => {
+    focusRef.current = path;
+    setFocusState(path);
+  };
+  const treeUi: TreeUi = {
+    focusPath,
+    setFocusPath,
+    getFocusPath: () => focusRef.current,
+    revealPath: activePath,
+  };
+  const scopeRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!pickedOpen) {
+      return;
+    }
+    const onDown = (event: MouseEvent): void => {
+      if (!scopeRef.current?.contains(event.target as Node)) {
+        setPickedOpen(false);
+      }
+    };
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        setPickedOpen(false);
+      }
+    };
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [pickedOpen]);
+  const activeFilters =
+    (excludeGlobs.trim() !== "" ? 1 : 0) + (timeRange !== null ? 1 : 0);
 
   useEffect(() => {
     setMtimeAfter(timeRange !== null ? mtimeAfterMs(timeRange) : undefined);
@@ -418,6 +561,7 @@ export function FileTree({
 
   useEffect(() => {
     if (!sessionReady) {
+      expandedPaths.clear();
       setRoot(null);
       setRootTruncated(false);
       setError(null);
@@ -442,6 +586,7 @@ export function FileTree({
       if (result.ok) {
         setRoot(result.listing.entries);
         setRootTruncated(result.listing.truncated);
+        setFocusPath(null);
         setError(null);
         return;
       }
@@ -454,11 +599,25 @@ export function FileTree({
     return () => {
       ac.abort();
     };
-  }, [excludeFilter, mtimeAfter, onAuthFailure, sessionReady, t, tick]);
+  }, [
+    excludeFilter,
+    expandedPaths,
+    mtimeAfter,
+    onAuthFailure,
+    sessionReady,
+    t,
+    tick,
+  ]);
 
   return (
     <aside
-      className={open ? "tree-pane" : "tree-pane collapsed rail"}
+      className={
+        open
+          ? picks.length > 0
+            ? "tree-pane has-picks"
+            : "tree-pane"
+          : "tree-pane collapsed rail"
+      }
       style={style}
       aria-label={open ? t("treeTitle") : t("treeCollapsed")}
     >
@@ -486,48 +645,79 @@ export function FileTree({
             </button>
           </div>
           <div className="tree-filters">
-            <div className="tree-actions">
-              <div className="tree-picked">
-                <span className="tree-picked-dot" />
-                {t("treePicked", { n })}
-              </div>
+            <div className="tree-scope" ref={scopeRef}>
               <button
                 type="button"
-                className="tree-clear"
+                className={pickedOpen ? "tree-picked is-open" : "tree-picked"}
+                aria-expanded={n > 0 ? pickedOpen : undefined}
+                disabled={n === 0}
+                onClick={() => {
+                  setPickedOpen((current) => !current);
+                }}
+              >
+                <span className="tree-picked-dot" />
+                {t("treePicked", { n })}
+                {n > 0 ? <IconChevron open={pickedOpen} /> : null}
+              </button>
+              {pickedOpen && n > 0 ? (
+                <div className="tree-picked-pop" role="list">
+                  {shownPicks.map((pick) => (
+                    <div key={pick.path} className="pick-chip" role="listitem">
+                      <span
+                        className="pick-chip-name"
+                        title={pick.path}
+                        aria-hidden="true"
+                      >
+                        {pickChipLabel(pick)}
+                      </span>
+                      <span className="pick-chip-path" aria-hidden="true">
+                        {pickParentLabel(pick)}
+                      </span>
+                      <button
+                        type="button"
+                        className="pick-chip-x"
+                        title={t("excludeClear")}
+                        aria-label={t("excludeClear")}
+                        onClick={() => {
+                          onRemovePick?.(pick);
+                        }}
+                      >
+                        <IconX />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                className={
+                  filtersOpen
+                    ? "tree-icon-btn tree-scope-end is-on"
+                    : "tree-icon-btn tree-scope-end"
+                }
+                aria-expanded={filtersOpen}
+                aria-label={t("treeFilters")}
+                title={t("treeFilters")}
+                onClick={toggleFilters}
+              >
+                <IconSliders />
+                {activeFilters > 0 ? (
+                  <span className="tree-icon-badge">{activeFilters}</span>
+                ) : null}
+              </button>
+              <button
+                type="button"
+                className="tree-icon-btn tree-clear"
                 disabled={!canClear}
+                aria-label={t("treeClear")}
                 title={t("treeClear")}
                 onClick={onClear}
               >
                 <IconX />
-                <span>{t("treeClear")}</span>
               </button>
             </div>
-            {shownPicks.length > 0 ? (
-              <div className="tree-picked-chips">
-                {shownPicks.map((pick) => (
-                  <span key={pick.path} className="pick-chip">
-                    <span
-                      className="pick-chip-name"
-                      title={pick.path}
-                      aria-hidden="true"
-                    >
-                      {pickChipLabel(pick)}
-                    </span>
-                    <button
-                      type="button"
-                      className="pick-chip-x"
-                      title={t("excludeClear")}
-                      aria-label={t("excludeClear")}
-                      onClick={() => {
-                        onRemovePick?.(pick);
-                      }}
-                    >
-                      <IconX />
-                    </button>
-                  </span>
-                ))}
-              </div>
-            ) : null}
+            {filtersOpen ? (
+              <div className="tree-filters-body">
             <div className="exclude-row">
               <span className="exclude-label">{t("excludeGlobLabel")}</span>
               <div
@@ -578,6 +768,7 @@ export function FileTree({
               <span className="tree-time-label">
                 <IconHistory />
                 {t("timeRange")}
+                <span className="tree-time-by">{t("timeRangeBy")}</span>
               </span>
               <div
                 className="tree-time-seg seg"
@@ -599,8 +790,18 @@ export function FileTree({
                 ))}
               </div>
             </div>
+          
+              </div>
+            ) : null}
           </div>
-          <div className="tree-scroll">
+          <div
+            className="tree-scroll"
+            role="tree"
+            aria-label={t("treeTitle")}
+            aria-multiselectable="true"
+            onKeyDown={onTreeKeyDown}
+          >
+            <TreeUiContext.Provider value={treeUi}>
             {error !== null ? (
               <div className="tree-error">
                 <div>{error}</div>
@@ -631,9 +832,10 @@ export function FileTree({
               </div>
             ) : (
               <>
-                {root.map((entry) => (
+                {root.map((entry, index) => (
                   <TreeNode
                     key={`${entry.path}:${mtimeAfter ?? "all"}:${excludeFilter}`}
+                    firstRoot={index === 0}
                     entry={entry}
                     depth={0}
                     activePath={activePath}
@@ -641,6 +843,7 @@ export function FileTree({
                     mtimeAfter={mtimeAfter}
                     excludeGlobs={excludeList}
                     parentListed={root}
+                    expandedPaths={expandedPaths}
                     onTogglePick={onTogglePick}
                     {...(onOpenFile !== undefined ? { onOpenFile } : {})}
                     {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
@@ -649,12 +852,13 @@ export function FileTree({
                 {rootTruncated ? (
                   <div className="tree-row tree-truncated">
                     <span className="tree-name" title={t("treeTruncated")}>
-                    {t("treeTruncated")}
-                  </span>
+                      {t("treeTruncated")}
+                    </span>
                   </div>
                 ) : null}
               </>
             )}
+            </TreeUiContext.Provider>
           </div>
           <div className="tree-foot">
             <ThemeToggle />
@@ -745,6 +949,88 @@ export function FileTree({
       )}
     </aside>
   );
+}
+
+function useFiltersOpen(): [boolean, () => void] {
+  const [open, setOpen] = useState(
+    () => localStorage.getItem(TREE_FILTERS_KEY) !== "0",
+  );
+  const toggle = (): void => {
+    setOpen((current) => {
+      const next = !current;
+      localStorage.setItem(TREE_FILTERS_KEY, next ? "1" : "0");
+      return next;
+    });
+  };
+  return [open, toggle];
+}
+
+/** Arrow keys move between rows; Left/Right fold/unfold; Space picks. */
+function onTreeKeyDown(event: React.KeyboardEvent<HTMLElement>): void {
+  const target = event.target;
+  if (!(target instanceof HTMLElement) || !target.classList.contains("tree-select")) {
+    return;
+  }
+  const row = target.closest<HTMLElement>(".tree-row");
+  if (row === null) {
+    return;
+  }
+  const rows = [
+    ...event.currentTarget.querySelectorAll<HTMLElement>(
+      ".tree-row .tree-select",
+    ),
+  ];
+  const index = rows.indexOf(target);
+  const focusAt = (i: number): void => {
+    rows[Math.max(0, Math.min(rows.length - 1, i))]?.focus();
+  };
+  const isDir = row.dataset.treeDir === "1";
+  const isOpen = row.dataset.treeExpanded === "1";
+  switch (event.key) {
+    case "ArrowDown":
+      event.preventDefault();
+      focusAt(index + 1);
+      break;
+    case "ArrowUp":
+      event.preventDefault();
+      focusAt(index - 1);
+      break;
+    case "Home":
+      event.preventDefault();
+      focusAt(0);
+      break;
+    case "End":
+      event.preventDefault();
+      focusAt(rows.length - 1);
+      break;
+    case "ArrowRight":
+      if (isDir) {
+        event.preventDefault();
+        if (!isOpen) {
+          row.querySelector<HTMLElement>(".tree-twist")?.click();
+        } else {
+          focusAt(index + 1);
+        }
+      }
+      break;
+    case "ArrowLeft":
+      event.preventDefault();
+      if (isDir && isOpen) {
+        row.querySelector<HTMLElement>(".tree-twist")?.click();
+      } else {
+        const parent = row
+          .closest(".tree-children")
+          ?.parentElement?.querySelector<HTMLElement>(":scope > .tree-row .tree-select");
+        parent?.focus();
+      }
+      break;
+    case " ":
+      event.preventDefault();
+      row.querySelector<HTMLElement>(".tree-pick")?.click();
+      break;
+    default:
+      break;
+  }
 }
 
 function TreeSkeleton({

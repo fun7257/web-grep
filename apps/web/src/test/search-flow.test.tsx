@@ -270,10 +270,12 @@ function mockFetch(
           }),
         );
       }
+      const asked = new URL(url, "http://x").searchParams.get("path") ?? "";
       return Promise.resolve(
         jsonResponse(200, {
-          path: "",
-          entries: auth?.treeEntries ?? [],
+          path: asked,
+          // Real paths are unique per level; only the root lists entries.
+          entries: asked === "" ? (auth?.treeEntries ?? []) : [],
           truncated: auth?.treeTruncated ?? false,
         }),
       );
@@ -558,7 +560,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    const input = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement;
     input.focus();
     fireEvent.change(input, { target: { value: "*.log" } });
     await new Promise((resolve) => {
@@ -588,7 +590,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    const input = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement;
     input.focus();
     fireEvent.change(input, { target: { value: "*.test.ts" } });
     fireEvent.blur(input);
@@ -611,7 +613,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    const input = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
+    const input = screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement;
     input.focus();
     fireEvent.change(input, { target: { value: "*.log" } });
     fireEvent.blur(input);
@@ -645,7 +647,7 @@ describe("search flow", () => {
     clickTreePick("ok.txt");
     clickTreePick("skip.log");
     expect(screen.getByText("2 selected")).toBeTruthy();
-    const exclude = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
+    const exclude = screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement;
     fireEvent.change(exclude, { target: { value: "*.log" } });
     fireEvent.blur(exclude);
     await waitFor(() => {
@@ -696,8 +698,10 @@ describe("search flow", () => {
             0,
       ),
     ).toBe(true);
-    fireEvent.click(treeName("packages"));
+    clickTreePick("packages");
     expect(screen.getByText("1 selected")).toBeTruthy();
+    expect(document.querySelector(".pick-chip")).toBeNull();
+    fireEvent.click(screen.getByText("1 selected"));
     expect(document.querySelectorAll(".pick-chip")).toHaveLength(1);
     const folderChip = document.querySelector(".pick-chip");
     expect(folderChip?.querySelector(".pick-chip-name")?.textContent).toBe(
@@ -735,6 +739,7 @@ describe("search flow", () => {
     });
     clickTreePick("ok.txt");
     expect(screen.getByText("1 selected")).toBeTruthy();
+    fireEvent.click(screen.getByText("1 selected"));
     expect(document.querySelector(".pick-chip-name")?.textContent).toBe(
       "ok.txt",
     );
@@ -765,7 +770,7 @@ describe("search flow", () => {
       expect(screen.getByText("skip.txt")).toBeTruthy();
     });
     clickTreePick("skip.txt");
-    fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. *.test.ts"), {
       target: { value: "*.log" },
     });
     typeQuery("needle");
@@ -825,7 +830,7 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     clickTreePick("ok.txt");
-    const exclude = screen.getByPlaceholderText("*.test.ts") as HTMLInputElement;
+    const exclude = screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement;
     fireEvent.change(exclude, { target: { value: "*.log" } });
     fireEvent.blur(exclude);
     fireEvent.click(screen.getByRole("button", { name: "24h" }));
@@ -1781,7 +1786,7 @@ describe("search flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Aa" }));
     fireEvent.click(screen.getByRole("button", { name: "\\b" }));
     fireEvent.click(screen.getByRole("button", { name: ".*" }));
-    fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. *.test.ts"), {
       target: { value: "*.test.ts" },
     });
     clickSearch();
@@ -1834,7 +1839,7 @@ describe("search flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Aa" }));
     fireEvent.click(screen.getByRole("button", { name: "\\b" }));
     fireEvent.click(screen.getByRole("button", { name: ".*" }));
-    fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. *.test.ts"), {
       target: { value: "*.test.ts" },
     });
     clickSearch();
@@ -2011,7 +2016,7 @@ describe("search flow", () => {
     );
     expect(screen.queryByPlaceholderText("*.ts, src/**")).toBeNull();
     expect(
-      (screen.getByPlaceholderText("*.test.ts") as HTMLInputElement).value,
+      (screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement).value,
     ).toBe("*.test.ts");
     expect(searchCallCount(fetchMock)).toBe(0);
     clickSearch();
@@ -2271,7 +2276,7 @@ describe("search flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Aa" }));
     fireEvent.click(screen.getByRole("button", { name: "\\b" }));
     fireEvent.click(screen.getByRole("button", { name: ".*" }));
-    fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. *.test.ts"), {
       target: { value: "*.test.ts" },
     });
     const previewText =
@@ -2318,7 +2323,7 @@ describe("search flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Aa" }));
     fireEvent.click(screen.getByRole("button", { name: "\\b" }));
     fireEvent.click(screen.getByRole("button", { name: ".*" }));
-    fireEvent.change(screen.getByPlaceholderText("*.test.ts"), {
+    fireEvent.change(screen.getByPlaceholderText("e.g. *.test.ts"), {
       target: { value: "*.test.ts" },
     });
     const previewText =

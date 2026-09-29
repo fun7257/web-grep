@@ -110,8 +110,13 @@ export const enUS = {
   resultExpandAll: "Expand all",
   treePicked: "{n} selected",
   treeClear: "Clear conditions",
+  treeExpand: "Expand",
+  treeCollapse: "Collapse",
+  treePick: "Select",
+  treeFilters: "Scope",
 
   timeRange: "Time",
+  timeRangeBy: "by modified",
   timeRangeHint:
     "Only files modified in this window, not log-line time. Click again to clear.",
   timeRangeToday: "Today",
@@ -120,7 +125,7 @@ export const enUS = {
   caseSensitive: "Match Case (Alt+C)",
   wordMatch: "Match Whole Word (Alt+W)",
   regex: "Use Regular Expression (Alt+R)",
-  excludeGlobs: "*.test.ts",
+  excludeGlobs: "e.g. *.test.ts",
   excludeGlobLabel: "Exclude",
   excludeClear: "Remove",
   copiedPath: "Copied relative path",
