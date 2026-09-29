@@ -52,6 +52,86 @@ function loadOpen(): boolean {
   return localStorage.getItem(TREE_OPEN_KEY) !== "0";
 }
 
+/**
+ * Big folders render in batches; the next batch loads as the tail scrolls into
+ * view. Each batch doubles so a jump to the bottom needs only a few rounds.
+ */
+const WINDOW_INITIAL = 200;
+const NO_ENTRIES: TreeEntry[] = [];
+
+function useWindowedEntries(entries: TreeEntry[], revealPath: string | null) {
+  const [count, setCount] = useState(WINDOW_INITIAL);
+  const sentinelRef = useRef<HTMLButtonElement>(null);
+  const windowed =
+    typeof IntersectionObserver !== "undefined" &&
+    entries.length > WINDOW_INITIAL;
+  // Never hide the row that should be revealed.
+  const revealIndex =
+    revealPath === null
+      ? -1
+      : entries.findIndex(
+          (entry) =>
+            entry.path === revealPath ||
+            revealPath.startsWith(`${entry.path}/`),
+        );
+  const limit = windowed
+    ? Math.min(entries.length, Math.max(count, revealIndex + 1))
+    : entries.length;
+  const more = entries.length - limit;
+  const loadMore = (): void => {
+    setCount(limit * 2);
+  };
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (more <= 0 || node === null) {
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (hits) => {
+        if (hits.some((hit) => hit.isIntersecting)) {
+          setCount(limit * 2);
+        }
+      },
+      { rootMargin: "240px" },
+    );
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, [limit, more]);
+  return {
+    shown: limit === entries.length ? entries : entries.slice(0, limit),
+    more,
+    sentinelRef,
+    loadMore,
+  };
+}
+
+function MoreRow({
+  more,
+  depth,
+  sentinelRef,
+  onClick,
+}: {
+  more: number;
+  depth: number;
+  sentinelRef: React.RefObject<HTMLButtonElement | null>;
+  onClick: () => void;
+}) {
+  const { t } = useLocale();
+  return (
+    <button
+      ref={sentinelRef}
+      type="button"
+      className="tree-row tree-more"
+      style={{ paddingLeft: `${1.15 + depth * 0.78}rem` }}
+      onClick={onClick}
+    >
+      {t("treeMore", { n: more })}
+    </button>
+  );
+}
+
 type TreeUi = {
   /** Row that owns the single Tab stop (roving tabindex). */
   focusPath: string | null;
@@ -160,6 +240,7 @@ function TreeNode({
   const [failed, setFailed] = useState(false);
   const [truncated, setTruncated] = useState(false);
   const [reload, setReload] = useState(0);
+  const win = useWindowedEntries(children ?? NO_ENTRIES, revealPath);
 
   useEffect(() => {
     if (!entry.dir || !expanded) {
@@ -393,7 +474,7 @@ function TreeNode({
                   <span className="tree-name">{t("treeEmptyFolder")}</span>
                 </div>
               ) : (
-                (children ?? []).map((child) => (
+                win.shown.map((child) => (
                   <TreeNode
                     key={child.path}
                     entry={child}
@@ -416,6 +497,14 @@ function TreeNode({
                   />
                 ))
               )}
+              {win.more > 0 ? (
+                <MoreRow
+                  more={win.more}
+                  depth={depth}
+                  sentinelRef={win.sentinelRef}
+                  onClick={win.loadMore}
+                />
+              ) : null}
               {truncated ? (
                 <div
                   className="tree-row tree-truncated"
@@ -499,6 +588,7 @@ export function FileTree({
   const excludeInputRef = useRef<HTMLInputElement>(null);
   const [expandedPaths] = useState(() => new Set<string>());
   const [filtersOpen, toggleFilters] = useFiltersOpen();
+  const rootWin = useWindowedEntries(root ?? NO_ENTRIES, activePath);
   const [pickedOpen, setPickedOpen] = useState(false);
   const [focusPath, setFocusState] = useState<string | null>(null);
   const focusRef = useRef<string | null>(null);
@@ -832,7 +922,7 @@ export function FileTree({
               </div>
             ) : (
               <>
-                {root.map((entry, index) => (
+                {rootWin.shown.map((entry, index) => (
                   <TreeNode
                     key={`${entry.path}:${mtimeAfter ?? "all"}:${excludeFilter}`}
                     firstRoot={index === 0}
@@ -849,6 +939,14 @@ export function FileTree({
                     {...(onAuthFailure !== undefined ? { onAuthFailure } : {})}
                   />
                 ))}
+                {rootWin.more > 0 ? (
+                  <MoreRow
+                    more={rootWin.more}
+                    depth={-1}
+                    sentinelRef={rootWin.sentinelRef}
+                    onClick={rootWin.loadMore}
+                  />
+                ) : null}
                 {rootTruncated ? (
                   <div className="tree-row tree-truncated">
                     <span className="tree-name" title={t("treeTruncated")}>

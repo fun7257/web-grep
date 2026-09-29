@@ -112,6 +112,7 @@ export const zhCN = {
   treeCollapse: "收起",
   treePick: "选中",
   treeFilters: "范围",
+  treeMore: "再显示更多（还有 {n} 项）",
 
   timeRange: "时间",
   timeRangeHint: "只搜这段时间内改过的文件，不是日志行时间。再点一次取消。",

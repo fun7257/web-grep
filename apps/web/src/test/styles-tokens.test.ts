@@ -380,4 +380,10 @@ describe("shipped stylesheet tokens", () => {
     expect(block).toContain(".toast-overlay");
     expect(block).toContain("animation: none");
   });
+
+  it("reveals tree checkboxes on keyboard focus only, not after a mouse click", () => {
+    // A clicked button keeps :focus-within, which left the empty box stuck open.
+    expect(css).not.toMatch(/\.tree-row[^{,]*:focus-within/);
+    expect(css).toContain(".tree-row:has(:focus-visible) .tree-check");
+  });
 });

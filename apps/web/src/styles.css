@@ -4197,13 +4197,13 @@ html[data-theme="light"] .token-prompt {
   }
 
   .tree-row:not(.picked):hover .tree-check:not(.on),
-  .tree-row:not(.picked):focus-within .tree-check:not(.on) {
+  .tree-row:not(.picked):has(:focus-visible) .tree-check:not(.on) {
     opacity: 1;
   }
 }
 
 .tree-row:hover .tree-check:not(.on),
-.tree-row:focus-within .tree-check:not(.on) {
+.tree-row:has(:focus-visible) .tree-check:not(.on) {
   border-color: var(--faint);
   background: transparent;
 }
@@ -4229,4 +4229,17 @@ html[data-theme="light"] .token-prompt {
   .tree-check {
     transition: none;
   }
+}
+
+.tree-row.tree-more {
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  font-size: var(--fs-xs);
+  text-align: left;
+  cursor: pointer;
+}
+
+.tree-row.tree-more:hover {
+  color: var(--text);
 }

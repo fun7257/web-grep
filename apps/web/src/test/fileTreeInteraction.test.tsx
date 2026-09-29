@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -216,5 +217,79 @@ describe("file tree interaction", () => {
       fetchMock.mock.calls.some((c) => requestUrl(c[0] as RequestInfo).includes("path=logs")),
     ).toBe(true);
     expect(name("x.log").closest(".tree-row")?.classList.contains("current")).toBe(true);
+  });
+
+  describe("big folders", () => {
+    const many = Array.from({ length: 500 }, (_, i) => {
+      const n = `f-${String(i + 1).padStart(4, "0")}.txt`;
+      return { name: n, path: n, dir: false };
+    });
+    const stubMany = () =>
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() =>
+          Promise.resolve(jsonResponse({ path: "", entries: many, truncated: false })),
+        ),
+      );
+    const rows = () => document.querySelectorAll(".tree-row:not(.tree-more)").length;
+
+    it("renders everything when IntersectionObserver is missing", async () => {
+      stubMany();
+      renderTree();
+      await waitFor(() => expect(rows()).toBe(500));
+      expect(document.querySelector(".tree-more")).toBeNull();
+    });
+
+    it("renders a first batch and grows it on demand", async () => {
+      class FakeObserver {
+        observe(): void {}
+        disconnect(): void {}
+      }
+      vi.stubGlobal("IntersectionObserver", FakeObserver);
+      stubMany();
+      renderTree();
+      await waitFor(() => expect(rows()).toBe(200));
+      expect(screen.getByText("Show more (300 more)")).toBeTruthy();
+      fireEvent.click(screen.getByText("Show more (300 more)"));
+      await waitFor(() => expect(rows()).toBe(400));
+      fireEvent.click(screen.getByText("Show more (100 more)"));
+      await waitFor(() => expect(rows()).toBe(500));
+      expect(document.querySelector(".tree-more")).toBeNull();
+    });
+
+    it("never hides the file that should be revealed", async () => {
+      class FakeObserver {
+        observe(): void {}
+        disconnect(): void {}
+      }
+      vi.stubGlobal("IntersectionObserver", FakeObserver);
+      stubMany();
+      renderTree({ activePath: "f-0450.txt" });
+      await waitFor(() => expect(name("f-0450.txt")).toBeTruthy());
+      expect(rows()).toBe(450);
+    });
+
+    it("loads the next batch when the tail scrolls into view", async () => {
+      let fire: ((hits: { isIntersecting: boolean }[]) => void) | undefined;
+      class FakeObserver {
+        constructor(cb: (hits: { isIntersecting: boolean }[]) => void) {
+          fire = cb;
+        }
+        observe(): void {}
+        disconnect(): void {}
+      }
+      vi.stubGlobal("IntersectionObserver", FakeObserver);
+      stubMany();
+      renderTree();
+      await waitFor(() => {
+        expect(rows()).toBe(200);
+        expect(typeof fire).toBe("function");
+      });
+      // Observer callbacks are not React events, so flush the batch inside act.
+      act(() => {
+        fire?.([{ isIntersecting: true }]);
+      });
+      expect(rows()).toBe(400);
+    });
   });
 });
