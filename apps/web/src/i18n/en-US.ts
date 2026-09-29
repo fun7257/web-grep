@@ -125,7 +125,7 @@ export const enUS = {
   caseSensitive: "Match Case (Alt+C)",
   wordMatch: "Match Whole Word (Alt+W)",
   regex: "Use Regular Expression (Alt+R)",
-  excludeGlobs: "*.test.ts",
+  excludeGlobs: "e.g. *.test.ts",
   excludeGlobLabel: "Exclude",
   excludeClear: "Remove",
   copiedPath: "Copied relative path",

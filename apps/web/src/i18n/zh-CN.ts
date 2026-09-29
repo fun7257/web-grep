@@ -122,7 +122,7 @@ export const zhCN = {
   caseSensitive: "大小写敏感 (Alt+C)",
   wordMatch: "全词匹配 (Alt+W)",
   regex: "正则表达式 (Alt+R)",
-  excludeGlobs: "*.test.ts",
+  excludeGlobs: "例如 *.test.ts",
   excludeGlobLabel: "排除",
   excludeClear: "移除",
   copiedPath: "已复制相对路径",

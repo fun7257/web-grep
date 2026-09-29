@@ -50,6 +50,7 @@ function renderTree(
     onTogglePick?: () => void;
     picks?: TreePick[];
     onRemovePick?: (pick: TreePick) => void;
+    activePath?: string | null;
   } = {},
 ) {
   const onTogglePick = props.onTogglePick ?? (() => undefined);
@@ -59,7 +60,7 @@ function renderTree(
         open
         onToggle={() => undefined}
         rootLabel="root"
-        activePath={null}
+        activePath={props.activePath ?? null}
         picks={props.picks ?? []}
         {...(props.onRemovePick !== undefined ? { onRemovePick: props.onRemovePick } : {})}
         onTogglePick={onTogglePick}
@@ -172,5 +173,48 @@ describe("file tree interaction", () => {
     await waitFor(() => expect(name("logs")).toBeTruthy());
     const pill = screen.getByText("0 selected") as HTMLButtonElement;
     expect(pill.disabled).toBe(true);
+  });
+
+  it("exposes a tree with one roving tab stop", async () => {
+    stubTree();
+    renderTree();
+    await waitFor(() => expect(name("logs")).toBeTruthy());
+    expect(screen.getByRole("tree")).toBeTruthy();
+    const items = screen.getAllByRole("treeitem");
+    expect(items.map((i) => i.getAttribute("aria-level"))).toEqual(["1", "1"]);
+    expect(
+      items.find((i) => i.getAttribute("aria-label") === "logs")?.getAttribute("aria-expanded"),
+    ).toBe("false");
+    const stops = () => document.querySelectorAll('.tree-select[tabindex="0"]');
+    expect(stops()).toHaveLength(1);
+    expect(stops()[0]).toBe(name("logs").closest("button"));
+    (name("a.txt").closest("button") as HTMLElement).focus();
+    await waitFor(() => expect(stops()[0]).toBe(name("a.txt").closest("button")));
+    expect(stops()).toHaveLength(1);
+  });
+
+  it("collapsing a folder hands the tab stop to the folder", async () => {
+    stubTree();
+    renderTree();
+    await waitFor(() => expect(name("logs")).toBeTruthy());
+    fireEvent.click(name("logs"));
+    await waitFor(() => expect(name("x.log")).toBeTruthy());
+    (name("x.log").closest("button") as HTMLElement).focus();
+    fireEvent.click(name("logs"));
+    await waitFor(() =>
+      expect(document.querySelector('.tree-select[tabindex="0"]')).toBe(
+        name("logs").closest("button"),
+      ),
+    );
+  });
+
+  it("unfolds ancestors of the active file", async () => {
+    const fetchMock = stubTree();
+    renderTree({ activePath: "logs/x.log" });
+    await waitFor(() => expect(name("x.log")).toBeTruthy());
+    expect(
+      fetchMock.mock.calls.some((c) => requestUrl(c[0] as RequestInfo).includes("path=logs")),
+    ).toBe(true);
+    expect(name("x.log").closest(".tree-row")?.classList.contains("current")).toBe(true);
   });
 });

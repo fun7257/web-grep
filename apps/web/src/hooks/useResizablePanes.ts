@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from "react";
 const TREE_WIDTH_KEY = "web-grep.treeWidth.v2";
 const HITS_WIDTH_KEY = "web-grep.hitsWidth.v1";
 
-const DEFAULT_TREE_WIDTH = 260;
+const DEFAULT_TREE_WIDTH = 300;
 const DEFAULT_HITS_WIDTH = 560;
 const TREE_MIN = 260;
 const TREE_MAX = 520;

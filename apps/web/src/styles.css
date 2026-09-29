@@ -4191,10 +4191,21 @@ html[data-theme="light"] .token-prompt {
     opacity: 0;
   }
 
+  /* Once anything is picked the tree is in "selecting" mode: show every box. */
+  .tree-pane.has-picks .tree-row:not(.picked) .tree-check:not(.on) {
+    opacity: 1;
+  }
+
   .tree-row:not(.picked):hover .tree-check:not(.on),
   .tree-row:not(.picked):focus-within .tree-check:not(.on) {
     opacity: 1;
   }
+}
+
+.tree-row:hover .tree-check:not(.on),
+.tree-row:focus-within .tree-check:not(.on) {
+  border-color: var(--faint);
+  background: transparent;
 }
 
 @keyframes tree-reveal {

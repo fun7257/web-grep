@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { SearchHttpError } from "../api/http.ts";
 import {
   fetchRootTreeRetry,
@@ -45,6 +52,23 @@ function loadOpen(): boolean {
   return localStorage.getItem(TREE_OPEN_KEY) !== "0";
 }
 
+type TreeUi = {
+  /** Row that owns the single Tab stop (roving tabindex). */
+  focusPath: string | null;
+  setFocusPath: (path: string | null) => void;
+  /** Latest value, safe to read inside event handlers between renders. */
+  getFocusPath: () => string | null;
+  /** Path to unfold ancestors for and scroll into view. */
+  revealPath: string | null;
+};
+
+const TreeUiContext = createContext<TreeUi>({
+  focusPath: null,
+  setFocusPath: () => undefined,
+  getFocusPath: () => null,
+  revealPath: null,
+});
+
 type NodeProps = {
   entry: TreeEntry;
   depth: number;
@@ -56,6 +80,7 @@ type NodeProps = {
   coveringListed?: TreeEntry[] | null;
   ancestorTruncated?: boolean;
   expandedPaths: Set<string>;
+  firstRoot?: boolean;
   onTogglePick: (
     entry: TreeEntry,
     listedChildren?: TreeEntry[] | null,
@@ -98,14 +123,37 @@ function TreeNode({
   coveringListed = null,
   ancestorTruncated = false,
   expandedPaths,
+  firstRoot = false,
   onTogglePick,
   onOpenFile,
   onAuthFailure,
 }: NodeProps) {
   const { t } = useLocale();
+  const { focusPath, setFocusPath, getFocusPath, revealPath } =
+    useContext(TreeUiContext);
   const [expanded, setExpanded] = useState(
     () => entry.dir && expandedPaths.has(entry.path),
   );
+  // Unfold once per new reveal target (state adjusted during render, not in an effect).
+  const [seenReveal, setSeenReveal] = useState<string | null>(null);
+  if (revealPath !== seenReveal) {
+    setSeenReveal(revealPath);
+    if (
+      entry.dir &&
+      revealPath !== null &&
+      revealPath.startsWith(`${entry.path}/`) &&
+      !expanded
+    ) {
+      expandedPaths.add(entry.path);
+      setExpanded(true);
+    }
+  }
+  const selectRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!entry.dir && revealPath === entry.path) {
+      selectRef.current?.scrollIntoView?.({ block: "nearest" });
+    }
+  }, [entry.dir, entry.path, revealPath]);
   const [children, setChildren] = useState<TreeEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [denied, setDenied] = useState(false);
@@ -170,15 +218,16 @@ function TreeNode({
     if (!entry.dir) {
       return;
     }
-    setExpanded((current) => {
-      const next = !current;
-      if (next) {
-        expandedPaths.add(entry.path);
-      } else {
-        expandedPaths.delete(entry.path);
+    const next = !expanded;
+    if (next) {
+      expandedPaths.add(entry.path);
+    } else {
+      expandedPaths.delete(entry.path);
+      if (getFocusPath()?.startsWith(`${entry.path}/`)) {
+        setFocusPath(entry.path);
       }
-      return next;
-    });
+    }
+    setExpanded(next);
   };
 
   const mark = pickMark(
@@ -216,7 +265,14 @@ function TreeNode({
   };
 
   return (
-    <div className="tree-node">
+    <div
+      className="tree-node"
+      role="treeitem"
+      aria-label={entry.name}
+      aria-level={depth + 1}
+      aria-selected={checked}
+      {...(entry.dir ? { "aria-expanded": expanded } : {})}
+    >
       <div
         className={rowClass}
         style={{ paddingLeft: `${0.28 + depth * 0.78}rem` }}
@@ -239,7 +295,16 @@ function TreeNode({
         )}
         <button
           type="button"
+          ref={selectRef}
           className="tree-select"
+          tabIndex={
+            focusPath === entry.path || (focusPath === null && firstRoot)
+              ? 0
+              : -1
+          }
+          onFocus={() => {
+            setFocusPath(entry.path);
+          }}
           {...(entry.dir
             ? { "aria-expanded": expanded }
             : onOpenFile === undefined
@@ -284,6 +349,7 @@ function TreeNode({
       {entry.dir && expanded ? (
         <div
           className="tree-children"
+          role="group"
           style={
             {
               "--guide-x": `${0.28 + depth * 0.78}rem`,
@@ -434,6 +500,18 @@ export function FileTree({
   const [expandedPaths] = useState(() => new Set<string>());
   const [filtersOpen, toggleFilters] = useFiltersOpen();
   const [pickedOpen, setPickedOpen] = useState(false);
+  const [focusPath, setFocusState] = useState<string | null>(null);
+  const focusRef = useRef<string | null>(null);
+  const setFocusPath = (path: string | null): void => {
+    focusRef.current = path;
+    setFocusState(path);
+  };
+  const treeUi: TreeUi = {
+    focusPath,
+    setFocusPath,
+    getFocusPath: () => focusRef.current,
+    revealPath: activePath,
+  };
   const scopeRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!pickedOpen) {
@@ -508,6 +586,7 @@ export function FileTree({
       if (result.ok) {
         setRoot(result.listing.entries);
         setRootTruncated(result.listing.truncated);
+        setFocusPath(null);
         setError(null);
         return;
       }
@@ -532,7 +611,13 @@ export function FileTree({
 
   return (
     <aside
-      className={open ? "tree-pane" : "tree-pane collapsed rail"}
+      className={
+        open
+          ? picks.length > 0
+            ? "tree-pane has-picks"
+            : "tree-pane"
+          : "tree-pane collapsed rail"
+      }
       style={style}
       aria-label={open ? t("treeTitle") : t("treeCollapsed")}
     >
@@ -709,7 +794,14 @@ export function FileTree({
               </div>
             ) : null}
           </div>
-          <div className="tree-scroll" onKeyDown={onTreeKeyDown}>
+          <div
+            className="tree-scroll"
+            role="tree"
+            aria-label={t("treeTitle")}
+            aria-multiselectable="true"
+            onKeyDown={onTreeKeyDown}
+          >
+            <TreeUiContext.Provider value={treeUi}>
             {error !== null ? (
               <div className="tree-error">
                 <div>{error}</div>
@@ -740,9 +832,10 @@ export function FileTree({
               </div>
             ) : (
               <>
-                {root.map((entry) => (
+                {root.map((entry, index) => (
                   <TreeNode
                     key={`${entry.path}:${mtimeAfter ?? "all"}:${excludeFilter}`}
+                    firstRoot={index === 0}
                     entry={entry}
                     depth={0}
                     activePath={activePath}
@@ -765,6 +858,7 @@ export function FileTree({
                 ) : null}
               </>
             )}
+            </TreeUiContext.Provider>
           </div>
           <div className="tree-foot">
             <ThemeToggle />
