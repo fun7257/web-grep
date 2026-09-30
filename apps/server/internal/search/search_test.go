@@ -563,3 +563,189 @@ func TestPreflightDefaultMaxConcurrentIsEight(t *testing.T) {
 		t.Fatalf("slots leaked: %d", svc.Inflight())
 	}
 }
+
+// emitThenBlockEngine emits matches, signals, then waits until ctx is cancelled.
+type emitThenBlockEngine struct {
+	matches []rg.Match
+	started chan struct{}
+}
+
+func (e emitThenBlockEngine) Kind() string { return "rg" }
+func (e emitThenBlockEngine) Search(ctx context.Context, _ rg.Input, emit func(rg.Match) error, _ func(int)) error {
+	for _, m := range e.matches {
+		if err := emit(m); err != nil {
+			return err
+		}
+	}
+	select {
+	case e.started <- struct{}{}:
+	default:
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+type alwaysAbortedStream struct{ memStream }
+
+func (*alwaysAbortedStream) Aborted() bool { return true }
+
+func assertDoneFlags(t *testing.T, done map[string]any, truncated, timedOut, cancelled bool, matchCount, fileCount int) {
+	t.Helper()
+	if done == nil {
+		t.Fatal("missing done event")
+	}
+	if done["truncated"] != truncated || done["timedOut"] != timedOut || done["cancelled"] != cancelled {
+		t.Fatalf("flags got truncated=%v timedOut=%v cancelled=%v, want %v %v %v",
+			done["truncated"], done["timedOut"], done["cancelled"], truncated, timedOut, cancelled)
+	}
+	if done["matchCount"] != matchCount || done["fileCount"] != fileCount {
+		t.Fatalf("counts got match=%v file=%v, want %d %d", done["matchCount"], done["fileCount"], matchCount, fileCount)
+	}
+}
+
+func assertSlotReusable(t *testing.T, svc *Service) {
+	t.Helper()
+	if svc.Inflight() != 0 {
+		t.Fatalf("slot leak: %d", svc.Inflight())
+	}
+	next := svc.Preflight(Request{Query: "hello", Hidden: true})
+	if !next.OK {
+		t.Fatalf("slot not reusable: %+v", next)
+	}
+	svc.Release(next.SearchID)
+}
+
+func waitStarted(t *testing.T, started <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("search did not start")
+	}
+}
+
+func waitFinished(t *testing.T, finished <-chan struct{}) {
+	t.Helper()
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not return")
+	}
+}
+
+func TestAbortAllDuringSearchMarksCancelled(t *testing.T) {
+	started := make(chan struct{}, 1)
+	eng := emitThenBlockEngine{
+		matches: []rg.Match{
+			{Path: "ok.txt", Line: 1, Text: "hello\n"},
+			{Path: "ok.txt", Line: 2, Text: "hello\n"},
+		},
+		started: started,
+	}
+	svc := testService(t, eng, 2, 0)
+	pre := svc.Preflight(Request{Query: "hello", Hidden: true})
+	if !pre.OK {
+		t.Fatalf("preflight: %+v", pre)
+	}
+	stream := &terminalStream{}
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		svc.Run(context.Background(), pre, stream)
+	}()
+	waitStarted(t, started)
+	svc.AbortAll()
+	waitFinished(t, finished)
+	assertDoneFlags(t, stream.done, false, false, true, 2, 1)
+	if got := stream.hits(); len(got) != 2 || got[0] != "ok.txt" {
+		t.Fatalf("partial hits = %v", got)
+	}
+	assertSlotReusable(t, svc)
+}
+
+func TestParentCancelDuringSearchMarksCancelled(t *testing.T) {
+	started := make(chan struct{}, 1)
+	eng := emitThenBlockEngine{
+		matches: []rg.Match{{Path: "ok.txt", Line: 1, Text: "hello\n"}},
+		started: started,
+	}
+	svc := testService(t, eng, 2, 0)
+	pre := svc.Preflight(Request{Query: "hello", Hidden: true})
+	if !pre.OK {
+		t.Fatalf("preflight: %+v", pre)
+	}
+	stream := &terminalStream{}
+	ctx, cancel := context.WithCancel(context.Background())
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		svc.Run(ctx, pre, stream)
+	}()
+	waitStarted(t, started)
+	cancel()
+	waitFinished(t, finished)
+	assertDoneFlags(t, stream.done, false, false, true, 1, 1)
+	assertSlotReusable(t, svc)
+}
+
+func TestTimeoutDoneIsNotCancelled(t *testing.T) {
+	started := make(chan struct{}, 1)
+	eng := emitThenBlockEngine{
+		matches: []rg.Match{{Path: "ok.txt", Line: 4, Text: "hello\n"}},
+		started: started,
+	}
+	svc := testService(t, eng, 2, 300)
+	pre := svc.Preflight(Request{Query: "hello", Hidden: true})
+	if !pre.OK {
+		t.Fatalf("preflight: %+v", pre)
+	}
+	stream := &terminalStream{}
+	svc.Run(context.Background(), pre, stream)
+	assertDoneFlags(t, stream.done, false, true, false, 1, 1)
+	assertSlotReusable(t, svc)
+}
+
+func TestMaxResultsTruncationIsNotCancelled(t *testing.T) {
+	eng := &emitEngine{matches: []rg.Match{
+		{Path: "ok.txt", Line: 1, Text: "hello\n"},
+		{Path: "ok.txt", Line: 2, Text: "hello\n"},
+		{Path: "ok.txt", Line: 3, Text: "hello\n"},
+	}}
+	svc := testService(t, eng, 2, 0)
+	pre := svc.Preflight(Request{Query: "hello", Hidden: true, MaxResults: 2})
+	if !pre.OK {
+		t.Fatalf("preflight: %+v", pre)
+	}
+	stream := &terminalStream{}
+	svc.Run(context.Background(), pre, stream)
+	assertDoneFlags(t, stream.done, true, false, false, 2, 1)
+	if got := stream.hits(); len(got) != 2 {
+		t.Fatalf("hits = %v, want 2", got)
+	}
+	assertSlotReusable(t, svc)
+}
+
+func TestAbortedStreamOmitsDone(t *testing.T) {
+	started := make(chan struct{}, 1)
+	svc := testService(t, blockingEngine{started: started, release: make(chan struct{})}, 2, 0)
+	pre := svc.Preflight(Request{Query: "hello", Hidden: true})
+	if !pre.OK {
+		t.Fatalf("preflight: %+v", pre)
+	}
+	stream := &alwaysAbortedStream{}
+	ctx, cancel := context.WithCancel(context.Background())
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		svc.Run(ctx, pre, stream)
+	}()
+	waitStarted(t, started)
+	cancel()
+	waitFinished(t, finished)
+	for _, name := range stream.names() {
+		if name == "done" || name == "error" {
+			t.Fatalf("aborted stream sent %q: %v", name, stream.names())
+		}
+	}
+	assertSlotReusable(t, svc)
+}
