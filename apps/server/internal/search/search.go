@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -374,8 +375,11 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	// rg follows symlinks when follow_symlinks is on, and RelUnderRoot only
 	// checks how a path is spelled. Resolve each hit's real path so a link
 	// that leads outside the root cannot surface files from outside it.
+	// Several root-relative spellings can name one real file; keep the first.
 	guard := sandbox.NewRealPathGuard(cfg.RootReal)
 	outsideRoot := 0
+	dupes := 0
+	seenLine := map[string]struct{}{}
 
 	lastProg := time.Now()
 	var err error
@@ -391,10 +395,19 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 			if !acceptHit(hit.Path) {
 				return nil
 			}
-			if !guard.Inside(hit.Path) {
+			canon, ok := guard.Canonical(hit.Path)
+			if !ok {
 				outsideRoot++
 				return nil
 			}
+			// Same real file and line. The key is the canonical path, so a
+			// symlink and its target collapse; the first spelling wins.
+			key := canon + "\x00" + strconv.Itoa(hit.Line)
+			if _, dup := seenLine[key]; dup {
+				dupes++
+				return nil
+			}
+			seenLine[key] = struct{}{}
 			if err := stream.Event("hit", hit); err != nil {
 				return err
 			}
@@ -418,9 +431,16 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	if outsideRoot > 0 {
 		logx.Warn("dropped hits outside root", map[string]any{"searchId": pre.SearchID, "count": outsideRoot})
 	}
+	if dupes > 0 {
+		logx.Warn("dropped duplicate hits", map[string]any{"searchId": pre.SearchID, "count": dupes})
+	}
 
+	// AbortAll cancels this ctx (the one bindCancel registered), not the
+	// request parent. A client disconnect cancels parent and therefore this
+	// ctx as well. Timeout is the deadline error on the same ctx; hitting
+	// maxResults only stops the search child, so it is not a cancel.
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
-	cancelled := parent.Err() != nil && !timedOut
+	cancelled := !timedOut && ctx.Err() != nil
 
 	if truncated {
 		sendDone(true, false, false, matchCount, len(files))
