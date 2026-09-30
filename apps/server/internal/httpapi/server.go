@@ -42,10 +42,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/search", s.search)
 	mux.HandleFunc("GET /api/file", s.file)
 	mux.HandleFunc("GET /api/tree", s.tree)
+	// Unknown /api paths. Method-specific so POST /api/health stays a plain
+	// 405. Registered even when the SPA is absent: otherwise dev (no dist)
+	// falls through to the mux's text 404, and `GET /` would swallow /api
+	// once the SPA is mounted.
+	mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) {
+		writeErr(w, http.StatusNotFound, "NOT_FOUND", "not found")
+	})
 	if s.WebDist != "" {
-		mux.HandleFunc("GET /api/", func(w http.ResponseWriter, r *http.Request) {
-			writeErr(w, http.StatusNotFound, "INTERNAL", "not found")
-		})
 		mux.Handle("GET /", spa(s.WebDist, func() string { return s.Config().PublicPath }))
 	}
 	return auth.Middleware(s.Config, s.Sessions)(mux)

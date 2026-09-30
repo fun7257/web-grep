@@ -53,13 +53,14 @@ HTTP JSON（SSE 尚未开始时）：
 | `UNAUTHORIZED` | 401 | 未登录或会话无效 |
 | `INVALID_AUTH` | 400/401 | 密码不合法或错误。已启用登录时，请求体不是 JSON，或 `Content-Type` 不是 `application/json`，也是 400 `INVALID_AUTH`。未启用登录时不走到这个码：任何 `POST /api/auth/login` 都在检查 `Content-Type` 之前返回 `401 UNAUTHORIZED`（`auth is not enabled`） |
 | `FORBIDDEN_HOST` | 403 | Host/Origin 不在允许名单 |
+| `NOT_FOUND` | 404 | 未知的 `/api/*` 路径。路径越界或不存在仍是 `INVALID_PATH`，不是这个码 |
 | `INTERNAL` | 500 | 未分类失败 |
 
 `ENGINE_UNSUPPORTED` **不是**当前契约码（Go 不导出）。若客户端仍收到该码，按 `ENGINE` 处理。
 
 `TIMEOUT` **不是**错误码。搜索超时走 SSE `done.timedOut=true`。
 
-未知的 `/api/*` 路径（且已通过鉴权，或没设密码）返回 `404 { "code": "INTERNAL", "message": "not found" }`；`INTERNAL` 是这里借用的码，不表示服务端出错。鉴权在路由之前，所以没登录时未知路径也是 `401 UNAUTHORIZED`。
+未知的 `/api/*` 路径（且已通过鉴权，或没设密码）返回 `404 { "code": "NOT_FOUND", "message": "not found" }`。鉴权在路由之前，所以没登录时未知路径也是 `401 UNAUTHORIZED`。
 
 ---
 

@@ -11,6 +11,8 @@ export const ErrorCodeSchema = z.enum([
   "UNAUTHORIZED",
   "INVALID_AUTH",
   "FORBIDDEN_HOST",
+  // Unknown /api route only. A bad file or tree path stays INVALID_PATH.
+  "NOT_FOUND",
   "INTERNAL",
 ]);
 export type ErrorCode = z.output<typeof ErrorCodeSchema>;

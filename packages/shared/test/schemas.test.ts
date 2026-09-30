@@ -335,4 +335,37 @@ describe("ErrorCodeSchema", () => {
     });
     expect(mapped.code).toBe("ENGINE");
   });
+
+  it("parses NOT_FOUND and does not remap the other codes", () => {
+    expect(ErrorCodeSchema.safeParse("NOT_FOUND").success).toBe(true);
+    expect(
+      JsonErrorSchema.parse({ code: "NOT_FOUND", message: "not found" }),
+    ).toEqual({ code: "NOT_FOUND", message: "not found" });
+    expect(mapLegacyErrorCode("NOT_FOUND")).toBe("NOT_FOUND");
+    expect(mapLegacyErrorCode("ENGINE_UNSUPPORTED")).toBe("ENGINE");
+    expect(mapLegacyErrorCode("INTERNAL")).toBe("INTERNAL");
+    expect(mapLegacyErrorCode("INVALID_PATH")).toBe("INVALID_PATH");
+    const codes = [
+      "INVALID_QUERY",
+      "INVALID_PATH",
+      "INVALID_GLOB",
+      "DENIED",
+      "BUSY",
+      "ENGINE",
+      "UNAUTHORIZED",
+      "INVALID_AUTH",
+      "FORBIDDEN_HOST",
+      "INTERNAL",
+    ] as const;
+    for (const code of codes) {
+      expect(ErrorCodeSchema.safeParse(code).success).toBe(true);
+      expect(JsonErrorSchema.parse({ code, message: "ok" })).toEqual({
+        code,
+        message: "ok",
+      });
+    }
+    expect(
+      JsonErrorSchema.safeParse({ code: "TIMEOUT", message: "x" }).success,
+    ).toBe(false);
+  });
 });

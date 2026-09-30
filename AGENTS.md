@@ -11,11 +11,12 @@
 ## 冻结约定
 
 - 搜索过滤语义冻结。不要改过滤条件契约（`filterTerms`；2026-09-30 起由 `andTerms` 改名，`globAnd` 同步改为 `globIntersect`，不再接受旧字段名）、SSE 事件名（`meta` / `progress` / `hit` / `done` / `error`）或相关产品行为，除非产品明确放开。
+- 错误码先稳住，不要改现有 `code`。2026-09-30 经产品确认新增 `NOT_FOUND`，仅用于未知路由。
 
 ## Backend
 
 - 栈：Go 服务在 `apps/server`（入口 `apps/server/cmd/web-grep`）。契约在 `packages/shared`，说明在 `docs/API.md`。
-- 路径和错误码先稳住，不要改现有 `/api` 路由和 `code`。当前路由：`GET /api/health`、`GET /api/auth/status`、`POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/meta`、`POST /api/search`、`GET /api/tree`、`GET /api/file`。`GET /api/count` 已删，不要加回去。
+- 路径和错误码先稳住，不要改现有 `/api` 路由和 `code`。2026-09-30 经产品确认新增 `NOT_FOUND`，仅用于未知路由。当前路由：`GET /api/health`、`GET /api/auth/status`、`POST /api/auth/login`、`POST /api/auth/logout`、`GET /api/meta`、`POST /api/search`、`GET /api/tree`、`GET /api/file`。`GET /api/count` 已删，不要加回去。
 - 拉文件行数只认配置 `preview_chunk` / `preview_chunk_max`（环境变量 `WEB_GREP_PREVIEW_CHUNK` / `WEB_GREP_PREVIEW_CHUNK_MAX`）。废弃的 `preview_lines` 只还会出现在 meta 的 `previewLines`，**不能**改变 `GET /api/file`。
 - 并发：搜索走 `max_concurrent`（默认 8，超限 HTTP 429 `BUSY`）。树和文件走 `read_max_concurrent` / `read_rate_limit` / `read_rate_window_ms`（默认 32 路、每客户端 10 秒 120 次）。取消必须释放槽位。
 - 测试：动过的包跑 `go test`。钉死测试要绿：登录会话、取消释放搜索槽、满并发 `BUSY`、`preview_chunk` 针、有 rg 时的真实边沿（`httpapi` 里 `TestPin*`）。
