@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -103,13 +103,32 @@ func stderrLineCount(text string) int {
 	return strings.Count(text, "\n") + 1
 }
 
+// mustRg returns a ripgrep binary for the logging tests. CI often has no
+// PATH entry named rg; Detect also finds the optional @vscode/ripgrep copy
+// installed with the repo. When neither is present, a shell stand-in still
+// drives Engine.run so the command and stderr redaction checks run.
 func mustRg(t *testing.T) string {
 	t.Helper()
-	bin, err := exec.LookPath("rg")
-	if err != nil {
+	if bin := rg.Detect(""); bin != "" {
+		return bin
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("no rg on PATH or via @vscode/ripgrep, and the shell stand-in needs a POSIX shell")
+	}
+	path := filepath.Join(t.TempDir(), "rg")
+	const body = `#!/bin/sh
+case "$*" in
+*fx7-leak-query*)
+  printf '%s\n' 'rg: regex parse error:' '    (?:fx7-leak-query-(?:)' '    ^' 'error: unclosed group' >&2
+  exit 2
+  ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	return bin
+	return path
 }
 
 func runSearch(t *testing.T, svc *Service, req Request) *errStream {
