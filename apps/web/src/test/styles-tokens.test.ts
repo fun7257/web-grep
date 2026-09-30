@@ -168,7 +168,7 @@ describe("shipped stylesheet tokens", () => {
     expect(root).toMatch(/--and-row-gap:\s*10px/);
     expect(root).toMatch(/--and-mods-gap:\s*12px/);
     expect(root).toMatch(/--and-mods-w:\s*72px/);
-    const panel = ruleBody(".search-and-pop");
+    const panel = ruleBody(".search-filter-pop");
     expect(panel).toContain("width: calc(100% + var(--s1) + var(--search-h))");
     expect(panel).toContain("min-width: 0");
     expect(panel).toContain("overflow-x: hidden");
@@ -176,94 +176,94 @@ describe("shipped stylesheet tokens", () => {
     expect(ruleBody(".hits-pane")).toContain("overflow: hidden");
     expect(panel).not.toContain("right: 0");
     expect(panel).not.toMatch(/480px|508px|520px/);
-    const row = ruleBody(".search-and-row");
+    const row = ruleBody(".search-filter-row");
     expect(row).toContain("minmax(0, 1fr) var(--and-mods-w)");
     expect(row).toContain("calc(var(--filter-remove) + 6px)");
     expect(row).toContain("column-gap: var(--and-mods-gap)");
     expect(row).toContain("background: transparent");
-    expect(ruleBody(".search-and-row:focus-within")).toContain(
+    expect(ruleBody(".search-filter-row:focus-within")).toContain(
       "background: transparent",
     );
-    const field = ruleBody(".search-and-field");
+    const field = ruleBody(".search-filter-field");
     expect(field).toContain("min-width: 0");
     expect(field).toContain("height: var(--and-row-h)");
     expect(field).toContain("background: var(--bg)");
     expect(field).toContain("border: 1px solid var(--line-strong)");
-    const focus = ruleBody(".search-and-field:focus-within");
+    const focus = ruleBody(".search-filter-field:focus-within");
     expect(focus).toContain("border: 1.5px solid var(--accent)");
     expect(focus).toMatch(/box-shadow:\s*none/);
     expect(focus).not.toContain("0 0 0 0.5px");
     expect(focus).not.toContain("var(--glow)");
     expect(focus).not.toContain("3px");
-    const focused = ruleBody(".search-and-field.is-focused");
+    const focused = ruleBody(".search-filter-field.is-focused");
     expect(focused).toContain("border: 1.5px solid var(--accent)");
     expect(focused).toMatch(/box-shadow:\s*none/);
     expect(focused).not.toContain("0 0 0 0.5px");
     expect(focused).not.toContain("var(--glow)");
     expect(focused).not.toContain("3px");
-    expect(ruleBody('html[data-theme="light"] .search-and-field')).toContain(
+    expect(ruleBody('html[data-theme="light"] .search-filter-field')).toContain(
       "border-color: var(--line-strong)",
     );
     const lightFocus = ruleBody(
-      'html[data-theme="light"] .search-and-field:focus-within',
+      'html[data-theme="light"] .search-filter-field:focus-within',
     );
     expect(lightFocus).toContain("border: 1.5px solid var(--accent)");
     expect(lightFocus).toMatch(/box-shadow:\s*none/);
     expect(lightFocus).not.toContain("0 0 0 0.5px");
     const lightFocused = ruleBody(
-      'html[data-theme="light"] .search-and-field.is-focused',
+      'html[data-theme="light"] .search-filter-field.is-focused',
     );
     expect(lightFocused).toContain("border: 1.5px solid var(--accent)");
     expect(lightFocused).toMatch(/box-shadow:\s*none/);
-    const input = ruleBody(".search-and-field input");
+    const input = ruleBody(".search-filter-field input");
     expect(input).toContain("min-width: 0");
     expect(input).toContain("text-overflow: ellipsis");
     expect(input).not.toContain("text-overflow: clip");
-    const mods = ruleBody(".search-and-mods");
+    const mods = ruleBody(".search-filter-mods");
     expect(mods).toContain("width: var(--and-mods-w)");
     expect(mods).toContain("min-width: var(--and-mods-w)");
     expect(mods).toContain("height: var(--and-row-h)");
     expect(mods).toContain("background: transparent");
     expect(mods).not.toContain("border: 1px");
-    expect(ruleBody(".search-and-mods .mod-btn")).toContain("min-width: 22px");
-    expect(css).not.toContain(".search-and-item:first-child .search-and-join");
+    expect(ruleBody(".search-filter-mods .mod-btn")).toContain("min-width: 22px");
+    expect(css).not.toContain(".search-filter-item:first-child .search-filter-join");
     expect(css).not.toContain(
-      ".search-and-item:first-child .search-and-line:first-of-type",
+      ".search-filter-item:first-child .search-filter-line:first-of-type",
     );
-    const join = ruleBody(".search-and-join");
+    const join = ruleBody(".search-filter-join");
     expect(join).toContain("flex-direction: row");
     expect(join).not.toContain("flex-direction: column");
     expect(join).not.toContain("margin-right: calc(");
-    const line = ruleBody(".search-and-line");
+    const line = ruleBody(".search-filter-line");
     expect(line).toMatch(/border-top:\s*1px dashed var\(--line-strong\)/);
     expect(line).toContain("border-left: none");
     expect(line).not.toContain("border-left: 1.5px");
     expect(line).not.toContain("var(--accent)");
     expect(ruleBody(".search-field-remove")).toContain("margin: 0 0 0 6px");
-    const foot = ruleBody(".search-and-foot");
+    const foot = ruleBody(".search-filter-foot");
     expect(foot).toContain("justify-content: space-between");
     expect(foot).toContain("flex-direction: row");
     expect(foot).not.toContain("flex-direction: column");
-    const hint = ruleBody(".search-and-hint");
+    const hint = ruleBody(".search-filter-hint");
     expect(hint).toContain("flex: 1 1 auto");
     expect(hint).toContain("text-align: left");
-    const actions = ruleBody(".search-and-actions");
+    const actions = ruleBody(".search-filter-actions");
     expect(actions).toContain("flex: none");
     expect(actions).toContain("gap: 8px");
-    const more = ruleBody(".search-and-more");
+    const more = ruleBody(".search-filter-more");
     expect(more).toMatch(/flex:\s*none/);
     expect(more).toContain("width: auto");
     expect(more).toContain("height: 32px");
     expect(more).not.toMatch(/flex:\s*1/);
-    expect(ruleBody(".search-and-go")).toContain("height: 32px");
-    expect(ruleBody(".search-and-go")).toContain("flex: none");
+    expect(ruleBody(".search-filter-go")).toContain("height: 32px");
+    expect(ruleBody(".search-filter-go")).toContain("flex: none");
     const light = css.slice(css.indexOf('html[data-theme="light"]'));
-    expect(light).toContain('html[data-theme="light"] .search-and-badge');
+    expect(light).toContain('html[data-theme="light"] .search-filter-badge');
     expect(light).toContain(
-      'html[data-theme="light"] .search-and-more:disabled',
+      'html[data-theme="light"] .search-filter-more:disabled',
     );
-    expect(ruleBody(".search-and-more:disabled")).toContain("var(--chip-fill)");
-    expect(ruleBody(".search-and-go:hover:not(:disabled)")).toContain(
+    expect(ruleBody(".search-filter-more:disabled")).toContain("var(--chip-fill)");
+    expect(ruleBody(".search-filter-go:hover:not(:disabled)")).toContain(
       "var(--accent-hover)",
     );
   });

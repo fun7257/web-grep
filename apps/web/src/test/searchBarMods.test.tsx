@@ -113,13 +113,13 @@ describe("SearchBar option toggles", () => {
 
     const extra = screen.getByRole("textbox", { name: "Add filter" });
     const extraMods = extra
-      .closest(".search-and-item")
+      .closest(".search-filter-item")
       ?.querySelectorAll(".mod-btn");
     expect(extraMods?.length).toBe(3);
     fireEvent.click(extraMods?.[0] as HTMLButtonElement);
     expect(onFlushSearch).not.toHaveBeenCalled();
 
-    fireEvent.click(document.querySelector(".search-and-go") as HTMLButtonElement);
+    fireEvent.click(document.querySelector(".search-filter-go") as HTMLButtonElement);
     expect(onFlushSearch).toHaveBeenCalledTimes(1);
     expect(
       onFlushSearch.mock.calls[0]?.[0]?.map((part: QueryPart) => part.value),

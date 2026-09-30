@@ -25,12 +25,12 @@ describe("i18n catalogs", () => {
   });
 
   it("ships S-AND filter placeholder copy in zh-CN and en-US", () => {
-    expect(catalogs["zh-CN"].queryFilterPlaceholder).toBe("过滤…");
-    expect(catalogs["en-US"].queryFilterPlaceholder).toBe("Filter…");
-    expect(catalogs["zh-CN"].queryAddFieldShort).toBe("添加");
-    expect(catalogs["zh-CN"].queryAndHintShort).toBe("加过滤");
-    expect(catalogs["en-US"].queryAddFieldShort).toBe("Add");
-    expect(catalogs["en-US"].queryAndHintShort).toBe("to add");
+    expect(catalogs["zh-CN"].filterPlaceholder).toBe("过滤…");
+    expect(catalogs["en-US"].filterPlaceholder).toBe("Filter…");
+    expect(catalogs["zh-CN"].filterAddShort).toBe("添加");
+    expect(catalogs["zh-CN"].filterAddHintShort).toBe("加过滤");
+    expect(catalogs["en-US"].filterAddShort).toBe("Add");
+    expect(catalogs["en-US"].filterAddHintShort).toBe("to add");
   });
 
   it("drops unused chip / browse / token copy keys", () => {

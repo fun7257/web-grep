@@ -442,7 +442,7 @@ func TestSearchSelectedPayloadAppliesModifiersAndGlobs(t *testing.T) {
 		}
 	}
 	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
-		`{"query":"H.llo","regex":true,"caseSensitive":true,"wordMatch":true,"globInclude":["src/**"],"globAnd":["*.ts"],"globExclude":["*.test.ts"]}`, nil)
+		`{"query":"H.llo","regex":true,"caseSensitive":true,"wordMatch":true,"globInclude":["src/**"],"globIntersect":["*.ts"],"globExclude":["*.test.ts"]}`, nil)
 	if rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
@@ -455,15 +455,15 @@ func TestSearchSelectedPayloadAppliesModifiersAndGlobs(t *testing.T) {
 	if !slices.Contains(got.GlobInclude, "src/**") {
 		t.Fatalf("globInclude: %v", got.GlobInclude)
 	}
-	if !slices.Contains(got.GlobAnd, "*.ts") {
-		t.Fatalf("globAnd: %v", got.GlobAnd)
+	if !slices.Contains(got.GlobIntersect, "*.ts") {
+		t.Fatalf("globIntersect: %v", got.GlobIntersect)
 	}
 	if !slices.Contains(got.GlobExclude, "*.test.ts") {
 		t.Fatalf("globExclude: %v", got.GlobExclude)
 	}
 }
 
-func TestSearchGlobAndIntersectsInclude(t *testing.T) {
+func TestSearchGlobIntersectIntersectsInclude(t *testing.T) {
 	var got rg.Input
 	eng := captureEngine{onSearch: func(in rg.Input) {
 		got = in
@@ -482,7 +482,7 @@ func TestSearchGlobAndIntersectsInclude(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
-		`{"query":"hello","globInclude":["src/**"],"globAnd":["*.ts"]}`, nil)
+		`{"query":"hello","globInclude":["src/**"],"globIntersect":["*.ts"]}`, nil)
 	if rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
@@ -492,8 +492,8 @@ func TestSearchGlobAndIntersectsInclude(t *testing.T) {
 	if !slices.Contains(got.GlobInclude, "src/**") {
 		t.Fatalf("globInclude: %v", got.GlobInclude)
 	}
-	if !slices.Contains(got.GlobAnd, "*.ts") {
-		t.Fatalf("globAnd: %v", got.GlobAnd)
+	if !slices.Contains(got.GlobIntersect, "*.ts") {
+		t.Fatalf("globIntersect: %v", got.GlobIntersect)
 	}
 }
 
@@ -748,7 +748,7 @@ func TestLiveRipgrepOnlySearchesPrefilteredFiles(t *testing.T) {
 	}
 }
 
-func TestSearchAndTermsPerTermModifiers(t *testing.T) {
+func TestSearchFilterTermsPerTermModifiers(t *testing.T) {
 	var got rg.Input
 	eng := captureEngine{onSearch: func(in rg.Input) {
 		got = in
@@ -758,19 +758,19 @@ func TestSearchAndTermsPerTermModifiers(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
-		`{"query":"Hello","caseSensitive":true,"andTerms":[{"query":"world.*","regex":true}]}`, nil)
+		`{"query":"Hello","caseSensitive":true,"filterTerms":[{"query":"world.*","regex":true}]}`, nil)
 	if rec.Code != 200 {
 		t.Fatal(rec.Code, rec.Body.String())
 	}
 	if !got.CaseSensitive || got.Regex {
 		t.Fatalf("head flags: case=%v regex=%v", got.CaseSensitive, got.Regex)
 	}
-	if len(got.AndTerms) != 1 || got.AndTerms[0].Query != "world.*" || !got.AndTerms[0].Regex || got.AndTerms[0].CaseSensitive {
-		t.Fatalf("piped term: %+v", got.AndTerms)
+	if len(got.FilterTerms) != 1 || got.FilterTerms[0].Query != "world.*" || !got.FilterTerms[0].Regex || got.FilterTerms[0].CaseSensitive {
+		t.Fatalf("piped term: %+v", got.FilterTerms)
 	}
 }
 
-func TestLiveRipgrepAndTermsAnyOrder(t *testing.T) {
+func TestLiveRipgrepFilterTermsAnyOrder(t *testing.T) {
 	bin := rg.Detect("")
 	if bin == "" {
 		t.Skip("rg not available")
@@ -787,7 +787,7 @@ func TestLiveRipgrepAndTermsAnyOrder(t *testing.T) {
 	}
 	s := newTestServer(cfg, rg.Engine{Bin: bin}, "rg")
 	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
-		`{"query":"030680228968","andTerms":["industryType","trade-users","host"]}`, nil)
+		`{"query":"030680228968","filterTerms":["industryType","trade-users","host"]}`, nil)
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
@@ -827,7 +827,7 @@ func TestLiveRipgrepSearchSelectedAdvancedOptions(t *testing.T) {
 	}
 	s := newTestServer(cfg, rg.Engine{Bin: bin}, "rg")
 	rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
-		`{"query":"H.llo","regex":true,"caseSensitive":true,"wordMatch":true,"globInclude":["src/**"],"globAnd":["*.ts"],"globExclude":["*.test.ts"]}`, nil)
+		`{"query":"H.llo","regex":true,"caseSensitive":true,"wordMatch":true,"globInclude":["src/**"],"globIntersect":["*.ts"],"globExclude":["*.test.ts"]}`, nil)
 	if rec.Code != 200 {
 		t.Fatal(rec.Body.String())
 	}
@@ -1120,13 +1120,13 @@ func TestHealthIgnoresApiVersionHeader(t *testing.T) {
 	}
 }
 
-func TestSearchAndTermsRejectsMoreThanSixteen(t *testing.T) {
+func TestSearchFilterTermsRejectsMoreThanSixteen(t *testing.T) {
 	s, _ := testServer(t, fakeEngine{})
 	terms := make([]string, 17)
 	for i := range terms {
 		terms[i] = fmt.Sprintf("t%d", i)
 	}
-	raw, err := json.Marshal(map[string]any{"query": "foo", "andTerms": terms})
+	raw, err := json.Marshal(map[string]any{"query": "foo", "filterTerms": terms})
 	if err != nil {
 		t.Fatal(err)
 	}

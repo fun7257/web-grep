@@ -201,6 +201,6 @@ docker rm -f web-grep
 - 健康检查请求 `http://127.0.0.1:8787/api/health`（Host 为本机，始终允许）。
 - 登录勾选「记住密码」后令牌在浏览器 `localStorage`，关页还在；服务端会话在内存里，**重启容器要重新登录**。
 - 时间范围、搜索历史在浏览器里。搜索次数由服务端记在配置文件同目录的 `search-count`（单文件挂载 config 时写在容器 `/app/search-count`，换容器会清零，需要持久化请把该文件或整个 `/app` 配置目录一起挂出来）。
-- 多条件 AND 在页面上加框，空框不搜；空格算进单条条件。
+- 多个过滤在页面上加框，空框不搜；空格算进单条条件。
 - 树是空的或权限错误：确认 `WEB_GREP_DATA` 存在且该 uid 可读。
 - 跟 main 用 `ghcr.io/fun7257/web-grep:dev`（每次合并覆盖）。钉版本用 `:vX.Y.Z`。本地构建统一用 `web-grep:local`（`docker compose up --build` 与 `docker build -t web-grep:local`）。

@@ -121,9 +121,9 @@ export function IconPlus() {
   );
 }
 
-export function IconAnd() {
+export function IconFilter() {
   return (
-    <svg className="icon icon-and" viewBox="0 0 16 16" aria-hidden="true">
+    <svg className="icon icon-filter" viewBox="0 0 16 16" aria-hidden="true">
       <path
         d="M2.4 3.2h11.2L9.3 8.4v3.4L6.7 13.4V8.4z"
         fill="none"
@@ -229,14 +229,6 @@ export function IconCaret({ open }: { open: boolean }) {
       aria-hidden="true"
     >
       <path d="M3.8 6.2 8 10.4 12.2 6.2" {...stroke} />
-    </svg>
-  );
-}
-
-export function IconFilter() {
-  return (
-    <svg className="icon" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M2 3h12l-5 6v5l-2-1V9L2 3z" {...stroke} />
     </svg>
   );
 }

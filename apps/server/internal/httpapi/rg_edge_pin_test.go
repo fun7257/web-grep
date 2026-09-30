@@ -16,19 +16,19 @@ import (
 
 // Step 4 item 5 pins: real-rg edge cases called out as quality debt.
 // These go through the production search path (HTTP → argv + piped
-// andTerms filters → JSON parse → SSE). Product behavior, andTerms
+// filterTerms filters → JSON parse → SSE). Product behavior, filterTerms
 // contract, SSE names, and HTTP paths are unchanged.
 
-func TestPinLiveRipgrepAndTermsRequireAll(t *testing.T) {
+func TestPinLiveRipgrepFilterTermsRequireAll(t *testing.T) {
 	s := liveRgServer(t, func(root string) {
 		writeRel(t, root, "keep.txt", []byte(
 			`"account":"030680228968","industryType":"4","route":"/trade-users/v1/me","accountHost":"ok"`+"\n",
 		))
-		// Same query + two of three andTerms — must not hit.
+		// Same query + two of three filterTerms — must not hit.
 		writeRel(t, root, "partial.txt", []byte(
 			`"account":"030680228968","industryType":"4","route":"/trade-users/v1/me"`+"\n",
 		))
-		// All andTerms, but missing the head query — must not hit.
+		// All filterTerms, but missing the head query — must not hit.
 		writeRel(t, root, "noquery.txt", []byte(
 			`"industryType":"4","route":"/trade-users/v1/me","accountHost":"ok"`+"\n",
 		))
@@ -41,7 +41,7 @@ func TestPinLiveRipgrepAndTermsRequireAll(t *testing.T) {
 
 	t.Run("stringTerms", func(t *testing.T) {
 		rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
-			`{"query":"030680228968","andTerms":["industryType","trade-users","accountHost"]}`, nil)
+			`{"query":"030680228968","filterTerms":["industryType","trade-users","accountHost"]}`, nil)
 		assertSearchOK(t, rec)
 		_, hits, done := parseSearchSSE(t, rec.Body.String())
 		paths := hitPaths(hits)
@@ -50,7 +50,7 @@ func TestPinLiveRipgrepAndTermsRequireAll(t *testing.T) {
 		}
 		for _, leak := range []string{"partial.txt", "noquery.txt", "split.txt"} {
 			if slices.Contains(paths, leak) {
-				t.Fatalf("andTerms must drop %s (missing a term on the match line): %v", leak, paths)
+				t.Fatalf("filterTerms must drop %s (missing a term on the match line): %v", leak, paths)
 			}
 		}
 		if n, _ := done["matchCount"].(float64); n != 1 {
@@ -64,18 +64,18 @@ func TestPinLiveRipgrepAndTermsRequireAll(t *testing.T) {
 		writeRel(t, s.Config().RootReal, "obj-and.txt", []byte("Hello missing-regex keep\n"))
 
 		rec := do(t, s.Handler(), "POST", "http://127.0.0.1:8787/api/search",
-			`{"query":"Hello","caseSensitive":true,"andTerms":[{"query":"world.*","regex":true}]}`, nil)
+			`{"query":"Hello","caseSensitive":true,"filterTerms":[{"query":"world.*","regex":true}]}`, nil)
 		assertSearchOK(t, rec)
 		_, hits, _ := parseSearchSSE(t, rec.Body.String())
 		paths := hitPaths(hits)
 		if !slices.Contains(paths, "obj-keep.txt") {
-			t.Fatalf("head+andTerm must hit, got %v body=%s", paths, rec.Body.String())
+			t.Fatalf("head+filterTerm must hit, got %v body=%s", paths, rec.Body.String())
 		}
 		if slices.Contains(paths, "obj-case.txt") {
 			t.Fatalf("case-sensitive head must not hit obj-case.txt: %v", paths)
 		}
 		if slices.Contains(paths, "obj-and.txt") {
-			t.Fatalf("regex andTerm must drop lines without world.*: %v", paths)
+			t.Fatalf("regex filterTerm must drop lines without world.*: %v", paths)
 		}
 	})
 }

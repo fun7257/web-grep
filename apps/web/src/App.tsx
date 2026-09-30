@@ -181,7 +181,7 @@ function AppShell() {
         hidden: lastStack?.hidden ?? true,
         rootAbs,
         relPaths: [selectedHit.path],
-        andTerms: shareState.parts.slice(1).map((term, index) => {
+        filterTerms: shareState.parts.slice(1).map((term, index) => {
           const mod = shareState.mods?.[index + 1];
           return {
             query: term,
@@ -247,7 +247,7 @@ function AppShell() {
       const stack: SearchStack = {
         parts: ready,
         globInclude: globs.globInclude,
-        globAnd: [],
+        globIntersect: [],
         globExclude: globs.globExclude,
         path: "",
         caseSensitive: head?.caseSensitive ?? false,
@@ -492,7 +492,7 @@ function AppShell() {
             stackRef.current = {
               ...stackRef.current,
               globInclude: [],
-              globAnd: [],
+              globIntersect: [],
             };
           }
           setTimeRange(next);

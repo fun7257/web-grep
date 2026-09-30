@@ -17,10 +17,10 @@ import (
 
 type searchBody struct {
 	Query         string          `json:"query"`
-	AndTerms      json.RawMessage `json:"andTerms"`
+	FilterTerms   json.RawMessage `json:"filterTerms"`
 	Path          *string         `json:"path"`
 	GlobInclude   []string        `json:"globInclude"`
-	GlobAnd       []string        `json:"globAnd"`
+	GlobIntersect []string        `json:"globIntersect"`
 	GlobExclude   []string        `json:"globExclude"`
 	Regex         *bool           `json:"regex"`
 	CaseSensitive *bool           `json:"caseSensitive"`
@@ -30,7 +30,7 @@ type searchBody struct {
 	MtimeAfter    *int64          `json:"mtimeAfter"`
 }
 
-type wireAndTerm struct {
+type wireFilterTerm struct {
 	Query         string `json:"query"`
 	Regex         *bool  `json:"regex"`
 	CaseSensitive *bool  `json:"caseSensitive"`
@@ -67,39 +67,39 @@ func (s *Server) search(w http.ResponseWriter, r *http.Request) {
 	s.Search.Run(r.Context(), pre, sw)
 }
 
-func parseAndTerms(raw json.RawMessage) ([]rg.AndTerm, error) {
+func parseFilterTerms(raw json.RawMessage) ([]rg.FilterTerm, error) {
 	if len(raw) == 0 || string(raw) == "null" {
-		return []rg.AndTerm{}, nil
+		return []rg.FilterTerm{}, nil
 	}
 	var strs []string
 	if err := json.Unmarshal(raw, &strs); err == nil {
 		if len(strs) > 16 {
 			return nil, errors.New("invalid query")
 		}
-		out := make([]rg.AndTerm, 0, len(strs))
+		out := make([]rg.FilterTerm, 0, len(strs))
 		for _, term := range strs {
 			term = strings.TrimSpace(term)
 			if term == "" || len(term) > config.QueryMaxChars {
 				return nil, errors.New("invalid query")
 			}
-			out = append(out, rg.AndTerm{Query: term})
+			out = append(out, rg.FilterTerm{Query: term})
 		}
 		return out, nil
 	}
-	var objs []wireAndTerm
+	var objs []wireFilterTerm
 	if err := json.Unmarshal(raw, &objs); err != nil {
 		return nil, errors.New("invalid query")
 	}
 	if len(objs) > 16 {
 		return nil, errors.New("invalid query")
 	}
-	out := make([]rg.AndTerm, 0, len(objs))
+	out := make([]rg.FilterTerm, 0, len(objs))
 	for _, obj := range objs {
 		query := strings.TrimSpace(obj.Query)
 		if query == "" || len(query) > config.QueryMaxChars {
 			return nil, errors.New("invalid query")
 		}
-		term := rg.AndTerm{Query: query}
+		term := rg.FilterTerm{Query: query}
 		if obj.Regex != nil {
 			term.Regex = *obj.Regex
 		}
@@ -126,11 +126,11 @@ func parseSearch(b searchBody) (search.Request, error) {
 	if len(path) > config.PathMaxChars {
 		return search.Request{}, errors.New("invalid query")
 	}
-	andTerms, err := parseAndTerms(b.AndTerms)
+	filterTerms, err := parseFilterTerms(b.FilterTerms)
 	if err != nil {
 		return search.Request{}, err
 	}
-	if len(b.GlobInclude) > config.GlobMaxCount || len(b.GlobAnd) > config.GlobMaxCount || len(b.GlobExclude) > config.GlobMaxCount {
+	if len(b.GlobInclude) > config.GlobMaxCount || len(b.GlobIntersect) > config.GlobMaxCount || len(b.GlobExclude) > config.GlobMaxCount {
 		return search.Request{}, errors.New("invalid query")
 	}
 	for _, g := range b.GlobInclude {
@@ -138,7 +138,7 @@ func parseSearch(b searchBody) (search.Request, error) {
 			return search.Request{}, errors.New("invalid query")
 		}
 	}
-	for _, g := range b.GlobAnd {
+	for _, g := range b.GlobIntersect {
 		if len(g) > config.GlobMaxChars {
 			return search.Request{}, errors.New("invalid query")
 		}
@@ -150,23 +150,23 @@ func parseSearch(b searchBody) (search.Request, error) {
 	}
 	req := search.Request{
 		Query:         q,
-		AndTerms:      andTerms,
+		FilterTerms:   filterTerms,
 		Path:          path,
 		GlobInclude:   b.GlobInclude,
-		GlobAnd:       b.GlobAnd,
+		GlobIntersect: b.GlobIntersect,
 		GlobExclude:   b.GlobExclude,
 		Regex:         false,
 		CaseSensitive: false,
 		Hidden:        true,
 	}
-	if req.AndTerms == nil {
-		req.AndTerms = []rg.AndTerm{}
+	if req.FilterTerms == nil {
+		req.FilterTerms = []rg.FilterTerm{}
 	}
 	if req.GlobInclude == nil {
 		req.GlobInclude = []string{}
 	}
-	if req.GlobAnd == nil {
-		req.GlobAnd = []string{}
+	if req.GlobIntersect == nil {
+		req.GlobIntersect = []string{}
 	}
 	if req.GlobExclude == nil {
 		req.GlobExclude = []string{}

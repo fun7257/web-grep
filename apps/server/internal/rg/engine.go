@@ -24,7 +24,7 @@ const fileListArgBudget = 96 * 1024
 
 func filterArgvs(in Input) [][]string {
 	var out [][]string
-	for _, term := range in.AndTerms {
+	for _, term := range in.FilterTerms {
 		query := strings.TrimSpace(term.Query)
 		if query == "" {
 			continue

@@ -4,13 +4,13 @@ import type {
   RefObject,
 } from "react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { measureAndPanelWidth } from "../andPanelLayout.ts";
+import { measureFilterPanelWidth } from "../filterPanelLayout.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchHistoryItem } from "../searchHistory.ts";
 import type { QueryPart } from "../searchStack.ts";
-import { countNonEmptyAndTerms, newPart } from "../searchStack.ts";
+import { countFilledFilters, newPart } from "../searchStack.ts";
 import {
-  IconAnd,
+  IconFilter,
   IconHistory,
   IconNavBack,
   IconNavForward,
@@ -19,7 +19,7 @@ import {
   IconX,
 } from "./icons.tsx";
 
-const MAX_AND_PARTS = 16;
+const MAX_FILTER_PARTS = 16;
 
 export function SearchBar({
   fields,
@@ -60,15 +60,15 @@ export function SearchBar({
   const filterBtnRef = useRef<HTMLButtonElement>(null);
   const extraRefs = useRef<Array<HTMLInputElement | null>>([]);
   const pendingFocus = useRef<"open" | "add" | null>(null);
-  const [andOpen, setAndOpen] = useState(false);
+  const [filterPanelOpen, setFilterPanelOpen] = useState(false);
   const [histOpen, setHistOpen] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number | null>(null);
   const values = fields.length > 0 ? fields : [newPart("")];
   const extras = values.slice(1);
-  const extraCount = countNonEmptyAndTerms(values);
+  const extraCount = countFilledFilters(values);
   const firstEmptyExtra = extras.findIndex((part) => part.value.trim() === "");
   const canAdd =
-    values.length < MAX_AND_PARTS &&
+    values.length < MAX_FILTER_PARTS &&
     (values[values.length - 1]?.value ?? "").trim() !== "";
 
   const sendSearch = (): void => {
@@ -78,7 +78,7 @@ export function SearchBar({
     const terms = values
       .map((part) => ({ ...part, value: part.value.trim() }))
       .filter((part) => part.value !== "");
-    setAndOpen(false);
+    setFilterPanelOpen(false);
     setHistOpen(false);
     onFlushSearch(terms);
   };
@@ -104,7 +104,7 @@ export function SearchBar({
     }
     pendingFocus.current = "add";
     setHistOpen(false);
-    setAndOpen(true);
+    setFilterPanelOpen(true);
     onFieldsChange([...values, newPart("")]);
   };
   const addFieldRef = useRef(addField);
@@ -112,7 +112,7 @@ export function SearchBar({
 
   const toggleAnd = (): void => {
     setHistOpen(false);
-    setAndOpen((open) => {
+    setFilterPanelOpen((open) => {
       if (!open) {
         pendingFocus.current = "open";
       }
@@ -121,7 +121,7 @@ export function SearchBar({
   };
 
   const toggleHist = (): void => {
-    setAndOpen(false);
+    setFilterPanelOpen(false);
     setHistOpen((open) => !open);
   };
 
@@ -132,12 +132,12 @@ export function SearchBar({
     const next = values.filter((_, i) => i !== index);
     onFieldsChange(next);
     if (next.length <= 1) {
-      setAndOpen(false);
+      setFilterPanelOpen(false);
     }
   };
 
   useLayoutEffect(() => {
-    if (!andOpen) {
+    if (!filterPanelOpen) {
       return;
     }
     const field = fieldRef.current;
@@ -148,7 +148,7 @@ export function SearchBar({
       return;
     }
     const apply = (): void => {
-      const width = measureAndPanelWidth(
+      const width = measureFilterPanelWidth(
         field.getBoundingClientRect(),
         funnel.getBoundingClientRect(),
         clip.getBoundingClientRect(),
@@ -166,10 +166,10 @@ export function SearchBar({
       observer?.disconnect();
       window.removeEventListener("resize", apply);
     };
-  }, [andOpen]);
+  }, [filterPanelOpen]);
 
   useEffect(() => {
-    if (!andOpen || !pendingFocus.current) {
+    if (!filterPanelOpen || !pendingFocus.current) {
       return;
     }
     const mode = pendingFocus.current;
@@ -181,7 +181,7 @@ export function SearchBar({
     const node = extraRefs.current[index];
     node?.focus();
     node?.scrollIntoView({ block: "nearest" });
-  }, [andOpen, extras.length, firstEmptyExtra]);
+  }, [filterPanelOpen, extras.length, firstEmptyExtra]);
 
   const handleSubmit = (event: FormEvent): void => {
     event.preventDefault();
@@ -212,7 +212,7 @@ export function SearchBar({
   }, []);
 
   useEffect(() => {
-    if (!andOpen && !histOpen) {
+    if (!filterPanelOpen && !histOpen) {
       return;
     }
     const onDown = (event: MouseEvent): void => {
@@ -222,7 +222,7 @@ export function SearchBar({
         rootRef.current !== null &&
         !rootRef.current.contains(target)
       ) {
-        setAndOpen(false);
+        setFilterPanelOpen(false);
         setHistOpen(false);
       }
     };
@@ -232,7 +232,7 @@ export function SearchBar({
       }
       event.preventDefault();
       event.stopPropagation();
-      setAndOpen(false);
+      setFilterPanelOpen(false);
       setHistOpen(false);
     };
     window.addEventListener("mousedown", onDown);
@@ -241,7 +241,7 @@ export function SearchBar({
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKeyDown, true);
     };
-  }, [andOpen, histOpen]);
+  }, [filterPanelOpen, histOpen]);
 
   const onQueryKeyDown = (
     event: ReactKeyboardEvent<HTMLElement>,
@@ -278,10 +278,10 @@ export function SearchBar({
       setFieldMods(index, { regex: !part.regex });
       return;
     }
-    if (event.key === "Escape" && (andOpen || histOpen)) {
+    if (event.key === "Escape" && (filterPanelOpen || histOpen)) {
       event.preventDefault();
       event.stopPropagation();
-      setAndOpen(false);
+      setFilterPanelOpen(false);
       setHistOpen(false);
       return;
     }
@@ -302,7 +302,7 @@ export function SearchBar({
   return (
     <div className="search-container" ref={rootRef}>
       <form
-        className={andOpen || histOpen ? "search-bar is-open" : "search-bar"}
+        className={filterPanelOpen || histOpen ? "search-bar is-open" : "search-bar"}
         onSubmit={handleSubmit}
         noValidate
         role="search"
@@ -416,15 +416,15 @@ export function SearchBar({
               }}
             />
           </div>
-          {andOpen ? (
+          {filterPanelOpen ? (
             <div
               className={
                 panelWidth !== null
-                  ? "search-and-pop search-and-block is-anchored"
-                  : "search-and-pop search-and-block"
+                  ? "search-filter-pop search-filter-block is-anchored"
+                  : "search-filter-pop search-filter-block"
               }
               role="dialog"
-              aria-label={t("queryConditions")}
+              aria-label={t("filterPanelTitle")}
               style={
                 panelWidth !== null
                   ? {
@@ -435,24 +435,24 @@ export function SearchBar({
                   : undefined
               }
             >
-              <div className="search-and-list">
+              <div className="search-filter-list">
                 {extras.map((part, extraIndex) => {
                   const index = extraIndex + 1;
                   return (
-                    <div key={part.id} className="search-and-item">
+                    <div key={part.id} className="search-filter-item">
                       {extraIndex > 0 ? (
-                        <div className="search-and-join" aria-hidden="true">
-                          <span className="search-and-line" />
-                          <span className="search-and-badge">
-                            <IconAnd />
-                            {t("opAnd")}
+                        <div className="search-filter-join" aria-hidden="true">
+                          <span className="search-filter-line" />
+                          <span className="search-filter-badge">
+                            <IconFilter />
+                            {t("filterLabel")}
                           </span>
-                          <span className="search-and-line" />
+                          <span className="search-filter-line" />
                         </div>
                       ) : null}
-                      <div className="search-and-row">
+                      <div className="search-filter-row">
                         <div
-                          className="search-and-field"
+                          className="search-filter-field"
                           onClick={() => {
                             extraRefs.current[extraIndex]?.focus();
                           }}
@@ -462,8 +462,8 @@ export function SearchBar({
                               extraRefs.current[extraIndex] = node;
                             }}
                             type="text"
-                            aria-label={t("queryAddField")}
-                            placeholder={t("queryFilterPlaceholder")}
+                            aria-label={t("filterAdd")}
+                            placeholder={t("filterPlaceholder")}
                             title={
                               part.value.trim() !== "" ? part.value : undefined
                             }
@@ -482,7 +482,7 @@ export function SearchBar({
                           {part.value.trim() !== "" ? (
                             <button
                               type="button"
-                              className="search-and-clear"
+                              className="search-filter-clear"
                               aria-label={t("queryClear")}
                               onClick={(event) => {
                                 event.preventDefault();
@@ -494,7 +494,7 @@ export function SearchBar({
                             </button>
                           ) : null}
                         </div>
-                        <div className="search-and-mods">
+                        <div className="search-filter-mods">
                           <FieldMods
                             part={part}
                             onToggle={(patch) => {
@@ -505,7 +505,7 @@ export function SearchBar({
                         <button
                           type="button"
                           className="search-field-remove"
-                          aria-label={t("queryRemoveField")}
+                          aria-label={t("filterRemove")}
                           onClick={() => {
                             removeField(index);
                           }}
@@ -517,31 +517,31 @@ export function SearchBar({
                   );
                 })}
               </div>
-              <div className="search-and-foot">
+              <div className="search-filter-foot">
                 <p
-                  className="search-and-hint"
-                  title={`Shift+Enter ${t("queryAndHint")} · ${t("queryAndLimitHint")}`}
+                  className="search-filter-hint"
+                  title={`Shift+Enter ${t("filterAddHint")} · ${t("filterLimitHint")}`}
                 >
-                  Shift+Enter {t("queryAndHintShort")}
+                  Shift+Enter {t("filterAddHintShort")}
                 </p>
-                <div className="search-and-actions">
+                <div className="search-filter-actions">
                   <button
                     type="button"
-                    className="search-and-more"
+                    className="search-filter-more"
                     disabled={!canAdd}
-                    aria-label={t("queryAddField")}
-                    title={t("queryAddField")}
+                    aria-label={t("filterAdd")}
+                    title={t("filterAdd")}
                     onClick={(event) => {
                       event.preventDefault();
                       addField();
                     }}
                   >
                     <IconPlus />
-                    {t("queryAddFieldShort")}
+                    {t("filterAddShort")}
                   </button>
                   <button
                     type="button"
-                    className="search-and-go"
+                    className="search-filter-go"
                     disabled={searchLocked}
                     onClick={(event) => {
                       event.preventDefault();
@@ -559,19 +559,19 @@ export function SearchBar({
           type="button"
           ref={filterBtnRef}
           className={
-            andOpen || extraCount > 0
+            filterPanelOpen || extraCount > 0
               ? "search-add-field is-on"
               : "search-add-field"
           }
-          aria-label={t("queryConditions")}
-          title={t("queryConditions")}
-          aria-expanded={andOpen}
+          aria-label={t("filterPanelTitle")}
+          title={t("filterPanelTitle")}
+          aria-expanded={filterPanelOpen}
           onClick={(event) => {
             event.preventDefault();
             toggleAnd();
           }}
         >
-          <IconAnd />
+          <IconFilter />
           {extraCount > 0 ? (
             <span className="search-add-count">{extraCount}</span>
           ) : null}
@@ -595,12 +595,12 @@ export function SearchBar({
           </button>
         </div>
       </form>
-      {andOpen || histOpen ? (
+      {filterPanelOpen || histOpen ? (
         <div
           className="search-drop-backdrop"
           onMouseDown={(event) => {
             event.preventDefault();
-            setAndOpen(false);
+            setFilterPanelOpen(false);
             setHistOpen(false);
           }}
         />

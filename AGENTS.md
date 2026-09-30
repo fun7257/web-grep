@@ -10,7 +10,7 @@
 
 ## 冻结约定
 
-- 搜索多条件语义冻结。不要改 and 条件契约（`andTerms`）、SSE 事件名（`meta` / `progress` / `hit` / `done` / `error`）或相关产品行为，除非产品明确放开。
+- 搜索过滤语义冻结。不要改过滤条件契约（`filterTerms`；2026-09-30 起由 `andTerms` 改名，`globAnd` 同步改为 `globIntersect`，不再接受旧字段名）、SSE 事件名（`meta` / `progress` / `hit` / `done` / `error`）或相关产品行为，除非产品明确放开。
 
 ## Backend
 
@@ -25,7 +25,7 @@
 
 - 改页面、状态、样式前先跟人对齐；开 PR 先不合，等 Test 过、PM 放行再合。
 - 类型与契约：以 `packages/shared` 为准，字段名跟接口一致。预览每次拉多少行：有 meta.`previewChunk` 就用它（可按 `previewChunkMax` 截），没有再用共享默认；不要把废弃的 `previewLines` 当每次块大小。
-- 搜索多条件语义冻结，别改。发请求走统一客户端（`apps/web/src/api`：拼前缀、带令牌、解析错误、可取消）；换条件/关弹窗要 abort，别让旧请求改界面。
+- 搜索过滤语义冻结，别改。发请求走统一客户端（`apps/web/src/api`：拼前缀、带令牌、解析错误、可取消）；换条件/关弹窗要 abort，别让旧请求改界面。
 - 本地：`pnpm typecheck` / `pnpm lint` / `pnpm test`（vitest）。冒烟：登录 → 搜一下 → 树点文件名出预览弹窗。
 - 别顺手大重构、别合 main、别编造未验证结果。
 
