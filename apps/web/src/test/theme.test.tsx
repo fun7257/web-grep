@@ -2,7 +2,7 @@
 
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { ThemeToggle } from "../components/StatusBar.tsx";
+import { LocaleToggle, ThemeToggle } from "../components/StatusBar.tsx";
 import { LocaleProvider } from "../hooks/useLocale.ts";
 import {
   applyTheme,
@@ -17,6 +17,7 @@ import {
 afterEach(() => {
   cleanup();
   localStorage.removeItem(THEME_STORAGE_KEY);
+  localStorage.removeItem("web-grep.locale");
   document.documentElement.removeAttribute(THEME_ATTR);
   document.documentElement.style.colorScheme = "";
 });
@@ -94,5 +95,49 @@ describe("ThemeToggle", () => {
     fireEvent.click(button);
     expect(localStorage.getItem(THEME_STORAGE_KEY)).toBe("dark");
     expect(document.documentElement.getAttribute(THEME_ATTR)).toBe("dark");
+  });
+
+  it("exposes aria-pressed without changing the accessible name", () => {
+    localStorage.setItem(THEME_STORAGE_KEY, "dark");
+    localStorage.setItem("web-grep.locale", "en-US");
+    render(
+      <LocaleProvider>
+        <ThemeToggle />
+      </LocaleProvider>,
+    );
+    const button = screen.getByRole("button", { name: "Toggle light/dark" });
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(button.getAttribute("aria-label")).toBe("Toggle light/dark");
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-pressed")).toBe("false");
+    expect(button.getAttribute("aria-label")).toBe("Toggle light/dark");
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-pressed")).toBe("true");
+    expect(button.getAttribute("aria-label")).toBe("Toggle light/dark");
+  });
+});
+
+describe("LocaleToggle", () => {
+  it("does not treat the compact cycle as a pressed switch", () => {
+    localStorage.setItem("web-grep.locale", "zh-CN");
+    render(
+      <LocaleProvider>
+        <LocaleToggle />
+      </LocaleProvider>,
+    );
+    expect(
+      screen.getByRole("button", { name: "中" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      screen.getByRole("button", { name: "EN" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+    cleanup();
+    render(
+      <LocaleProvider>
+        <LocaleToggle compact />
+      </LocaleProvider>,
+    );
+    const cycle = screen.getByRole("button", { name: "中 / EN" });
+    expect(cycle.hasAttribute("aria-pressed")).toBe(false);
   });
 });

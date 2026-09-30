@@ -7,7 +7,11 @@ import {
   type HlTermInput,
   highlightSpans,
 } from "../highlight.ts";
-import { clipLineEnd, clipResultSnippets, shiftSpans } from "../resultSnippet.ts";
+import {
+  clipLogLine,
+  clipResultSnippets,
+  shiftSpans,
+} from "../resultSnippet.ts";
 
 function paintText(text: string, spans: HlSpan[]): ReactNode {
   const parts: ReactNode[] = [];
@@ -59,17 +63,28 @@ export function LogLineText({
   terms?: HlTermInput[];
   opts?: HlOpts;
 }) {
-  const clip = clipLineEnd(text);
-  const slice = text.slice(clip.start, clip.end);
-  const shifted = matches
-    .map((match) => ({
-      start: Math.max(0, match.start - clip.start),
-      end: Math.min(clip.end - clip.start, match.end - clip.start),
-    }))
-    .filter((match) => match.end > match.start);
+  const spans = highlightSpans(text, terms, opts, matches);
+  // Server offsets stay in the window even when term paints miss (invalid
+  // regex, word boundaries). Term spans still pull in the other hits.
+  const anchors = matches.some((match) => match.end > match.start)
+    ? [...matches, ...spans]
+    : spans;
+  const clips = clipLogLine(text, anchors);
+  const lead = (clips[0]?.start ?? 0) > 0;
+  const trail = (clips.at(-1)?.end ?? 0) < text.length;
   return (
     <span className="result-text">
-      {paintText(slice, highlightSpans(slice, terms, opts, shifted))}
+      {lead ? "…" : null}
+      {clips.map((clip, index) => {
+        const slice = text.slice(clip.start, clip.end);
+        return (
+          <span key={`${clip.start}-${clip.end}`}>
+            {index > 0 ? "…" : null}
+            {paintText(slice, shiftSpans(spans, clip.start, clip.end))}
+          </span>
+        );
+      })}
+      {trail ? "…" : null}
     </span>
   );
 }
