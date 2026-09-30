@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PUBLIC_PATH_META } from "../api/base.ts";
 import { TOKEN_STORAGE_KEY } from "../api/headers.ts";
 import {
   abortableSleep,
@@ -10,7 +11,6 @@ import {
   readJsonError,
   SearchHttpError,
 } from "../api/http.ts";
-import { PUBLIC_PATH_META } from "../api/base.ts";
 
 describe("shared JSON client", () => {
   afterEach(() => {
@@ -22,9 +22,9 @@ describe("shared JSON client", () => {
 
   it("detects abort errors from DOMException and Error", () => {
     expect(isAbortError(new DOMException("aborted", "AbortError"))).toBe(true);
-    expect(isAbortError(Object.assign(new Error("aborted"), { name: "AbortError" }))).toBe(
-      true,
-    );
+    expect(
+      isAbortError(Object.assign(new Error("aborted"), { name: "AbortError" })),
+    ).toBe(true);
     expect(isAbortError(new Error("nope"))).toBe(false);
     expect(isAbortError("AbortError")).toBe(false);
   });
@@ -39,14 +39,44 @@ describe("shared JSON client", () => {
     expect(parsed.status).toBe(429);
     expect(parsed.body).toEqual({ code: "BUSY", message: "full" });
 
-    const unauthorized = await readJsonError(new Response("nope", { status: 401 }));
+    const unauthorized = await readJsonError(
+      new Response("nope", { status: 401 }),
+    );
     expect(unauthorized.body).toEqual({
       code: "UNAUTHORIZED",
       message: "missing or invalid token",
     });
 
     const fallback = await readJsonError(new Response("nope", { status: 500 }));
-    expect(fallback.body).toEqual({ code: "INTERNAL", message: "request failed" });
+    expect(fallback.body).toEqual({
+      code: "INTERNAL",
+      message: "request failed",
+    });
+  });
+
+  it("accepts NOT_FOUND and falls back to INTERNAL for an unknown code", async () => {
+    const notFound = await readJsonError(
+      new Response(
+        JSON.stringify({ code: "NOT_FOUND", message: "not found" }),
+        {
+          status: 404,
+        },
+      ),
+    );
+    expect(notFound.status).toBe(404);
+    expect(notFound.body).toEqual({ code: "NOT_FOUND", message: "not found" });
+
+    const unknown = await readJsonError(
+      new Response(JSON.stringify({ code: "NO_SUCH_CODE", message: "boom" }), {
+        status: 404,
+      }),
+    );
+    expect(unknown).toBeInstanceOf(SearchHttpError);
+    expect(unknown.status).toBe(404);
+    expect(unknown.body).toEqual({
+      code: "INTERNAL",
+      message: "request failed",
+    });
   });
 
   it("prefixes the public path and attaches the session token", async () => {
@@ -55,9 +85,11 @@ describe("shared JSON client", () => {
     meta.setAttribute("content", "/web-grep/");
     document.head.append(meta);
     localStorage.setItem(TOKEN_STORAGE_KEY, "tok-1");
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), { status: 200 }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), { status: 200 }),
+      );
     vi.stubGlobal("fetch", fetchMock);
     await fetchApi("/api/meta");
     expect(fetchMock).toHaveBeenCalledTimes(1);
