@@ -1,4 +1,4 @@
-import type { SearchRequestInput, SseHit } from "@web-grep/shared";
+import type { SearchRequestInput } from "@web-grep/shared";
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { isAbortError, SearchHttpError } from "../api/http.ts";
 import { streamSearch } from "../api/searchClient.ts";
@@ -10,10 +10,7 @@ import {
 
 export type UseSearch = SearchState & {
   searchCount: number;
-  submit: (
-    input: SearchRequestInput,
-    opts?: { acceptHit?: (hit: SseHit) => boolean },
-  ) => void;
+  submit: (input: SearchRequestInput) => void;
   cancel: () => void;
   reset: () => void;
 };
@@ -40,10 +37,7 @@ export function useSearch(opts?: {
     dispatch({ type: "search/reset" });
   }, []);
 
-  const submit = useCallback((
-    input: SearchRequestInput,
-    filter?: { acceptHit?: (hit: SseHit) => boolean },
-  ) => {
+  const submit = useCallback((input: SearchRequestInput) => {
     abortRef.current?.abort();
     const ac = new AbortController();
     abortRef.current = ac;
@@ -53,9 +47,6 @@ export function useSearch(opts?: {
     void (async () => {
       let sawTerminal = false;
       let streamStarted = false;
-      let kept = 0;
-      const files = new Set<string>();
-      const accept = filter?.acceptHit;
       try {
         for await (const event of streamSearch(input, ac.signal)) {
           if (gen !== genRef.current) {
@@ -70,25 +61,10 @@ export function useSearch(opts?: {
           } else if (event.event === "progress") {
             dispatch({ type: "search/progress", progress: event.data });
           } else if (event.event === "hit") {
-            if (accept !== undefined && !accept(event.data)) {
-              continue;
-            }
-            kept += 1;
-            files.add(event.data.path);
             dispatch({ type: "search/hit", hit: event.data });
           } else if (event.event === "done") {
             sawTerminal = true;
-            dispatch({
-              type: "search/done",
-              done:
-                accept === undefined
-                  ? event.data
-                  : {
-                      ...event.data,
-                      matchCount: kept,
-                      fileCount: files.size,
-                    },
-            });
+            dispatch({ type: "search/done", done: event.data });
           } else if (event.event === "error") {
             sawTerminal = true;
             dispatch({ type: "search/error", error: event.data });

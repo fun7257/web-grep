@@ -535,7 +535,6 @@ function AppShell() {
           }
           onClear={clearAll}
           queryRef={queryRef}
-          timeRange={timeRange}
           history={searchHistory}
           canGoBack={nav.index > 0}
           canGoForward={nav.index >= 0 && nav.index < nav.stack.length - 1}
