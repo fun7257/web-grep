@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState } from "react";
 import { fetchFileWindow } from "../api/fileClient.ts";
-import { livePreviewChunk } from "../previewChunk.ts";
 import { isAbortError, SearchHttpError } from "../api/http.ts";
 import { mergeLines, type WindowLine } from "../fileWindow.ts";
 import type { Translate } from "../i18n/index.ts";
+import { livePreviewChunk } from "../previewChunk.ts";
 
 type FetchQuery = {
   path: string;
@@ -22,9 +22,13 @@ export function useFileWindow(t: Translate) {
   const loadingRef = useRef(false);
   const pathRef = useRef<string | null>(null);
   const genRef = useRef(0);
+  // setState updaters run on a later turn. Merge and the returned window
+  // have to use this ref so a caller can anchor the viewport before paint.
+  const linesRef = useRef<WindowLine[]>([]);
 
   const reset = useCallback(() => {
     genRef.current += 1;
+    linesRef.current = [];
     setLines([]);
     setError(null);
     setErrorCode(null);
@@ -60,6 +64,7 @@ export function useFileWindow(t: Translate) {
         if (win.binary) {
           setBinary(true);
           if (opts.mode === "replace") {
+            linesRef.current = [];
             setLines([]);
             setEof(true);
           }
@@ -67,17 +72,16 @@ export function useFileWindow(t: Translate) {
         }
         setBinary(false);
         if (opts.mode === "replace") {
+          linesRef.current = win.lines;
           setLines(win.lines);
           setEof(win.eof === true || win.lines.length === 0);
           return win.lines;
         }
-        let lastN = 0;
-        let merged: WindowLine[] = [];
-        setLines((current) => {
-          lastN = current[current.length - 1]?.n ?? 0;
-          merged = mergeLines(current, win.lines);
-          return merged;
-        });
+        const current = linesRef.current;
+        const lastN = current[current.length - 1]?.n ?? 0;
+        const merged = mergeLines(current, win.lines);
+        linesRef.current = merged;
+        setLines(merged);
         if (opts.dir === "down") {
           const grew = win.lines.some((line) => line.n > lastN);
           setEof(win.eof === true || !grew);

@@ -1,8 +1,8 @@
 /** @vitest-environment jsdom */
 
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FileWindowResponse } from "@web-grep/shared";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchFileWindow } from "../api/fileClient.ts";
 import { useFileWindow } from "../hooks/useFileWindow.ts";
 import { createT } from "../i18n/index.ts";
@@ -112,5 +112,41 @@ describe("file window stale slices", () => {
       expect(result.current.lines.map((line) => line.n)).toEqual([50, 51, 52]);
     });
     expect(result.current.lines.some((line) => line.n === 5)).toBe(false);
+  });
+
+  it("returns the merged window and marks eof when a downward slice does not grow", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ...windowOf("ok.txt", 1, 4),
+      eof: false,
+    });
+    const { result } = renderHook(() => useFileWindow(createT("en-US")));
+    result.current.pathRef.current = "ok.txt";
+    await act(async () => {
+      await result.current.loadSlice(
+        { path: "ok.txt", from: 1, count: 4 },
+        { mode: "replace" },
+      );
+    });
+    fetchMock.mockResolvedValueOnce({
+      path: "ok.txt",
+      startLine: 3,
+      lineCount: 2,
+      truncated: false,
+      binary: false,
+      eof: false,
+      lines: [
+        { n: 3, text: "overlap 3" },
+        { n: 4, text: "overlap 4" },
+      ],
+    });
+    const merged = await act(() =>
+      result.current.loadSlice(
+        { path: "ok.txt", from: 5, count: 4 },
+        { mode: "merge", dir: "down" },
+      ),
+    );
+    expect(merged?.map((line) => line.n)).toEqual([1, 2, 3, 4]);
+    expect(result.current.eof).toBe(true);
+    expect(result.current.lines.map((line) => line.n)).toEqual([1, 2, 3, 4]);
   });
 });
