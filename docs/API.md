@@ -16,7 +16,7 @@
 | 规则 | 说明 |
 | --- | --- |
 | 单一真相 | 类型、默认值、上限只写在 `packages/shared/src`。前端 `safeParse` 响应；后端按同名字段吐 JSON。 |
-| 兼容 | v1 内只允许**新增可选字段**。删除、改名、改语义必须升到 v2。 |
+| 兼容 | v1 内只允许**新增可选字段**。删除、改名、改语义必须升到 v2。**唯一例外**：2026-09-30 经产品确认，在 v1 内把请求字段 `andTerms` 改名为 `filterTerms`、`globAnd` 改名为 `globIntersect`。服务端**不再接受旧名**，旧名会被静默忽略（不报错）。此后不再有例外。 |
 | 默认值 | 请求里省略的字段按 Zod `.default()`。前端若行为与默认不同，必须显式传（当前 UI：`regex: false`、`caseSensitive: false`、`hidden: true`）。 |
 | 路径 | 客户端只出现 POSIX **相对路径**（`src/a.ts`）。禁止绝对路径、`..`、NUL。 |
 | 错误 | 机器可读 `code` + 给人看的 `message`。不要把 Zod issue 数组或 Go error 原文直接给浏览器。 |
@@ -49,7 +49,7 @@ HTTP JSON（SSE 尚未开始时）：
 | `INVALID_GLOB` | 400 | glob 含 `!`、`--`、绝对路径、`..` |
 | `DENIED` | 403 | 命中密钥/黑名单（如 `.env`） |
 | `BUSY` | 429 | 超过上限。搜索：并发默认 8 路（`max_concurrent` / `WEB_GREP_MAX_CONCURRENT`）。`GET /api/tree`、`GET /api/file`：全局同时进行默认 32 路（`read_max_concurrent` / `WEB_GREP_READ_MAX_CONCURRENT`），并且每个客户端（有效会话令牌，否则 TCP 对端 IP）在窗口内默认 120 次（`read_rate_limit` / `WEB_GREP_READ_RATE_LIMIT`，窗口 `read_rate_window_ms` 默认 10000）。JSON `{ "code": "BUSY", "message": "…" }`，在读文件 / 列目录之前返回。登录没有这项限制。 |
-| `ENGINE` | 503 | 没有可用的 `rg` |
+| `ENGINE` | 503（开流前）或 SSE `error` | 开流前的 503：没有可用的 `rg`。搜索途中 `rg` 失败（如非法正则）：以 SSE `error` 事件终止，message 是 `rg` 的错误原文。**只有开流前的 `ENGINE`（或 `GET /api/meta` 的 `engine:"none"`）表示引擎不存在**；流里的 `ENGINE` 只是这一次搜索失败 |
 | `UNAUTHORIZED` | 401 | 未登录或会话无效 |
 | `INVALID_AUTH` | 400/401 | 密码不合法或错误 |
 | `FORBIDDEN_HOST` | 403 | Host/Origin 不在允许名单 |
@@ -58,6 +58,8 @@ HTTP JSON（SSE 尚未开始时）：
 `ENGINE_UNSUPPORTED` **不是**当前契约码（Go 不导出）。若客户端仍收到该码，按 `ENGINE` 处理。
 
 `TIMEOUT` **不是**错误码。搜索超时走 SSE `done.timedOut=true`。
+
+未知的 `/api/*` 路径（且已通过鉴权，或没设密码）返回 `404 { "code": "INTERNAL", "message": "not found" }`；`INTERNAL` 是这里借用的码，不表示服务端出错。鉴权在路由之前，所以没登录时未知路径也是 `401 UNAUTHORIZED`。
 
 ---
 
@@ -87,11 +89,35 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 ### `POST /api/auth/logout`（公开）
 
-撤销当前会话令牌。`{ "ok": true }`。
+撤销请求所带的会话令牌，响应 `{ "ok": true }`。**请求必须带着要撤销的令牌**（`Authorization: Bearer` 或 `X-Web-Grep-Token`）：不带令牌也返回 200 `{ "ok": true }`，但什么都不会撤销，令牌仍然有效。前端要先发退出请求，再清本地令牌。
 
 ### `GET /api/meta`（设置了密码时需会话）
 
-见 `MetaResponseSchema`。`rgVersion` 可为 `null`。`rootLabel` 是根目录 basename，不是绝对路径。`previewBytes=0` 表示不限制文件体积。`limits.previewChunk` / `limits.previewChunkMax` 是 `GET /api/file` 的默认 `count` 与上限（配置 `preview_chunk` / `preview_chunk_max`，默认 160 / 400）。`limits.previewLines` **已弃用**：仍会返回（配置 `preview_lines` / `WEB_GREP_PREVIEW_LINES`），**不**改变文件预览行数。含 `authRequired`、`searchCount`（本实例累计执行的搜索次数，落在配置文件旁的 `search-count`；内存先加，约每 2 秒以及进程退出时刷盘）。
+`MetaResponseSchema`。
+
+| 字段 | 说明 |
+| --- | --- |
+| `engine` | `rg` \| `none`。`none` 表示没找到 `rg`，搜索会 503 `ENGINE` |
+| `rgVersion` | `rg --version` 的第一行；探测不到时为 `null` |
+| `rootLabel` | 根目录的 basename，给界面显示用 |
+| `root` | 根目录的**绝对路径**（已解析符号链接）。前端用它拼分享弹窗里可复现的 `rg` 命令。要注意：任何能调用 meta 的人都能看到服务器上的部署目录 |
+| `followSymlinks` | 是否跟随符号链接（`follow_symlinks`，默认 `true`）。跟随时，解析后落在根外的命中会被丢弃，见搜索一节 |
+| `limits` | 见下表 |
+| `defaultLocale` | 固定 `"zh-CN"` |
+| `authRequired` | 是否设置了登录密码 |
+| `searchCount` | 本实例累计执行的搜索次数，落在配置文件旁的 `search-count`；内存先加，约每 2 秒以及进程退出时刷盘 |
+
+`limits`：
+
+| 字段 | 说明 |
+| --- | --- |
+| `maxResults` | 单次搜索的结果条数上限（`max_results`，默认 20000，`0` 不限）。`POST /api/search` 省略 `maxResults` 时用它 |
+| `maxResultsHard` | 请求里 `maxResults` 的硬上限（`max_results_hard`）；`0` 表示没有硬上限 |
+| `timeoutMs` | 单次搜索超时（`timeout_ms`），`0` 不超时 |
+| `previewBytes` | `0` 表示不限制文件体积 |
+| `queryMaxChars` | 单个查询串的最大长度 8192；服务端按字节计，见搜索一节的上限说明 |
+| `previewChunk` / `previewChunkMax` | `GET /api/file` 省略 `count` 时的默认行数与上限（配置 `preview_chunk` / `preview_chunk_max`，默认 160 / 400） |
+| `previewLines` | **已弃用**：仍会返回（配置 `preview_lines` / `WEB_GREP_PREVIEW_LINES`，默认 201），**不**改变文件预览行数 |
 
 ### `POST /api/search`（设置了密码时需会话）
 
@@ -99,8 +125,8 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
-| `query` | 必填 | 1–8192 字符。第一框。空条件丢弃。单框里的空格是查询内容，不是分隔符。 |
-| `filterTerms` | `[]` | 额外过滤条件（filter），最多 **16** 项。每项是非空字符串，或 `{ query, regex?, caseSensitive?, wordMatch? }`（`query` 1–8192）。与 `query` 同时命中（顺序不限）。**不会**折成一条 `a.*b\|b.*a` 正则；服务端对每一项再跑一轮 rg 过滤。字符串项按字面量、不区分大小写、非整词。对象项未写的修饰符为 false，不从顶层字段继承。当前 UI 把其余框发成对象。 |
+| `query` | 必填 | 1–8192 字节（口径见下方上限说明）。第一框。空条件丢弃。单框里的空格是查询内容，不是分隔符。 |
+| `filterTerms` | `[]` | 额外过滤条件（filter），最多 **16** 项。每项是非空字符串，或 `{ query, regex?, caseSensitive?, wordMatch? }`（`query` 1–8192 字节）。与 `query` 同时命中（顺序不限）。**不会**折成一条 `a.*b\|b.*a` 正则；服务端对每一项再跑一轮 rg 过滤。字符串项按字面量、不区分大小写、非整词。对象项未写的修饰符为 false，不从顶层字段继承。当前 UI 把其余框发成对象。 |
 | `path` | `""` | 相对目录；空=整个根 |
 | `globInclude` | `[]` | 用户 glob 或树勾选转成的路径 glob（多项之间 OR） |
 | `globIntersect` | `[]` | 与 `globInclude` 求交。当前 UI 发空数组；不要为了「用上字段」去改搜索范围 |
@@ -112,15 +138,28 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 | `maxResults` | 服务端配置 | 正整数；省略则用服务端 `max_results` |
 | `mtimeAfter` | 省略=不限 | unix 毫秒。服务端先按文件 mtime 列出文件，再只对这些路径跑 rg |
 
+请求上限（超出一律 `400 INVALID_QUERY`，不开流）：
+
+| 项 | 上限 |
+| --- | --- |
+| `query`、`filterTerms[*].query` | 各 8192 **字节** |
+| `filterTerms` | 16 项 |
+| `path` | 4096 字节 |
+| `globInclude` / `globIntersect` / `globExclude` | 每项 256 字节，每个数组 4096 项 |
+| 请求体 | 约 1 MiB |
+| `maxResults` | 正整数；配置了 `max_results_hard`（非 0）时不能超过它 |
+
+**注意口径不一致**：服务端按 UTF-8 **字节数**判断长度（Go `len`），而 `packages/shared` 的 Zod schema 的 `.max(8192)` 按 UTF-16 **码元数**判断。纯英文时两者相同；含中文时服务端更早拒绝，例如 2731 个汉字（8193 字节）能通过前端校验，却会被服务端以 `400 INVALID_QUERY` 拒掉。这是已知的不一致，尚未统一。
+
 **Preflight（非 SSE）**：校验失败直接 HTTP JSON。空查询、非法路径、BUSY、ENGINE 都在开流之前返回。
 
-**成功：SSE** `Content-Type: text/event-stream`
+**成功：SSE** `Content-Type: text/event-stream`，服务端每 5 秒发一条 `: ping` 心跳。
 
 | event | data | 次数 |
 | --- | --- | --- |
-| `meta` | `{ searchId, engine }`（`engine`：`rg` \| `none`） | 恰好 1，最先 |
-| `progress` | `{ files, matches }` | 0–N，搜索过程中 |
-| `hit` | `{ path, line, text, matches[{start,end}] }` | 0–N |
+| `meta` | `{ searchId, engine, searchCount? }`（`engine`：`rg` \| `none`；`searchCount` 是本实例累计搜索次数，可选） | 恰好 1，最先 |
+| `progress` | `{ files, matches }` | 0–N，搜索过程中，最多每 200ms 一条。搜得很快时可能一条都没有 |
+| `hit` | `{ path, line, text, matches[{start,end}] }`。`text` 最长 65,536 **字节**（按 UTF-8 边界截断，不会切开一个字符；名字里带 `Chars` 的 `lineTextMaxChars` 常量实际按字节算），更长的行被截断，`matches` 也随之夹到截断后的范围内 | 0–N |
 | `done` | `{ elapsedMs, matchCount, fileCount, truncated, timedOut, cancelled }` | 与 `error` 互斥，恰好一个终态 |
 | `error` | `{ code, message }` | 引擎失败（message 可含 rg stderr）；与 `done` 互斥 |
 
@@ -184,6 +223,10 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 - 前端虚拟列表：可视区靠近已加载边界时再请求相邻切片；**禁止**因新切片把 scrollTop 重置到第一行。
 - 超过读接口上限时 HTTP 429 `BUSY`（与 tree 共用同一套限额）。`preview_chunk` / 切片语义不变。
 
+### 反向代理前缀（`public_path`）
+
+设置 `public_path`（如 `/web-grep`）后，页面、静态资源和 API 都可以挂在前缀下：`/web-grep/`、`/web-grep/assets/*`、`/web-grep/api/*`。服务端会剥掉可选的前缀，所以**不带前缀的 `/api/*` 同样可用**，方便前面的代理自己剥前缀后再转发。`public_path` 不能以 `/api` 开头。Host/Origin 校验对两种写法一视同仁。
+
 ---
 
 ## 4. 前端必须遵守
@@ -193,6 +236,8 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 3. SSE 用缓冲拆帧（TCP 可把 `data:` 切断）；忽略 `:` 注释。
 4. 换查询要 abort 上一轮搜索和预览。
 5. 预览切片合并后保持用户当前滚动位置；只在「换文件 / 换命中行」时 `scrollTo` 一次。
+6. 退出登录：先带着令牌调用 `POST /api/auth/logout`，再清本地令牌。先清再发，服务端会话不会被撤销。
+7. 只有开流前的 `ENGINE`（或 `meta.engine` 为 `none`）才禁用搜索。流里途中的 `ENGINE`（如非法正则）只是这一次搜索失败，下一次仍要允许。
 
 ---
 
