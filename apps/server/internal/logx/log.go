@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -24,16 +25,53 @@ var (
 )
 
 func SetLevel(name string) {
+	lv := LevelInfo
 	switch name {
 	case "debug":
-		level = LevelDebug
+		lv = LevelDebug
 	case "warn":
-		level = LevelWarn
+		lv = LevelWarn
 	case "error":
-		level = LevelError
-	default:
-		level = LevelInfo
+		lv = LevelError
 	}
+	mu.Lock()
+	level = lv
+	mu.Unlock()
+}
+
+// DebugEnabled reports whether a debug line would be written.
+// Callers use it to skip building expensive messages.
+func DebugEnabled() bool {
+	mu.Lock()
+	defer mu.Unlock()
+	return level == LevelDebug
+}
+
+// headLineMax is the longest first line kept on warn and error.
+// Later lines of an rg failure repeat the pattern, so they stay at debug.
+const headLineMax = 200
+
+// ClipForLog returns the first line of text and how many lines it has.
+// The line is cut to headLineMax Unicode code points so a character is not
+// split. When root is set and label is a different string, root is replaced
+// on that first line so an absolute search root stays out of warn and error.
+// Later lines are dropped; log the original text at debug when it is still needed.
+func ClipForLog(text, root, label string) (string, int) {
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = strings.TrimRight(text, "\n")
+	if text == "" {
+		return "", 0
+	}
+	parts := strings.Split(text, "\n")
+	head := parts[0]
+	if root != "" && label != "" && root != label {
+		head = strings.ReplaceAll(head, root, label)
+	}
+	if runes := []rune(head); len(runes) > headLineMax {
+		head = string(runes[:headLineMax])
+	}
+	return head, len(parts)
 }
 
 // SetOutput directs log lines to w. A nil writer restores stdout.
@@ -48,7 +86,10 @@ func SetOutput(w io.Writer) {
 }
 
 func logAt(lv Level, name, msg string, fields map[string]any) {
-	if lv < level {
+	mu.Lock()
+	enabled := lv >= level
+	mu.Unlock()
+	if !enabled {
 		return
 	}
 	rec := map[string]any{

@@ -76,7 +76,7 @@ Primary config is `config.yaml` (see `config.example.yaml`). Path: `-config`, el
 | `rg` | `WEB_GREP_RG` | unset | Absolute `rg` binary. |
 | `web_dist` | `WEB_GREP_WEB_DIST` | next to binary | Built SPA directory. Docker image uses `/app/web`. |
 | `dev` | `WEB_GREP_DEV` | `false` | Skip serving the SPA (`pnpm dev` sets `1`). |
-| `log_level` | `WEB_GREP_LOG_LEVEL` | `info` | `debug \| info \| warn \| error`。默认 `info` 且未设 `WEB_GREP_DEV` 时，启动行与热加载行只含 `rootLabel`，不含搜索根绝对路径。令牌与密码不进日志。见下方说明 |
+| `log_level` | `WEB_GREP_LOG_LEVEL` | `info` | `debug \| info \| warn \| error`。yaml 与该环境变量都没写时，默认 `info`；开发模式（`WEB_GREP_DEV=1` 或 yaml `dev: true`）下改为 `debug`。显式值优先，包括显式 `info`。启动与热加载行只含 `rootLabel`。令牌与密码不进日志。见下方说明 |
 | `search_zip` | `WEB_GREP_SEARCH_ZIP` | `true` | 交给 rg `--search-zip`。只支持 gzip、bzip2、xz、lz4、lzma、brotli、zstd，且 `PATH` 里要有对应解压程序。不支持 `.zip` 归档。缺解压程序时没有解压后的正文（常见是 0 命中；压缩字节里残留原文时也可能是一条脏行） |
 
 其余搜索参数（`max_results`、`timeout_ms`、`no_ignore` 等）见 `config.example.yaml`。`GET /api/tree` / `/api/file` 另有读接口限额：`read_max_concurrent`（默认 32）、`read_rate_limit`（默认 120 / `read_rate_window_ms` 默认 10s）。超限返回 HTTP 429 `BUSY`。搜索仍只用 `max_concurrent`。
@@ -85,7 +85,7 @@ Primary config is `config.yaml` (see `config.example.yaml`). Path: `-config`, el
 - Binding `0.0.0.0` without `token` **or** `public_host` fails at boot.
 - After login the SPA stores a **session** token with no expiry. Checking **Remember password** writes it to `localStorage` until logout or the user clears site data; otherwise `sessionStorage` (cleared when the tab closes). Requests send `Authorization: Bearer` / `X-Web-Grep-Token`. The password is never sent on search. Sessions live in process memory, so restarting the server still requires a new login.
 - Time range is **file mtime** (`mtimeAfter` from the browser), not a yaml key. Search history is in `localStorage`. Search count is a file next to `config.yaml` named `search-count`. The in-memory counter increments on every search; the file is flushed about every 2s and on SIGINT/SIGTERM. A crash before the next flush can lose recent increments.
-- 日志：默认 `log_level=info` 且未设 `WEB_GREP_DEV` 时，启动行 `listening` 与热加载行 `reloaded config` 只含 `rootLabel`，不含搜索根绝对路径；成功搜索的 info 行也不含查询全文。登录密码和会话令牌不进日志。`WEB_GREP_DEV` 为 `1`、`true` 或 `TRUE`（`pnpm dev` 设的是 `1`），或 `WEB_GREP_LOG_LEVEL=debug` 时，每次搜索有一条 `level=info` 的 `rg` 日志，含搜索根绝对路径和完整命令（含查询全文）。`rg` 报错（如非法正则）时，stderr 会原样进 `warn` / `error`，可能回显查询片段。`log_level=debug` 还可以含 `root path`、`search start` 等更多细节。
+- 日志：yaml 与 `WEB_GREP_LOG_LEVEL` 都没写 `log_level` 时，默认 `info`；若同时处于开发模式（`WEB_GREP_DEV` 为 `1`、`true` 或 `TRUE`，`pnpm dev` 设的是 `1`；或 yaml `dev: true`），生效级别改为 `debug`。显式配置了 `log_level` 则以显式值为准，包括显式的 `info`。启动行 `listening` 与热加载行 `reloaded config` 只含 `rootLabel`，不含搜索根绝对路径；成功搜索的 info 行也不含查询全文。登录密码和会话令牌不进任何级别的日志。`rg` 命令只在 `debug` 级别打印（`level` 为 `debug`），里面有搜索根绝对路径和完整命令（含查询全文）；默认 `info` 时即使开了 `WEB_GREP_DEV` 也不会打这条。`rg` 报错（如非法正则）时，`warn`（`rg stderr`）和 `error`（`search failed`）只记录 stderr 的第一行（最多 200 个字符）和总行数（`lines`）；完整 stderr 只在 `debug`。给客户端的 SSE `error.message` 仍是完整的 rg 报错。`log_level=debug` 还可以含 `root path`、`search start`（含查询）等更多细节。
 - `SIGHUP` 会按同一条 `config.yaml` 路径重新加载配置，并以原子快照替换（并发请求不会读到半更新的字段）。进行中的搜索会被中止，仍保持连接的客户端会收到 `done.cancelled=true`（`matchCount` / `fileCount` 是已经发出的部分结果，不能当作完整结果）。客户端自己先断开的那条连接收不到 `done`。监听地址/端口不会在热加载时重绑。
 
 ## Architecture

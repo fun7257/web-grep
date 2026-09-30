@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -332,7 +333,7 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		)
 		if listErr != nil {
 			if ctx.Err() == nil {
-				logx.Error("file list failed", map[string]any{"searchId": pre.SearchID, "err": listErr.Error()})
+				logEngineFailure("file list failed", pre.SearchID, "", listErr.Error(), cfg)
 				sendError(listErr.Error())
 				return
 			}
@@ -458,12 +459,34 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		return
 	}
 	if err != nil && !errors.Is(err, errStop) && !errors.Is(err, context.Canceled) {
-		logx.Error("search failed", map[string]any{"searchId": pre.SearchID, "code": "ENGINE", "err": err.Error()})
-		sendError(err.Error())
+		full := err.Error()
+		logEngineFailure("search failed", pre.SearchID, "ENGINE", full, cfg)
+		sendError(full)
 		return
 	}
 	sendDone(false, false, false, matchCount, len(files))
 	logx.Info("search done", map[string]any{"searchId": pre.SearchID, "elapsedMs": time.Since(started).Milliseconds(), "matchCount": matchCount})
+}
+
+// logEngineFailure records a one-line summary at error and the full text at
+// debug. rg repeats the pattern after the first stderr line; that echo must
+// not land in warn or error. full is what the client still receives.
+func logEngineFailure(msg, searchID, code, full string, cfg config.Config) {
+	label := cfg.RootLabel
+	if label == "" {
+		label = filepath.Base(cfg.RootReal)
+	}
+	head, lines := logx.ClipForLog(full, cfg.RootReal, label)
+	fields := map[string]any{
+		"searchId": searchID,
+		"err":      head,
+		"lines":    lines,
+	}
+	if code != "" {
+		fields["code"] = code
+	}
+	logx.Error(msg, fields)
+	logx.Debug(msg, map[string]any{"searchId": searchID, "err": full})
 }
 
 var errStop = errors.New("stop")

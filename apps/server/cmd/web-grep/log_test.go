@@ -4,11 +4,17 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"web-grep/internal/auth"
 	"web-grep/internal/config"
+	"web-grep/internal/httpapi"
 	"web-grep/internal/logx"
+	"web-grep/internal/ratelimit"
+	"web-grep/internal/search"
 )
 
 func TestInfoLogsOmitSearchRoot(t *testing.T) {
@@ -105,6 +111,93 @@ func TestInfoLogsOmitSearchRoot(t *testing.T) {
 	}
 	if !sawDebugRoot {
 		t.Fatalf("debug lines did not keep the search root:\n%s", debugText)
+	}
+}
+
+func TestTokenAndPasswordStayOutOfLogs(t *testing.T) {
+	const (
+		password = "fx7-password-secret"
+		wrong    = "fx7-wrong-password"
+		bearer   = "fx7-bearer-token-secret"
+	)
+	root := t.TempDir()
+	cfg := config.Config{
+		Host:      "127.0.0.1",
+		Port:      8787,
+		RootReal:  root,
+		RootLabel: "fixture-root",
+		TokenHash: config.HashPassword(password),
+		LogLevel:  "debug",
+	}
+	srv := &httpapi.Server{
+		Search:   search.New(cfg, nil, "none", nil),
+		Engine:   "none",
+		Sessions: auth.NewSessions(),
+		Reads:    ratelimit.New(),
+	}
+	srv.SetConfig(cfg)
+
+	var buf bytes.Buffer
+	logx.SetOutput(&buf)
+	logx.SetLevel("debug")
+	t.Cleanup(func() {
+		logx.SetOutput(nil)
+		logx.SetLevel("info")
+	})
+
+	h := srv.Handler()
+	postLogin := func(pass string) *httptest.ResponseRecorder {
+		t.Helper()
+		body, err := json.Marshal(map[string]string{"password": pass})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8787/api/auth/login", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	bad := postLogin(wrong)
+	if bad.Code != http.StatusUnauthorized {
+		t.Fatalf("wrong password: %d %s", bad.Code, bad.Body.String())
+	}
+	ok := postLogin(password)
+	if ok.Code != http.StatusOK {
+		t.Fatalf("login: %d %s", ok.Code, ok.Body.String())
+	}
+	var sess struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(ok.Body.Bytes(), &sess); err != nil {
+		t.Fatal(err)
+	}
+	if sess.Token == "" {
+		t.Fatal("empty session token")
+	}
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8787/api/meta", nil)
+	req.Header.Set("Authorization", "Bearer "+bearer)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("bad bearer: %d %s", rec.Code, rec.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodGet, "http://127.0.0.1:8787/api/meta", nil)
+	req.Header.Set("Authorization", "Bearer "+sess.Token)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authed meta: %d %s", rec.Code, rec.Body.String())
+	}
+
+	text := buf.String()
+	if !strings.Contains(text, "auth fail") {
+		t.Fatalf("expected an auth failure log:\n%s", text)
+	}
+	for _, secret := range []string{password, wrong, bearer, sess.Token, cfg.TokenHash} {
+		if strings.Contains(text, secret) {
+			t.Fatalf("log contains %q:\n%s", secret, text)
+		}
 	}
 }
 

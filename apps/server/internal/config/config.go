@@ -175,9 +175,17 @@ func Load(explicit string) (Config, error) {
 	if readWindow < 100 || readWindow > 3_600_000 {
 		return Config{}, fmt.Errorf("invalid read_rate_window_ms: %d", readWindow)
 	}
+	// An empty log_level means neither the yaml key nor WEB_GREP_LOG_LEVEL
+	// was set (applyEnv already folded the env into raw.LogLevel). Dev mode
+	// then defaults to debug so `pnpm dev` still shows the rg command, which
+	// is emitted only at debug. An explicit level, including info, is kept.
+	dev := boolOr(raw.Dev, false)
 	level := strings.TrimSpace(raw.LogLevel)
 	if level == "" {
 		level = "info"
+		if dev {
+			level = "debug"
+		}
 	}
 	switch level {
 	case "debug", "info", "warn", "error":
@@ -220,7 +228,7 @@ func Load(explicit string) (Config, error) {
 		SearchZip:         boolOr(raw.SearchZip, true),
 		RgPath:            rgPath,
 		LogLevel:          level,
-		Dev:               boolOr(raw.Dev, false),
+		Dev:               dev,
 		WebDist:           strings.TrimSpace(raw.WebDist),
 		PublicPath:        publicPath,
 	}

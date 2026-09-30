@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -124,12 +125,14 @@ func (e Engine) run(ctx context.Context, dir string, argv []string, filters [][]
 	for i, cmd := range cmds {
 		cmd.Stderr = &limitWriter{w: &stderrs[i], n: stderrLimit}
 	}
-	if logCmd() {
+	// The command includes the query and the absolute root. Build it only when
+	// debug is on, and record it at debug — never at info, even in dev mode.
+	if logx.DebugEnabled() {
 		cmd := formatCmd(e.Bin, argv)
 		for _, filter := range filters {
 			cmd += " | " + formatCmd(e.Bin, filter)
 		}
-		logx.Info("rg", map[string]any{"cwd": dir, "cmd": cmd})
+		logx.Debug("rg", map[string]any{"cwd": dir, "cmd": cmd})
 	}
 	for i, cmd := range cmds {
 		if err := cmd.Start(); err != nil {
@@ -220,7 +223,12 @@ func (e Engine) run(ctx context.Context, dir string, argv []string, filters [][]
 			}
 		}
 		if msg != "" {
-			logx.Warn("rg stderr", map[string]any{"stderr": msg})
+			// rg repeats the pattern on the lines after the first. Keep that
+			// out of warn; the returned error is still the full stderr so the
+			// client SSE message does not change.
+			head, n := logx.ClipForLog(msg, dir, filepath.Base(dir))
+			logx.Warn("rg stderr", map[string]any{"stderr": head, "lines": n})
+			logx.Debug("rg stderr", map[string]any{"stderr": msg})
 			return files, fmt.Errorf("%s", msg)
 		}
 		return files, waitErr
@@ -288,14 +296,6 @@ func benignRgExit(err error) bool {
 	default:
 		return false
 	}
-}
-
-func logCmd() bool {
-	switch os.Getenv("WEB_GREP_DEV") {
-	case "1", "true", "TRUE":
-		return true
-	}
-	return os.Getenv("WEB_GREP_LOG_LEVEL") == "debug"
 }
 
 func formatCmd(bin string, argv []string) string {

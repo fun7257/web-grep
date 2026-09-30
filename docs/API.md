@@ -270,10 +270,11 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 3. 先 preflight 再 SSE；SSE 开始后不要再发普通 JSON 错误体。
 4. 文件接口按行扫描切片，不要 `ReadAll` 整文件。
 5. 日志里的路径、查询和秘密：
-   - 默认 `log_level=info`，且没有设置 `WEB_GREP_DEV`：启动行 `listening` 和热加载行 `reloaded config` 只带 `rootLabel`，不带搜索根的绝对路径。成功搜索的 info 行（`search done`）也不写查询全文。
+   - 默认 `log_level=info`。启动行 `listening` 和热加载行 `reloaded config` 只带 `rootLabel`，不带搜索根的绝对路径。成功搜索的 info 行（`search done`）也不写查询全文。
+   - yaml 与环境变量 `WEB_GREP_LOG_LEVEL` 都没有设置 `log_level` 时：普通启动仍是 `info`；开发模式改为 `debug`。开发模式指 `WEB_GREP_DEV` 为 `1`、`true` 或 `TRUE`（`pnpm dev` 设的是 `1`），或 yaml 里 `dev: true`。显式设置了 `log_level`（包括 `info`）则以显式值为准。
    - 登录密码和会话令牌不进任何级别的日志。
-   - `WEB_GREP_DEV` 为 `1`、`true` 或 `TRUE`（`pnpm dev` 设的是 `1`），或者 `WEB_GREP_LOG_LEVEL=debug`：每次搜索额外打一条 **info** 级 `rg` 日志。`cwd` 是搜索根绝对路径，`cmd` 是完整命令，里面有查询全文。这是开发排障行为；`log_level=debug` 时这条仍然是 `info`，不是 `debug`。
-   - `rg` 失败（例如非法正则）时，stderr 原样进 `warn`（`rg stderr`）和 `error`（`search failed`），可能回显查询片段。
+   - `rg` 命令只在 `debug` 级别打印，日志行的 `level` 是 `debug`。`cwd` 是搜索根绝对路径，`cmd` 是完整命令，里面有查询全文。默认 `info` 时，即使 `WEB_GREP_DEV=1`，也不会打这条。
+   - `rg` 失败（例如非法正则）时，`warn`（`rg stderr`）和 `error`（`search failed`）只记录 stderr 的第一行（最多 200 个字符）和总行数（`lines`）。回显 pattern 的后续行不进 info 及以上。完整 stderr 只在 `debug` 级别记录。给客户端的 SSE `error` 事件的 `message` 仍是完整的 rg 报错（可含 `regex parse error` 和查询）。
    - `log_level=debug` 还可以有更多细节，例如启动时的 `root path`、搜索开始时的 `search start`（含查询）。
 
 ---
