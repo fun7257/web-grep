@@ -44,14 +44,14 @@ HTTP JSON（SSE 尚未开始时）：
 
 | code | HTTP | 含义 |
 | --- | --- | --- |
-| `INVALID_QUERY` | 400 | 缺查询、超长、JSON 非法 |
+| `INVALID_QUERY` | 400 | 缺查询、超长、JSON 非法，或 `POST /api/search` 的 `Content-Type` 不是 `application/json` |
 | `INVALID_PATH` | 400/404 | 路径越界、不存在 |
 | `INVALID_GLOB` | 400 | glob 含 `!`、`--`、绝对路径、`..` |
 | `DENIED` | 403 | 命中密钥/黑名单（如 `.env`） |
 | `BUSY` | 429 | 超过上限。搜索：并发默认 8 路（`max_concurrent` / `WEB_GREP_MAX_CONCURRENT`）。`GET /api/tree`、`GET /api/file`：全局同时进行默认 32 路（`read_max_concurrent` / `WEB_GREP_READ_MAX_CONCURRENT`），并且每个客户端（有效会话令牌，否则 TCP 对端 IP）在窗口内默认 120 次（`read_rate_limit` / `WEB_GREP_READ_RATE_LIMIT`，窗口 `read_rate_window_ms` 默认 10000）。JSON `{ "code": "BUSY", "message": "…" }`，在读文件 / 列目录之前返回。登录没有这项限制。 |
 | `ENGINE` | 503（开流前）或 SSE `error` | 开流前的 503：没有可用的 `rg`。搜索途中 `rg` 失败（如非法正则）：以 SSE `error` 事件终止，message 是 `rg` 的错误原文。**只有开流前的 `ENGINE`（或 `GET /api/meta` 的 `engine:"none"`）表示引擎不存在**；流里的 `ENGINE` 只是这一次搜索失败 |
 | `UNAUTHORIZED` | 401 | 未登录或会话无效 |
-| `INVALID_AUTH` | 400/401 | 密码不合法或错误 |
+| `INVALID_AUTH` | 400/401 | 密码不合法或错误。已启用登录时，请求体不是 JSON，或 `Content-Type` 不是 `application/json`，也是 400 `INVALID_AUTH`。未启用登录时不走到这个码：任何 `POST /api/auth/login` 都在检查 `Content-Type` 之前返回 `401 UNAUTHORIZED`（`auth is not enabled`） |
 | `FORBIDDEN_HOST` | 403 | Host/Origin 不在允许名单 |
 | `INTERNAL` | 500 | 未分类失败 |
 
@@ -87,6 +87,10 @@ HTTP JSON（SSE 尚未开始时）：
 
 Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
+未设置登录密码时，本接口在检查 `Content-Type` 和请求体之前就返回 `401 UNAUTHORIZED`（message 为 `auth is not enabled`），不签发令牌。下面的 `Content-Type` 规则只在已启用登录时生效。
+
+已启用登录时，`Content-Type` 必须是 `application/json`。可以附带参数（例如 `charset=utf-8`），判定只看媒体类型。缺失该头，或媒体类型不是 `application/json`（如 `text/plain`、`application/x-www-form-urlencoded`），与非 JSON 请求体相同：`400 INVALID_AUTH`（message 为 `invalid request`），不签发令牌。
+
 ### `POST /api/auth/logout`（公开）
 
 撤销请求所带的会话令牌，响应 `{ "ok": true }`。**请求必须带着要撤销的令牌**（`Authorization: Bearer` 或 `X-Web-Grep-Token`）：不带令牌也返回 200 `{ "ok": true }`，但什么都不会撤销，令牌仍然有效。前端要先发退出请求，再清本地令牌。
@@ -121,7 +125,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 ### `POST /api/search`（设置了密码时需会话）
 
-**Request** `SearchRequestSchema`（JSON body）：
+**Request** `SearchRequestSchema`（JSON body）。`Content-Type` 必须是 `application/json`（可以附带 `charset`）；否则见下方请求上限后面的说明。
 
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
@@ -149,6 +153,8 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 | 请求体 | 约 1 MiB |
 | `maxResults` | 正整数；配置了 `max_results_hard`（非 0）时不能超过它 |
 
+`Content-Type` 同样在开流之前检查，不占用搜索槽：必须是 `application/json`。可以附带参数（例如 `charset=utf-8`），判定只看媒体类型。缺失该头，或媒体类型不是 `application/json`（如 `text/plain`、`application/x-www-form-urlencoded`），返回 `400 INVALID_QUERY`，响应不是 `text/event-stream`。
+
 **注意口径不一致**：服务端按 UTF-8 **字节数**判断长度（Go `len`），而 `packages/shared` 的 Zod schema 的 `.max(8192)` 按 UTF-16 **码元数**判断。纯英文时两者相同；含中文时服务端更早拒绝，例如 2731 个汉字（8193 字节）能通过前端校验，却会被服务端以 `400 INVALID_QUERY` 拒掉。这是已知的不一致，尚未统一。
 
 **Preflight（非 SSE）**：校验失败直接 HTTP JSON。空查询、非法路径、BUSY、ENGINE 都在开流之前返回。
@@ -160,7 +166,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 | `meta` | `{ searchId, engine, searchCount? }`（`engine`：`rg` \| `none`；`searchCount` 是本实例累计搜索次数，可选） | 恰好 1，最先 |
 | `progress` | `{ files, matches }` | 0–N，搜索过程中，最多每 200ms 一条。搜得很快时可能一条都没有 |
 | `hit` | `{ path, line, text, matches[{start,end}] }`。`text` 最长 65,536 **字节**（按 UTF-8 边界截断，不会切开一个字符；名字里带 `Chars` 的 `lineTextMaxChars` 常量实际按字节算），更长的行被截断，`matches` 也随之夹到截断后的范围内 | 0–N |
-| `done` | `{ elapsedMs, matchCount, fileCount, truncated, timedOut, cancelled }` | 与 `error` 互斥，恰好一个终态 |
+| `done` | `{ elapsedMs, matchCount, fileCount, truncated, timedOut, cancelled }` | 与 `error` 互斥。连接还在时恰好一个终态；客户端自己断开则这条连接上看不到终态，见下方边界表 |
 | `error` | `{ code, message }` | 引擎失败（message 可含 rg stderr）；与 `done` 互斥 |
 
 注释行 `: ping` 为心跳，客户端必须忽略。`matches.start/end` 是 **UTF-16 码元**（给 JS `string` 切片），不是字节。
@@ -170,10 +176,13 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 | 情况 | 行为 |
 | --- | --- |
 | 有路径读不了（没权限、符号链接环等） | rg 此时退出码为 2，但其余文件都已搜完。只要 rg 的 stderr 里全是这类「某个路径读不了」的错误，就照常以 `done` 收尾，服务端记一条 warn。不会再因为一个读不了的文件让整次搜索变成 `error`。正则错误、参数错误等其它 rg 失败仍以 `error`（`ENGINE`）收尾 |
-| 符号链接 | `follow_symlinks` 开着（默认）时，rg 会跟进符号链接。服务端对每条命中解析真实路径：落在根外的命中**丢弃**，不计入 `matchCount`、`fileCount` 和 `maxResults`，与 `GET /api/file` 对同一路径返回 `INVALID_PATH` 保持一致。指向根内的链接照常可搜，同一文件经链接与原路径都会命中时会各出现一次 |
+| 符号链接 | `follow_symlinks` 开着（默认）时，rg 会跟进符号链接。服务端对每条命中解析真实路径。落在根外的命中**丢弃**，不计入 `matchCount`、`fileCount` 和 `maxResults`，与 `GET /api/file` 对同一路径返回 `INVALID_PATH` 保持一致。目标仍在根内的可以搜到；经根内符号链接到达的命中若与原路径是同一真实文件的同一行，只保留先到达的一条（按真实文件 + 行号去重）。文件链接和目录链接都这样。`matchCount` / `fileCount` 只计实际发出的命中 |
+| 客户端自己断开 | 服务端中止这次搜索，日志为 `search abort`。连接已经断了，终态 `done` 不会再写出，所以这条连接上看不到 `done` |
+| 服务端取消仍连着的搜索（既不是超时，也不是结果被截断） | 典型是收到 `SIGHUP` 热加载配置。终态仍是 `done`，且 `cancelled=true`（`timedOut` 与 `truncated` 为 false）。`matchCount` / `fileCount` 是已经发出的命中数，属于部分结果，客户端不能当作完整结果。超时仍是 `timedOut=true`，截断仍是 `truncated=true` |
+| `search_zip`（配置，默认 `true`） | 传给 rg `--search-zip`。只搜 ripgrep 能解压的压缩流：gzip（`.gz`）、bzip2（`.bz2`）、xz（`.xz`）、lz4（`.lz4`）、lzma（`.lzma`）、brotli（`.br`）、zstd（`.zst`）。**不支持 `.zip` 归档**（搜 `.zip` 里的内容没有命中是预期）。解压程序要在进程的 `PATH` 里（rg 会去调 `gzip`、`brotli`、`lz4` 等）。找不到时 rg 按原字节读：文件里有 NUL 时当成二进制，API 是 0 命中；原文残留在压缩字节里、又没被当成二进制时，可能扫到一条脏行，那不是解压后的正文。这不是请求字段，见 `config.example.yaml` |
 | `filterTerms` 某项 `regex:true` 但正则非法 | 以 `error`（`ENGINE`，message 含 rg 的 `regex parse error`）终止，不会挂起 |
 
-取消：关掉 fetch（AbortController）。超时：`done.timedOut=true`，不是 `error`。
+仍保持连接、由服务端中止的搜索（`SIGHUP`）：`done.cancelled=true`，不是 `error`。客户端自己断开时，该连接收不到这条 `done`。超时：`done.timedOut=true`，不是 `error`。截断：`done.truncated=true`。
 
 ### `GET /api/tree`（设置了密码时需会话）
 
@@ -186,7 +195,11 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 | `include` | 可选，可重复。用户 glob；只保留匹配的文件（以及下面仍有匹配文件的目录）。当前 UI 不发 |
 | `exclude` | 可选，可重复。用户 glob；去掉匹配的文件。当前 UI 排除框发这个参数 |
 
-`include` / `exclude` 用与搜索相同的用户 glob 清洗（含 `!`、`--`、绝对路径、`..` 的项会被丢掉，目录树接口不因此 400）。可与 `mtimeAfter` 同时用。逗号 / 分号 / 空白也会拆成多项。
+`include` / `exclude` 用与搜索相同的用户 glob 清洗（含 `!`、`--`、绝对路径、`..` 的项会被丢掉，目录树接口不因此 400）。可与 `mtimeAfter` 同时用。同一个参数值里的逗号、分号、空白会拆成多项。
+
+分号在 URL 里必须写成 `%3B`。Go 标准库解析查询串时，把裸的 `;` 当成非法分隔符，丢掉**含有它的那一项**（同一条查询串里的其它参数还在）。因此 `?exclude=README.md;*.log` 等于没有 `exclude`，而 `?exclude=README.md%3B*.log` 会拆成两项并都生效。逗号和空白不受这条限制（`?exclude=*.log,README.md`、`?exclude=*.log%20README.md` 都会拆开）。前端用 `URLSearchParams` 组查询串，会把 `;` 编成 `%3B`。
+
+没有通配符、也不含 `/` 的项是相对根的精确路径，不会自动变成 `目录/**`。`exclude=docs` 去不掉 `docs/` 下面的文件，目录项也还在；`exclude=README.md%3Bdocs` 只会去掉 `README.md`。要按文件名排除，用 `*.log` 这种带通配符的写法。
 
 响应 `TreeListingSchema`：
 
@@ -228,7 +241,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 - `eof=true`：这是文件末尾，不要再请求 `from=hi+1`。
 - `binary=true`：`lines` 为空，不要当文本渲染。
-- 前端虚拟列表：可视区靠近已加载边界时再请求相邻切片；**禁止**因新切片把 scrollTop 重置到第一行。
+- 前端虚拟列表：可视区靠近已加载边界时再请求相邻切片。向上或向下补窗口时，每次只发一个请求，并保持视口锚点；**禁止**把 `scrollTop` 重置到第一行。见 §4 第 5 点。
 - 超过读接口上限时 HTTP 429 `BUSY`（与 tree 共用同一套限额）。`preview_chunk` / 切片语义不变。
 
 ### 反向代理前缀（`public_path`）
@@ -243,7 +256,7 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 2. 收响应再 `safeParse`；失败当 `INTERNAL`。
 3. SSE 用缓冲拆帧（TCP 可把 `data:` 切断）；忽略 `:` 注释。
 4. 换查询要 abort 上一轮搜索和预览。
-5. 预览切片合并后保持用户当前滚动位置；只在「换文件 / 换命中行」时 `scrollTo` 一次。
+5. 读文件窗口向上或向下补窗口时，每次靠近边界只发一个 `GET /api/file`，并且必须保持视口锚点：同一行仍留在视野里（行号前后相差不超过 1），不要用 `scrollTop` 重置到顶或第一行。只在「换文件 / 换命中行」时 `scrollTo` 一次。
 6. 退出登录：先带着令牌调用 `POST /api/auth/logout`，再清本地令牌。先清再发，服务端会话不会被撤销。
 7. 只有开流前的 `ENGINE`（或 `meta.engine` 为 `none`）才禁用搜索。流里途中的 `ENGINE`（如非法正则）只是这一次搜索失败，下一次仍要允许。
 
@@ -255,7 +268,12 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 2. 搜索 `cwd = root`（`config.yaml`），命中路径转相对路径后再发出。`mtimeAfter` 时不要把整个 root 交给 rg，只搜筛过的文件列表。
 3. 先 preflight 再 SSE；SSE 开始后不要再发普通 JSON 错误体。
 4. 文件接口按行扫描切片，不要 `ReadAll` 整文件。
-5. 不把绝对路径、token、查询全文（非 debug）打进 info 日志。
+5. 日志里的路径、查询和秘密：
+   - 默认 `log_level=info`，且没有设置 `WEB_GREP_DEV`：启动行 `listening` 和热加载行 `reloaded config` 只带 `rootLabel`，不带搜索根的绝对路径。成功搜索的 info 行（`search done`）也不写查询全文。
+   - 登录密码和会话令牌不进任何级别的日志。
+   - `WEB_GREP_DEV` 为 `1`、`true` 或 `TRUE`（`pnpm dev` 设的是 `1`），或者 `WEB_GREP_LOG_LEVEL=debug`：每次搜索额外打一条 **info** 级 `rg` 日志。`cwd` 是搜索根绝对路径，`cmd` 是完整命令，里面有查询全文。这是开发排障行为；`log_level=debug` 时这条仍然是 `info`，不是 `debug`。
+   - `rg` 失败（例如非法正则）时，stderr 原样进 `warn`（`rg stderr`）和 `error`（`search failed`），可能回显查询片段。
+   - `log_level=debug` 还可以有更多细节，例如启动时的 `root path`、搜索开始时的 `search start`（含查询）。
 
 ---
 
