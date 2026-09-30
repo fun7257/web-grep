@@ -22,52 +22,36 @@ import { useHotkeys } from "./hooks/useHotkeys.ts";
 import { LocaleProvider, useLocale } from "./hooks/useLocale.ts";
 import { useResizablePanes } from "./hooks/useResizablePanes.ts";
 import { useSearch } from "./hooks/useSearch.ts";
+import { useSearchSession } from "./hooks/useSearchSession.ts";
+import { useSearchTrail } from "./hooks/useSearchTrail.ts";
+import { useShareLink } from "./hooks/useShareLink.ts";
 import { copyText } from "./copyText.ts";
 import { parseGlobs } from "./globs.ts";
 import type { HlTermInput } from "./highlight.ts";
 import { resolvePreviewChunk } from "./previewChunk.ts";
 import { useAuth } from "./hooks/useAuth.ts";
 import { useBatchedHits } from "./hooks/useBatchedHits.ts";
+import type { SearchNavEntry } from "./searchNav.ts";
 import {
   buildShareUrl,
   captureShareState,
-  parseShareSearch,
-  shareUrlSearch,
+  type ShareState,
 } from "./searchShare.ts";
+import { buildRgShareCommand } from "./shareCommand.ts";
+import { newPart } from "./searchStack.ts";
 import {
-  picksToSearchGlobs,
+  loadTimeRange,
+  saveTimeRange,
+  type TimeRange,
+} from "./timeRange.ts";
+import {
   prunePicksByExclude,
   removePick,
   type TreePick,
   togglePick,
 } from "./treePicks.ts";
-import {
-  newPart,
-  type QueryPart,
-  type SearchStack,
-  toRequest,
-  toRgShareCommand,
-} from "./searchStack.ts";
-import {
-  loadSearchHistory,
-  pushSearchHistory,
-  type SearchHistoryItem,
-} from "./searchHistory.ts";
-import { pushSearchNav, type SearchNavEntry } from "./searchNav.ts";
-import {
-  loadTimeRange,
-  mtimeAfterMs,
-  saveTimeRange,
-  type TimeRange,
-} from "./timeRange.ts";
 
 const EMPTY_HL_TERMS: HlTermInput[] = [];
-
-function partsFromFields(values: QueryPart[]): QueryPart[] {
-  return values
-    .map((part) => ({ ...part, value: part.value.trim() }))
-    .filter((part) => part.value !== "");
-}
 
 function AppShell() {
   const { t } = useLocale();
@@ -76,8 +60,6 @@ function AppShell() {
   const queryRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLElement>(null);
-  const [parts, setParts] = useState<QueryPart[]>([]);
-  const [fields, setFields] = useState<QueryPart[]>(() => [newPart("")]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [treeOpen, toggleTree] = useTreeOpen();
   const [picks, setPicks] = useState<TreePick[]>([]);
@@ -85,10 +67,6 @@ function AppShell() {
 
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [infoCue, setInfoCue] = useState<string | null>(null);
-  const [sharePending, setSharePending] = useState<{
-    path: string;
-    line: number;
-  } | null>(null);
   const infoCueTimer = useRef(0);
   const [helpOpen, setHelpOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -96,15 +74,6 @@ function AppShell() {
     null,
   );
   const [timeRange, setTimeRange] = useState<TimeRange | null>(loadTimeRange);
-  const [searchHistory, setSearchHistory] = useState(loadSearchHistory);
-  const [nav, setNav] = useState<{ stack: SearchNavEntry[]; index: number }>({
-    stack: [],
-    index: -1,
-  });
-  const skipNavRef = useRef(false);
-  const stackRef = useRef<SearchStack | null>(null);
-  const bootstrapped = useRef(false);
-  const pendingSelect = useRef<{ path: string; line: number } | null>(null);
   const [hitsHeadActions, setHitsHeadActions] = useState<HTMLDivElement | null>(
     null,
   );
@@ -121,82 +90,12 @@ function AppShell() {
       ? 0
       : Math.min(selectedIndex, search.hits.length - 1);
   const selectedHit = search.hits[selectedIndexClamped] ?? null;
-  const lastStack = stackRef.current;
-  const hlTerms = useMemo(
-    () =>
-      lastStack?.parts.map((part) => ({
-        value: part.value,
-        caseSensitive: part.caseSensitive,
-        wordMatch: part.wordMatch,
-        regex: part.regex,
-      })) ?? EMPTY_HL_TERMS,
-    [lastStack],
-  );
-  const hlOpts = useMemo(
-    () => ({
-      caseSensitive: lastStack?.parts[0]?.caseSensitive ?? false,
-      wordMatch: lastStack?.parts[0]?.wordMatch ?? false,
-      regex: lastStack?.parts[0]?.regex ?? false,
-    }),
-    [lastStack],
-  );
-  const rootAbs = token.meta?.root;
-  const shareState = useMemo(
-    () =>
-      captureShareState({
-        fields,
-        excludeGlobs,
-        picks,
-        timeRange,
-        ...(lastStack !== null ? { fallbackParts: lastStack.parts } : {}),
-        ...(selectedHit !== null
-          ? { hitPath: selectedHit.path, hitLine: selectedHit.line }
-          : {}),
-      }),
-    [excludeGlobs, fields, lastStack, picks, selectedHit, timeRange],
-  );
-  const webUrl =
-    shareState !== null && selectedHit !== null
-      ? buildShareUrl(window.location.href, shareState)
-      : null;
-  let rgCommand: string | null = null;
-  if (
-    selectedHit !== null &&
-    shareState !== null &&
-    rootAbs !== undefined &&
-    rootAbs !== ""
-  ) {
-    const query = shareState.parts[0] ?? "";
-    if (query !== "") {
-      const head = shareState.mods?.[0] ?? {
-        caseSensitive: shareState.caseSensitive,
-        wordMatch: shareState.wordMatch,
-        regex: shareState.regex,
-      };
-      rgCommand = toRgShareCommand({
-        query,
-        regex: head.regex,
-        caseSensitive: head.caseSensitive,
-        wordMatch: head.wordMatch,
-        hidden: lastStack?.hidden ?? true,
-        rootAbs,
-        relPaths: [selectedHit.path],
-        filterTerms: shareState.parts.slice(1).map((term, index) => {
-          const mod = shareState.mods?.[index + 1];
-          return {
-            query: term,
-            regex: mod?.regex ?? false,
-            caseSensitive: mod?.caseSensitive ?? false,
-            wordMatch: mod?.wordMatch ?? false,
-          };
-        }),
-        line: selectedHit.line,
-      });
-    }
-  }
 
   const selectHit = useCallback((index: number) => {
     setSelectedIndex(index);
+  }, []);
+  const resetSelection = useCallback(() => {
+    setSelectedIndex(0);
   }, []);
 
   const showInfoCue = useCallback((message: string) => {
@@ -218,109 +117,123 @@ function AppShell() {
   const searchLocked = token.hostForbidden || engineDown;
   const authOpen = token.promptOpen && !token.hostForbidden;
 
-  const searchWithParts = useCallback(
-    (
-      nextParts: QueryPart[],
-      extraInclude: string[] = [],
-      nextTime: TimeRange | null = timeRange,
-      nextPicks: TreePick[] = picks,
-      nextExcludeRaw: string = excludeGlobs,
-    ) => {
-      const ready = partsFromFields(nextParts);
-      if (ready.length === 0) {
-        return;
-      }
-      const globs = picksToSearchGlobs(
-        nextPicks,
-        extraInclude,
-        parseGlobs(nextExcludeRaw),
-      );
-      if (globs.blocked) {
-        showInfoCue(t("pickTooLong"));
-        return;
-      }
-      if (globs.omitted.length > 0) {
-        showInfoCue(t("pickTooLongSkipped", { n: globs.omitted.length }));
-      }
-      const head = ready[0];
+  const trail = useSearchTrail();
+  const session = useSearchSession({
+    timeRange,
+    picks,
+    excludeGlobs,
+    runSearch,
+    record: trail.record,
+    showInfoCue,
+    onStart: resetSelection,
+    searchLocked,
+  });
+  const {
+    fields,
+    setFields,
+    lastStack,
+    setLastStack,
+    searchWithParts,
+    submit,
+    searchSelected,
+    resetDraft,
+  } = session;
 
-      const stack: SearchStack = {
-        parts: ready,
-        globInclude: globs.globInclude,
-        globIntersect: [],
-        globExclude: globs.globExclude,
-        path: "",
-        caseSensitive: head?.caseSensitive ?? false,
-        wordMatch: head?.wordMatch ?? false,
-        regex: head?.regex ?? false,
-        hidden: true,
-      };
-
-      stackRef.current = stack;
-      setParts(ready);
-      setFields(ready);
-      setSelectedIndex(0);
-      const navEntry: SearchNavEntry = {
-        parts: ready.map((part) => ({
-          value: part.value,
-          caseSensitive: part.caseSensitive,
-          wordMatch: part.wordMatch,
-          regex: part.regex,
-        })),
-        timeRange: nextTime,
-      };
-      if (!skipNavRef.current) {
-        setNav((cur) => pushSearchNav(cur.stack, cur.index, navEntry));
-      }
-      skipNavRef.current = false;
-      setSearchHistory((prev) => pushSearchHistory(prev, navEntry));
-      runSearch(
-        toRequest(
-          stack,
-          [],
-          nextTime !== null ? mtimeAfterMs(nextTime) : undefined,
-        ),
-      );
-    },
-    [excludeGlobs, picks, runSearch, showInfoCue, t, timeRange],
+  const hlTerms = useMemo(
+    () =>
+      lastStack?.parts.map((part) => ({
+        value: part.value,
+        caseSensitive: part.caseSensitive,
+        wordMatch: part.wordMatch,
+        regex: part.regex,
+      })) ?? EMPTY_HL_TERMS,
+    [lastStack],
+  );
+  const hlOpts = useMemo(
+    () => ({
+      caseSensitive: lastStack?.parts[0]?.caseSensitive ?? false,
+      wordMatch: lastStack?.parts[0]?.wordMatch ?? false,
+      regex: lastStack?.parts[0]?.regex ?? false,
+    }),
+    [lastStack],
   );
 
-  const submit = useCallback(() => {
-    if (searchLocked) {
-      return;
-    }
-    const parsed = partsFromFields(fields);
-    const fallback = stackRef.current?.parts ?? parts;
-    searchWithParts(parsed.length > 0 ? parsed : fallback);
-  }, [fields, parts, searchLocked, searchWithParts]);
+  const shareState = useMemo(
+    () =>
+      captureShareState({
+        fields,
+        excludeGlobs,
+        picks,
+        timeRange,
+        ...(lastStack !== null ? { fallbackParts: lastStack.parts } : {}),
+        ...(selectedHit !== null
+          ? { hitPath: selectedHit.path, hitLine: selectedHit.line }
+          : {}),
+      }),
+    [excludeGlobs, fields, lastStack, picks, selectedHit, timeRange],
+  );
+  const webUrl =
+    shareState !== null && selectedHit !== null
+      ? buildShareUrl(window.location.href, shareState)
+      : null;
+  const rgCommand =
+    shareState !== null && selectedHit !== null
+      ? buildRgShareCommand({
+          state: shareState,
+          hit: selectedHit,
+          rootAbs: token.meta?.root,
+          hidden: lastStack?.hidden ?? true,
+        })
+      : null;
 
-  const searchSelected = useCallback(
-    (text: string) => {
-      if (searchLocked) {
-        return;
+  const restoreShare = useCallback(
+    (parsed: ShareState) => {
+      setExcludeGlobs(parsed.excludeGlobs ?? "");
+      setPicks(parsed.picks ?? []);
+      showInfoCue(t("shareRestored"));
+      if (parsed.timeRange !== undefined) {
+        setTimeRange(parsed.timeRange);
+        saveTimeRange(parsed.timeRange);
+      } else {
+        setTimeRange(null);
       }
-      const current = fields[0];
-      searchWithParts([
-        newPart(text, {
-          caseSensitive: current?.caseSensitive ?? false,
-          wordMatch: current?.wordMatch ?? false,
-          regex: current?.regex ?? false,
-        }),
-      ]);
+      const nextFields = parsed.parts.map((value, index) =>
+        newPart(value, parsed.mods?.[index]),
+      );
+      setFields(nextFields.length > 0 ? nextFields : [newPart("")]);
     },
-    [fields, searchLocked, searchWithParts],
+    [setFields, showInfoCue, t],
+  );
+  const { sharePending, dropPendingSelect } = useShareLink({
+    ready: !token.hostForbidden && !token.promptOpen && token.meta !== null,
+    onRestore: restoreShare,
+    shareState,
+    hits: search.hits,
+    status: search.status,
+    onSelectIndex: setSelectedIndex,
+  });
+
+  /** Put a nav or history entry back into the scope and search it again. */
+  const replayEntry = useCallback(
+    (entry: SearchNavEntry) => {
+      setTimeRange(entry.timeRange);
+      saveTimeRange(entry.timeRange);
+      searchWithParts(
+        entry.parts.map((part) => newPart(part.value, part)),
+        [],
+        entry.timeRange,
+      );
+    },
+    [searchWithParts],
   );
 
   const clearAll = useCallback(() => {
     resetSearch();
-    stackRef.current = null;
-    pendingSelect.current = null;
-    setSharePending(null);
+    resetDraft();
+    dropPendingSelect();
     setInfoCue(null);
     setShareOpen(false);
     setContextTarget(null);
-    setParts([]);
-    setFields([newPart("")]);
     setSelectedIndex(0);
     window.history.replaceState(
       window.history.state,
@@ -328,77 +241,7 @@ function AppShell() {
       window.location.pathname,
     );
     queryRef.current?.focus();
-  }, [resetSearch]);
-
-  useEffect(() => {
-    if (bootstrapped.current) {
-      return;
-    }
-    if (token.hostForbidden || token.promptOpen || token.meta === null) {
-      return;
-    }
-    bootstrapped.current = true;
-    const parsed = parseShareSearch(window.location.search);
-    if (parsed === null) {
-      return;
-    }
-    const nextExclude = parsed.excludeGlobs ?? "";
-    const nextPicks = parsed.picks ?? [];
-    setExcludeGlobs(nextExclude);
-    setPicks(nextPicks);
-    showInfoCue(t("shareRestored"));
-    if (parsed.path !== undefined && parsed.line !== undefined) {
-      pendingSelect.current = { path: parsed.path, line: parsed.line };
-    }
-    if (parsed.timeRange !== undefined) {
-      setTimeRange(parsed.timeRange);
-      saveTimeRange(parsed.timeRange);
-    } else {
-      setTimeRange(null);
-    }
-    const nextFields = parsed.parts.map((value, index) =>
-      newPart(value, parsed.mods?.[index]),
-    );
-    setFields(nextFields.length > 0 ? nextFields : [newPart("")]);
-  }, [
-    showInfoCue,
-    t,
-    token.hostForbidden,
-    token.meta,
-    token.promptOpen,
-  ]);
-
-  useEffect(() => {
-    if (!bootstrapped.current || shareState === null) {
-      return;
-    }
-    const next = shareUrlSearch(window.location.href, shareState);
-    if (window.location.search !== next) {
-      window.history.replaceState(
-        window.history.state,
-        "",
-        `${window.location.pathname}${next}`,
-      );
-    }
-  }, [shareState]);
-
-  useEffect(() => {
-    const target = pendingSelect.current;
-    if (target === null || search.hits.length === 0) {
-      return;
-    }
-    const idx = search.hits.findIndex(
-      (hit) => hit.path === target.path && hit.line === target.line,
-    );
-    if (idx >= 0) {
-      setSelectedIndex(idx);
-      setSharePending(null);
-    }
-    if (search.status === "done" || search.status === "error") {
-      pendingSelect.current = null;
-      setSharePending(null);
-    }
-  }, [search.hits, search.status]);
+  }, [dropPendingSelect, resetDraft, resetSearch]);
 
   const copySelectedPath = useCallback(() => {
     const path = selectedHit?.path;
@@ -488,22 +331,16 @@ function AppShell() {
         timeRange={timeRange}
         onTimeRange={(next) => {
           setPicks([]);
-          if (stackRef.current !== null) {
-            stackRef.current = {
-              ...stackRef.current,
-              globInclude: [],
-              globIntersect: [],
-            };
-          }
+          setLastStack((cur) =>
+            cur === null ? cur : { ...cur, globInclude: [], globIntersect: [] },
+          );
           setTimeRange(next);
           saveTimeRange(next);
         }}
         onLogout={() => {
           void token.logout().then(() => {
             resetSearch();
-            stackRef.current = null;
-            setParts([]);
-            setFields([newPart("")]);
+            resetDraft();
             setSelectedIndex(0);
             setPicks([]);
           });
@@ -528,63 +365,29 @@ function AppShell() {
           onFieldsChange={setFields}
           onFlushSearch={searchWithParts}
           canClear={
-            parts.length > 0 ||
+            lastStack !== null ||
             fields.some((part) => part.value !== "") ||
             search.hits.length > 0 ||
             search.status !== "idle"
           }
           onClear={clearAll}
           queryRef={queryRef}
-          history={searchHistory}
-          canGoBack={nav.index > 0}
-          canGoForward={nav.index >= 0 && nav.index < nav.stack.length - 1}
+          history={trail.history}
+          canGoBack={trail.canGoBack}
+          canGoForward={trail.canGoForward}
           onGoBack={() => {
-            if (nav.index <= 0) {
-              return;
+            const entry = trail.step(-1);
+            if (entry !== null) {
+              replayEntry(entry);
             }
-            const nextIndex = nav.index - 1;
-            const entry = nav.stack[nextIndex];
-            if (entry === undefined) {
-              return;
-            }
-            setNav((cur) => ({ ...cur, index: nextIndex }));
-            skipNavRef.current = true;
-            setTimeRange(entry.timeRange);
-            saveTimeRange(entry.timeRange);
-            searchWithParts(
-              entry.parts.map((part) => newPart(part.value, part)),
-              [],
-              entry.timeRange,
-            );
           }}
           onGoForward={() => {
-            if (nav.index < 0 || nav.index >= nav.stack.length - 1) {
-              return;
+            const entry = trail.step(1);
+            if (entry !== null) {
+              replayEntry(entry);
             }
-            const nextIndex = nav.index + 1;
-            const entry = nav.stack[nextIndex];
-            if (entry === undefined) {
-              return;
-            }
-            setNav((cur) => ({ ...cur, index: nextIndex }));
-            skipNavRef.current = true;
-            setTimeRange(entry.timeRange);
-            saveTimeRange(entry.timeRange);
-            searchWithParts(
-              entry.parts.map((part) => newPart(part.value, part)),
-              [],
-              entry.timeRange,
-            );
           }}
-          onRestoreHistory={(item: SearchHistoryItem) => {
-            setTimeRange(item.timeRange);
-            saveTimeRange(item.timeRange);
-            searchWithParts(
-              item.parts.map((part) => newPart(part.value, part)),
-              [],
-              item.timeRange,
-            );
-          }}
+          onRestoreHistory={replayEntry}
           running={search.status === "running"}
           searchLocked={searchLocked}
           onCancel={cancelSearch}
