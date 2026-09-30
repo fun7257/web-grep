@@ -116,14 +116,14 @@ func TestNeedsMtimeFileList(t *testing.T) {
 	}
 }
 
-func TestNeedGlobAndPostFilter(t *testing.T) {
-	if NeedGlobAndPostFilter(nil, []string{"*.ts"}) {
+func TestNeedGlobIntersectPostFilter(t *testing.T) {
+	if NeedGlobIntersectPostFilter(nil, []string{"*.ts"}) {
 		t.Fatal("and-only is pushed to rg --glob")
 	}
-	if NeedGlobAndPostFilter([]string{"src/**"}, nil) {
+	if NeedGlobIntersectPostFilter([]string{"src/**"}, nil) {
 		t.Fatal("include-only is pushed to rg --glob")
 	}
-	if !NeedGlobAndPostFilter([]string{"src/**"}, []string{"*.ts"}) {
+	if !NeedGlobIntersectPostFilter([]string{"src/**"}, []string{"*.ts"}) {
 		t.Fatal("include∩and cannot be expressed as rg --glob")
 	}
 }
@@ -167,11 +167,11 @@ func TestRunPushesGlobsToRgWithoutMtime(t *testing.T) {
 	eng := &captureEngine{}
 	svc := testService(t, eng, 2, 0)
 	pre := svc.Preflight(Request{
-		Query:       "hello",
-		Hidden:      true,
-		GlobInclude: []string{"src/**"},
-		GlobAnd:     []string{"*.ts"},
-		GlobExclude: []string{"*.test.ts"},
+		Query:         "hello",
+		Hidden:        true,
+		GlobInclude:   []string{"src/**"},
+		GlobIntersect: []string{"*.ts"},
+		GlobExclude:   []string{"*.test.ts"},
 	})
 	if !pre.OK {
 		t.Fatalf("preflight: %+v", pre)
@@ -186,15 +186,15 @@ func TestRunPushesGlobsToRgWithoutMtime(t *testing.T) {
 	if len(eng.in.GlobInclude) != 1 || eng.in.GlobInclude[0] != "src/**" {
 		t.Fatalf("include: %v", eng.in.GlobInclude)
 	}
-	if len(eng.in.GlobAnd) != 1 || eng.in.GlobAnd[0] != "*.ts" {
-		t.Fatalf("and: %v", eng.in.GlobAnd)
+	if len(eng.in.GlobIntersect) != 1 || eng.in.GlobIntersect[0] != "*.ts" {
+		t.Fatalf("and: %v", eng.in.GlobIntersect)
 	}
 	if len(eng.in.GlobExclude) != 1 || eng.in.GlobExclude[0] != "*.test.ts" {
 		t.Fatalf("exclude: %v", eng.in.GlobExclude)
 	}
 }
 
-func TestRunPostFiltersGlobAndIntersection(t *testing.T) {
+func TestRunPostFiltersGlobIntersectIntersection(t *testing.T) {
 	// Fake engine does not honor --glob. Emit only paths that include
 	// (src/**) would have kept; Go must still drop files that fail and.
 	eng := emitEngine{matches: []rg.Match{
@@ -212,10 +212,10 @@ func TestRunPostFiltersGlobAndIntersection(t *testing.T) {
 		}
 	}
 	pre := svc.Preflight(Request{
-		Query:       "hello",
-		Hidden:      true,
-		GlobInclude: []string{"src/**"},
-		GlobAnd:     []string{"*.ts"},
+		Query:         "hello",
+		Hidden:        true,
+		GlobInclude:   []string{"src/**"},
+		GlobIntersect: []string{"*.ts"},
 	})
 	if !pre.OK {
 		t.Fatalf("preflight: %+v", pre)

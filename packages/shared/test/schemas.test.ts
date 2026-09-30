@@ -69,9 +69,9 @@ describe("SearchRequestSchema", () => {
     expect(parsed.query).toBe("foo");
     expect(parsed.path).toBe("");
     expect(parsed.globInclude).toEqual([]);
-    expect(parsed.globAnd).toEqual([]);
+    expect(parsed.globIntersect).toEqual([]);
     expect(parsed.globExclude).toEqual([]);
-    expect(parsed.andTerms).toEqual([]);
+    expect(parsed.filterTerms).toEqual([]);
     expect(parsed.regex).toBe(false);
     expect(parsed.caseSensitive).toBe(false);
     expect(parsed.wordMatch).toBe(false);
@@ -80,30 +80,30 @@ describe("SearchRequestSchema", () => {
     expect(parsed.mtimeAfter).toBeUndefined();
   });
 
-  it("keeps globAnd and match modifiers on parse", () => {
+  it("keeps globIntersect and match modifiers on parse", () => {
     const parsed = SearchRequestSchema.parse({
       query: "Hello",
       globInclude: ["src/**"],
-      globAnd: ["*.ts"],
+      globIntersect: ["*.ts"],
       globExclude: ["*.test.ts"],
       caseSensitive: true,
       wordMatch: true,
       regex: true,
     });
     expect(parsed.globInclude).toEqual(["src/**"]);
-    expect(parsed.globAnd).toEqual(["*.ts"]);
+    expect(parsed.globIntersect).toEqual(["*.ts"]);
     expect(parsed.globExclude).toEqual(["*.test.ts"]);
     expect(parsed.caseSensitive).toBe(true);
     expect(parsed.wordMatch).toBe(true);
     expect(parsed.regex).toBe(true);
   });
 
-  it("accepts object andTerms with per-term modifiers", () => {
+  it("accepts object filterTerms with per-term modifiers", () => {
     const parsed = SearchRequestSchema.parse({
       query: "Hello",
-      andTerms: [{ query: "world.*", regex: true }, "plain"],
+      filterTerms: [{ query: "world.*", regex: true }, "plain"],
     });
-    expect(parsed.andTerms).toEqual([
+    expect(parsed.filterTerms).toEqual([
       { query: "world.*", regex: true },
       "plain",
     ]);

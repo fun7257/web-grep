@@ -12,11 +12,11 @@ export const SearchRequestSchema = z.object({
     .array(z.string().max(LIMITS.globMaxChars))
     .max(LIMITS.globMaxCount)
     .default([]),
-  globAnd: z
+  globIntersect: z
     .array(z.string().max(LIMITS.globMaxChars))
     .max(LIMITS.globMaxCount)
     .default([]),
-  andTerms: z
+  filterTerms: z
     .array(
       z.union([
         z.string().min(1).max(LIMITS.queryMaxChars),

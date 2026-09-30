@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  countNonEmptyAndTerms,
+  countFilledFilters,
   joinAbs,
   newPart,
   toRequest,
@@ -8,7 +8,7 @@ import {
 } from "../searchStack.ts";
 
 describe("toRequest", () => {
-  it("forwards modifiers, globAnd, and globExclude", () => {
+  it("forwards modifiers, globIntersect, and globExclude", () => {
     const req = toRequest({
       parts: [
         newPart("hello", {
@@ -18,7 +18,7 @@ describe("toRequest", () => {
         }),
       ],
       globInclude: ["src/**"],
-      globAnd: ["*.ts"],
+      globIntersect: ["*.ts"],
       globExclude: ["*.test.ts"],
       path: "",
       caseSensitive: true,
@@ -28,7 +28,7 @@ describe("toRequest", () => {
     });
     expect(req.query).toBe("hello");
     expect(req.globInclude).toEqual(["src/**"]);
-    expect(req.globAnd).toEqual(["*.ts"]);
+    expect(req.globIntersect).toEqual(["*.ts"]);
     expect(req.globExclude).toEqual(["*.test.ts"]);
     expect(req.caseSensitive).toBe(true);
     expect(req.wordMatch).toBe(true);
@@ -42,7 +42,7 @@ describe("toRequest", () => {
         newPart("world.*", { regex: true }),
       ],
       globInclude: [],
-      globAnd: [],
+      globIntersect: [],
       globExclude: [],
       path: "",
       caseSensitive: true,
@@ -53,7 +53,7 @@ describe("toRequest", () => {
     expect(req.query).toBe("Hello");
     expect(req.caseSensitive).toBe(true);
     expect(req.regex).toBe(false);
-    expect(req.andTerms).toEqual([
+    expect(req.filterTerms).toEqual([
       {
         query: "world.*",
         regex: true,
@@ -72,7 +72,7 @@ describe("toRequest", () => {
         newPart("trade-users"),
       ],
       globInclude: [],
-      globAnd: [],
+      globIntersect: [],
       globExclude: [],
       path: "",
       caseSensitive: false,
@@ -81,7 +81,7 @@ describe("toRequest", () => {
       hidden: true,
     });
     expect(req.query).toBe("host");
-    expect(req.andTerms).toEqual([
+    expect(req.filterTerms).toEqual([
       {
         query: "030680228968",
         regex: false,
@@ -130,7 +130,7 @@ describe("toRgShareCommand", () => {
         hidden: true,
         rootAbs: "/tmp/project",
         relPaths: ["src/a.ts"],
-        andTerms: ["world"],
+        filterTerms: ["world"],
         line: 12,
       }),
     ).toBe(
@@ -148,7 +148,7 @@ describe("toRgShareCommand", () => {
         hidden: true,
         rootAbs: "/tmp/project",
         relPaths: ["test.log"],
-        andTerms: ["industryType", "host"],
+        filterTerms: ["industryType", "host"],
       }),
     ).toBe(
       "rg -n -F -i --hidden -- 030680228968 /tmp/project/test.log | rg -F -i -- industryType | rg -F -i -- host",
@@ -179,7 +179,7 @@ describe("toRgShareCommand", () => {
         hidden: true,
         rootAbs: "/tmp/project",
         relPaths: ["src/a.ts"],
-        andTerms: [{ query: "world.*", regex: true }],
+        filterTerms: [{ query: "world.*", regex: true }],
       }),
     ).toBe(
       "rg -n -F -s --hidden -- Hello /tmp/project/src/a.ts | rg -i -- 'world.*'",
@@ -191,12 +191,12 @@ describe("toRgShareCommand", () => {
   });
 });
 
-describe("countNonEmptyAndTerms", () => {
+describe("countFilledFilters", () => {
   it("counts only extra parts with a non-empty trimmed value", () => {
-    expect(countNonEmptyAndTerms([])).toBe(0);
-    expect(countNonEmptyAndTerms([newPart("hello")])).toBe(0);
+    expect(countFilledFilters([])).toBe(0);
+    expect(countFilledFilters([newPart("hello")])).toBe(0);
     expect(
-      countNonEmptyAndTerms([
+      countFilledFilters([
         newPart("hello"),
         newPart("filled"),
         newPart("also"),

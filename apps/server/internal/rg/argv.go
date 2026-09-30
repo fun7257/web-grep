@@ -7,7 +7,7 @@ import (
 	"web-grep/internal/sandbox"
 )
 
-type AndTerm struct {
+type FilterTerm struct {
 	Query         string
 	Regex         bool
 	CaseSensitive bool
@@ -31,8 +31,8 @@ type Input struct {
 	Threads        int
 	FileList       []string
 	LimitToList    bool
-	GlobAnd        []string
-	AndTerms       []AndTerm
+	GlobIntersect  []string
+	FilterTerms    []FilterTerm
 }
 
 func BuildArgv(in Input) ([]string, error) {
@@ -75,10 +75,10 @@ func BuildArgv(in Input) ([]string, error) {
 	if !in.LimitToList {
 		argv = append(argv, "--glob", "!.git/**")
 		// Positive --glob flags are OR. Push include when set; otherwise
-		// globAnd (same OR-within-set). include∩and is applied in Go.
+		// globIntersect (same OR-within-set). include∩and is applied in Go.
 		includes := in.GlobInclude
 		if len(includes) == 0 {
-			includes = in.GlobAnd
+			includes = in.GlobIntersect
 		}
 		for _, g := range includes {
 			argv = append(argv, "--glob", sandbox.ToRgGlob(g))
@@ -86,7 +86,7 @@ func BuildArgv(in Input) ([]string, error) {
 		for _, g := range in.GlobExclude {
 			argv = append(argv, "--glob", "!"+sandbox.ToRgGlob(g))
 		}
-		hasUserInclude := len(in.GlobInclude) > 0 || len(in.GlobAnd) > 0
+		hasUserInclude := len(in.GlobInclude) > 0 || len(in.GlobIntersect) > 0
 		for _, g := range sandbox.DenylistRgGlobs(in.AllowSecrets, hasUserInclude) {
 			argv = append(argv, "--glob", g)
 		}
@@ -105,7 +105,7 @@ func BuildArgv(in Input) ([]string, error) {
 	return argv, nil
 }
 
-func BuildFilterArgv(term AndTerm) []string {
+func BuildFilterArgv(term FilterTerm) []string {
 	argv := []string{"--no-config"}
 	if !term.Regex {
 		argv = append(argv, "-F")

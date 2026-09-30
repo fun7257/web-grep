@@ -19,10 +19,10 @@ import (
 
 type Request struct {
 	Query         string
-	AndTerms      []rg.AndTerm
+	FilterTerms   []rg.FilterTerm
 	Path          string
 	GlobInclude   []string
-	GlobAnd       []string
+	GlobIntersect []string
 	GlobExclude   []string
 	Regex         bool
 	CaseSensitive bool
@@ -33,17 +33,17 @@ type Request struct {
 }
 
 type Preflight struct {
-	OK          bool
-	Status      int
-	Code        string
-	Message     string
-	SearchID    string
-	Request     Request
-	RelativeDir string
-	GlobInclude []string
-	GlobAnd     []string
-	GlobExclude []string
-	MaxResults  int
+	OK            bool
+	Status        int
+	Code          string
+	Message       string
+	SearchID      string
+	Request       Request
+	RelativeDir   string
+	GlobInclude   []string
+	GlobIntersect []string
+	GlobExclude   []string
+	MaxResults    int
 }
 
 type Engine interface {
@@ -125,7 +125,7 @@ func (s *Service) Preflight(req Request) Preflight {
 		exclude = append(exclude, clean)
 	}
 	var and []string
-	for _, g := range req.GlobAnd {
+	for _, g := range req.GlobIntersect {
 		clean, err := sandbox.SanitizeUserGlob(g)
 		if err != nil {
 			return Preflight{Status: 400, Code: "INVALID_GLOB", Message: "invalid glob"}
@@ -152,14 +152,14 @@ func (s *Service) Preflight(req Request) Preflight {
 		maxResults = cfg.MaxResultsHard
 	}
 	return Preflight{
-		OK:          true,
-		SearchID:    id,
-		Request:     req,
-		RelativeDir: rel,
-		GlobInclude: include,
-		GlobAnd:     and,
-		GlobExclude: exclude,
-		MaxResults:  maxResults,
+		OK:            true,
+		SearchID:      id,
+		Request:       req,
+		RelativeDir:   rel,
+		GlobInclude:   include,
+		GlobIntersect: and,
+		GlobExclude:   exclude,
+		MaxResults:    maxResults,
 	}
 }
 
@@ -296,7 +296,7 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		sendDone(false, false, false, 0, 0)
 		return
 	}
-	if len(pre.Request.GlobAnd) > 0 && len(pre.GlobAnd) == 0 {
+	if len(pre.Request.GlobIntersect) > 0 && len(pre.GlobIntersect) == 0 {
 		sendDone(false, false, false, 0, 0)
 		return
 	}
@@ -314,7 +314,7 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		NoIgnore:       cfg.NoIgnore,
 		SearchZip:      cfg.SearchZip,
 		Threads:        cfg.Threads,
-		AndTerms:       pre.Request.AndTerms,
+		FilterTerms:    pre.Request.FilterTerms,
 	}
 	// mtimeAfter is the only reason to WalkDir + LimitToList. Otherwise
 	// let rg recurse from the search root (or RelativeDir) with globs.
@@ -337,8 +337,8 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 			}
 		} else {
 			listed = sandbox.FilterByGlobs(listed, pre.GlobInclude, nil)
-			if len(pre.GlobAnd) > 0 {
-				listed = sandbox.FilterByGlobs(listed, pre.GlobAnd, nil)
+			if len(pre.GlobIntersect) > 0 {
+				listed = sandbox.FilterByGlobs(listed, pre.GlobIntersect, nil)
 			}
 			if len(listed) == 0 {
 				sendDone(false, false, false, 0, 0)
@@ -353,7 +353,7 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		}
 	} else {
 		in.GlobInclude = pre.GlobInclude
-		in.GlobAnd = pre.GlobAnd
+		in.GlobIntersect = pre.GlobIntersect
 		in.GlobExclude = pre.GlobExclude
 	}
 
@@ -363,12 +363,12 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 	searchCtx, stopSearch := context.WithCancel(ctx)
 	defer stopSearch()
 
-	// Include/exclude (and globAnd when include is empty) are already in
+	// Include/exclude (and globIntersect when include is empty) are already in
 	// rg argv. rg ORs positive --glob flags, so include∩and cannot be
 	// expressed there and is applied in Go — compiled once, not per hit.
 	acceptHit := func(string) bool { return true }
-	if !in.LimitToList && NeedGlobAndPostFilter(pre.GlobInclude, pre.GlobAnd) {
-		acceptHit = sandbox.CompileHitFilter(nil, nil, pre.GlobAnd)
+	if !in.LimitToList && NeedGlobIntersectPostFilter(pre.GlobInclude, pre.GlobIntersect) {
+		acceptHit = sandbox.CompileHitFilter(nil, nil, pre.GlobIntersect)
 	}
 
 	lastProg := time.Now()
@@ -445,9 +445,9 @@ func NeedsMtimeFileList(after time.Time) bool {
 	return !after.IsZero()
 }
 
-// NeedGlobAndPostFilter is true when include and and are both set.
-// Those two sets are intersected; rg --glob cannot express that AND.
-func NeedGlobAndPostFilter(include, and []string) bool {
+// NeedGlobIntersectPostFilter is true when include and and are both set.
+// Those two sets are intersected; rg --glob cannot express that intersection.
+func NeedGlobIntersectPostFilter(include, and []string) bool {
 	return len(include) > 0 && len(and) > 0
 }
 

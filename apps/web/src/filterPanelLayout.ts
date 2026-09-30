@@ -1,6 +1,6 @@
-/** Bar-aligned S-AND panel: main query field left → funnel button right, clipped to the hits column. */
+/** Bar-aligned filter panel: main query field left → funnel button right, clipped to the hits column. */
 
-export function measureAndPanelWidth(
+export function measureFilterPanelWidth(
   field: Pick<DOMRect, "left">,
   funnel: Pick<DOMRect, "right">,
   clip: Pick<DOMRect, "right">,

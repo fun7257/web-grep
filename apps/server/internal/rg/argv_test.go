@@ -100,7 +100,7 @@ func TestFormatCmdQuotesQuery(t *testing.T) {
 }
 
 func TestBuildFilterArgvPipesLiteralFlags(t *testing.T) {
-	got := BuildFilterArgv(AndTerm{Query: "host", WordMatch: true})
+	got := BuildFilterArgv(FilterTerm{Query: "host", WordMatch: true})
 	want := []string{"--no-config", "-F", "-i", "-w", "--", "host"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %v want %v", got, want)
@@ -108,7 +108,7 @@ func TestBuildFilterArgvPipesLiteralFlags(t *testing.T) {
 }
 
 func TestBuildFilterArgvUsesPerTermModifiers(t *testing.T) {
-	got := BuildFilterArgv(AndTerm{Query: "H.llo", Regex: true, CaseSensitive: true})
+	got := BuildFilterArgv(FilterTerm{Query: "H.llo", Regex: true, CaseSensitive: true})
 	want := []string{"--no-config", "-s", "--", "H.llo"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %v want %v", got, want)
@@ -138,14 +138,14 @@ func TestBuildArgvAnchorsLiteralUserGlobs(t *testing.T) {
 	}
 }
 
-func TestBuildArgvDoesNotORGlobAndWithInclude(t *testing.T) {
+func TestBuildArgvDoesNotORGlobIntersectWithInclude(t *testing.T) {
 	argv, err := BuildArgv(Input{
-		RootReal:    "/tmp/root",
-		RelativeDir: ".",
-		Query:       "needle",
-		GlobInclude: []string{"src/**"},
-		GlobAnd:     []string{"*.ts"},
-		GlobExclude: []string{"*.test.ts"},
+		RootReal:      "/tmp/root",
+		RelativeDir:   ".",
+		Query:         "needle",
+		GlobInclude:   []string{"src/**"},
+		GlobIntersect: []string{"*.ts"},
+		GlobExclude:   []string{"*.test.ts"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -158,22 +158,22 @@ func TestBuildArgvDoesNotORGlobAndWithInclude(t *testing.T) {
 		t.Fatalf("exclude should be pushed: %v", argv)
 	}
 	if strings.Contains(joined, "--glob *.ts") {
-		t.Fatalf("globAnd must not be OR'd into --glob when include is set: %v", argv)
+		t.Fatalf("globIntersect must not be OR'd into --glob when include is set: %v", argv)
 	}
 }
 
-func TestBuildArgvUsesGlobAndWhenIncludeEmpty(t *testing.T) {
+func TestBuildArgvUsesGlobIntersectWhenIncludeEmpty(t *testing.T) {
 	argv, err := BuildArgv(Input{
-		RootReal:    "/tmp/root",
-		RelativeDir: ".",
-		Query:       "needle",
-		GlobAnd:     []string{"*.ts"},
+		RootReal:      "/tmp/root",
+		RelativeDir:   ".",
+		Query:         "needle",
+		GlobIntersect: []string{"*.ts"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(argv, "*.ts") {
-		t.Fatalf("globAnd should become --glob when include is empty: %v", argv)
+		t.Fatalf("globIntersect should become --glob when include is empty: %v", argv)
 	}
 }
 

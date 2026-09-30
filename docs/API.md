@@ -100,12 +100,12 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 | 字段 | 默认 | 说明 |
 | --- | --- | --- |
 | `query` | 必填 | 1–8192 字符。第一框。空条件丢弃。单框里的空格是查询内容，不是分隔符。 |
-| `andTerms` | `[]` | 额外 AND 条件，最多 **16** 项。每项是非空字符串，或 `{ query, regex?, caseSensitive?, wordMatch? }`（`query` 1–8192）。与 `query` 同时命中（顺序不限）。**不会**折成一条 `a.*b\|b.*a` 正则；服务端对每一项再跑一轮 rg 过滤。字符串项按字面量、不区分大小写、非整词。对象项未写的修饰符为 false，不从顶层字段继承。当前 UI 把其余框发成对象。 |
+| `filterTerms` | `[]` | 额外过滤条件（filter），最多 **16** 项。每项是非空字符串，或 `{ query, regex?, caseSensitive?, wordMatch? }`（`query` 1–8192）。与 `query` 同时命中（顺序不限）。**不会**折成一条 `a.*b\|b.*a` 正则；服务端对每一项再跑一轮 rg 过滤。字符串项按字面量、不区分大小写、非整词。对象项未写的修饰符为 false，不从顶层字段继承。当前 UI 把其余框发成对象。 |
 | `path` | `""` | 相对目录；空=整个根 |
 | `globInclude` | `[]` | 用户 glob 或树勾选转成的路径 glob（多项之间 OR） |
-| `globAnd` | `[]` | 与 `globInclude` 求交。当前 UI 发空数组；不要为了「用上字段」去改搜索范围 |
+| `globIntersect` | `[]` | 与 `globInclude` 求交。当前 UI 发空数组；不要为了「用上字段」去改搜索范围 |
 | `globExclude` | `[]` | |
-| `regex` | `false` | `false` → rg `-F`（只作用于 `query`，不自动套到 `andTerms`） |
+| `regex` | `false` | `false` → rg `-F`（只作用于 `query`，不自动套到 `filterTerms`） |
 | `caseSensitive` | `false` | 只作用于 `query` |
 | `wordMatch` | `false` | 只作用于 `query` |
 | `hidden` | `true` | `true` → rg `--hidden` |

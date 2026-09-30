@@ -17,7 +17,7 @@ export type QueryPart = {
 export type SearchStack = {
   parts: QueryPart[];
   globInclude: string[];
-  globAnd: string[];
+  globIntersect: string[];
   globExclude: string[];
   path: string;
   caseSensitive: boolean;
@@ -42,8 +42,8 @@ export function newPart(
   };
 }
 
-/** Funnel / rail badge: extra AND slots with a non-empty trimmed value. */
-export function countNonEmptyAndTerms(
+/** Funnel / rail badge: extra filter rows with a non-empty trimmed value. */
+export function countFilledFilters(
   parts: ReadonlyArray<Pick<QueryPart, "value">>,
 ): number {
   return parts.slice(1).filter((part) => part.value.trim() !== "").length;
@@ -93,7 +93,7 @@ function rgContentFlags(
   return args;
 }
 
-export type AndTermShare = {
+export type FilterShare = {
   query: string;
   regex?: boolean;
   caseSensitive?: boolean;
@@ -108,7 +108,7 @@ export function toRgShareCommand(opts: {
   hidden: boolean;
   rootAbs: string;
   relPaths: string[];
-  andTerms?: Array<string | AndTermShare>;
+  filterTerms?: Array<string | FilterShare>;
   line?: number;
 }): string {
   const pathArgs = [
@@ -121,7 +121,7 @@ export function toRgShareCommand(opts: {
   ].map(shQuote);
   const headFlags = rgContentFlags(opts, "head");
   const query = shQuote(opts.query);
-  const extraAnd = (opts.andTerms ?? [])
+  const extraAnd = (opts.filterTerms ?? [])
     .map((term) => {
       if (typeof term === "string") {
         return { query: term, regex: opts.regex, caseSensitive: opts.caseSensitive, wordMatch: opts.wordMatch };
@@ -167,7 +167,7 @@ export function toRequest(
   const head = ready[0];
   const rest = ready.slice(1);
   let globInclude = stack.globInclude;
-  const globAnd = stack.globAnd;
+  const globIntersect = stack.globIntersect;
   let globExclude = stack.globExclude;
   if (extraInclude.length > 0) {
     globInclude = extraInclude;
@@ -177,7 +177,7 @@ export function toRequest(
       query: "",
       path: stack.path,
       globInclude,
-      globAnd,
+      globIntersect,
       globExclude,
       regex: stack.regex,
       caseSensitive: stack.caseSensitive,
@@ -190,7 +190,7 @@ export function toRequest(
     query: head.value,
     path: stack.path,
     globInclude,
-    globAnd,
+    globIntersect,
     globExclude,
     regex: head.regex,
     caseSensitive: head.caseSensitive,
@@ -198,7 +198,7 @@ export function toRequest(
     hidden: stack.hidden,
     ...(rest.length > 0
       ? {
-          andTerms: rest.map((part) => ({
+          filterTerms: rest.map((part) => ({
             query: part.value,
             regex: part.regex,
             caseSensitive: part.caseSensitive,
