@@ -50,6 +50,10 @@ func (s *Server) authLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func readLoginBody(w http.ResponseWriter, r *http.Request) (loginBody, bool) {
+	if !jsonContentType(r) {
+		writeErr(w, http.StatusBadRequest, "INVALID_AUTH", "invalid request")
+		return loginBody{}, false
+	}
 	var body loginBody
 	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<16))
 	if err := dec.Decode(&body); err != nil {

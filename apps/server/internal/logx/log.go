@@ -36,6 +36,17 @@ func SetLevel(name string) {
 	}
 }
 
+// SetOutput directs log lines to w. A nil writer restores stdout.
+// Tests capture lines with a buffer; the server leaves the default.
+func SetOutput(w io.Writer) {
+	if w == nil {
+		w = os.Stdout
+	}
+	mu.Lock()
+	out = w
+	mu.Unlock()
+}
+
 func logAt(lv Level, name, msg string, fields map[string]any) {
 	if lv < level {
 		return

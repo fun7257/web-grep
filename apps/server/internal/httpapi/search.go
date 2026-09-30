@@ -38,6 +38,10 @@ type wireFilterTerm struct {
 }
 
 func (s *Server) search(w http.ResponseWriter, r *http.Request) {
+	if !jsonContentType(r) {
+		writeErr(w, http.StatusBadRequest, "INVALID_QUERY", "invalid request")
+		return
+	}
 	var body searchBody
 	dec := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
 	if err := dec.Decode(&body); err != nil {
