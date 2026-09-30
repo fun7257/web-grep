@@ -92,6 +92,9 @@ func splitFileList(files []string, budget int) [][]string {
 
 func (e Engine) run(ctx context.Context, dir string, argv []string, filters [][]string, emit func(Match) error, progress func(files int), filesAlready int) (int, error) {
 	cmds := make([]*exec.Cmd, 0, 1+len(filters))
+	// readers[i] is the read end of cmds[i]'s stdout. Every one but the last
+	// is handed to the next stage as its stdin.
+	var readers []io.ReadCloser
 	head := exec.Command(e.Bin, argv...)
 	head.Dir = dir
 	head.Env = Env()
@@ -101,6 +104,7 @@ func (e Engine) run(ctx context.Context, dir string, argv []string, filters [][]
 		return filesAlready, err
 	}
 	cmds = append(cmds, head)
+	readers = append(readers, stdout)
 	prev := stdout
 	for _, filter := range filters {
 		next := exec.Command(e.Bin, filter...)
@@ -113,11 +117,12 @@ func (e Engine) run(ctx context.Context, dir string, argv []string, filters [][]
 			return filesAlready, err
 		}
 		cmds = append(cmds, next)
+		readers = append(readers, out)
 		prev = out
 	}
 	stderrs := make([]strings.Builder, len(cmds))
 	for i, cmd := range cmds {
-		cmd.Stderr = &limitWriter{w: &stderrs[i], n: 4096}
+		cmd.Stderr = &limitWriter{w: &stderrs[i], n: stderrLimit}
 	}
 	if logCmd() {
 		cmd := formatCmd(e.Bin, argv)
@@ -131,6 +136,13 @@ func (e Engine) run(ctx context.Context, dir string, argv []string, filters [][]
 			terminateAll(cmds[:i])
 			return filesAlready, err
 		}
+	}
+	// The children now hold their own copies of the pipes between stages.
+	// Keeping ours open would stop an upstream rg from ever seeing EPIPE when
+	// a downstream one exits early (e.g. an invalid filter regex), so it would
+	// block on a full pipe and Wait below would never return.
+	for _, r := range readers[:len(readers)-1] {
+		_ = r.Close()
 	}
 
 	stopWatch := make(chan struct{})
@@ -171,12 +183,24 @@ func (e Engine) run(ctx context.Context, dir string, argv []string, filters [][]
 	}
 	scanErr := sc.Err()
 	var waitErr error
+	partial := 0
 	for i := len(cmds) - 1; i >= 0; i-- {
-		if err := cmds[i].Wait(); err != nil && waitErr == nil && !benignRgExit(err) {
+		err := cmds[i].Wait()
+		if err == nil || benignRgExit(err) {
+			continue
+		}
+		if partialRgExit(err, stderrs[i].String()) {
+			partial++
+			continue
+		}
+		if waitErr == nil {
 			waitErr = err
 		}
 	}
 	close(stopWatch)
+	if partial > 0 && waitErr == nil {
+		logx.Warn("rg skipped unreadable paths", map[string]any{"stages": partial})
+	}
 
 	if emitErr != nil {
 		return files, emitErr
@@ -211,6 +235,46 @@ func terminateAll(cmds []*exec.Cmd) {
 	for i := len(cmds) - 1; i >= 0; i-- {
 		terminate(cmds[i])
 	}
+}
+
+// stderrLimit caps how much of each rg stderr is kept.
+const stderrLimit = 4096
+
+// partialRgExit reports whether err is rg's exit status 2 caused only by
+// paths it could not read (permission denied, symlink loops, ...). rg exits 2
+// in that case even though it searched everything else and printed its
+// matches, so the search is complete and must not be reported as an engine
+// failure. Any other status-2 cause (bad regex, bad flag) is a real error.
+func partialRgExit(err error, stderr string) bool {
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 2 {
+		return false
+	}
+	return partialErrorsOnly(stderr)
+}
+
+func partialErrorsOnly(stderr string) bool {
+	lines := strings.Split(stderr, "\n")
+	if len(stderr) >= stderrLimit && len(lines) > 0 {
+		// The capture stopped mid-line; the last line is incomplete.
+		lines = lines[:len(lines)-1]
+	}
+	seen := false
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		seen = true
+		if !strings.HasPrefix(line, "rg: ") {
+			return false
+		}
+		if strings.Contains(line, "(os error ") || strings.Contains(line, "File system loop found") {
+			continue
+		}
+		return false
+	}
+	return seen
 }
 
 func benignRgExit(err error) bool {

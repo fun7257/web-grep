@@ -50,6 +50,6 @@ read_rate_limit: 120 # 每个客户端（会话或 IP）在窗口内的次数；
 read_rate_window_ms: 10000 # 上述次数的滑动窗口；WEB_GREP_READ_RATE_WINDOW_MS
 
 search_zip: true # 是否搜压缩包
-follow_symlinks: true # 是否跟随符号链接
+follow_symlinks: true # 是否跟随符号链接；解析后落在 root 之外的命中会被丢弃
 no_ignore: true # true = 忽略 gitignore，日志目录才能搜全
 allow_secrets: false # true = 允许搜 .env 等密钥文件（默认拒绝）

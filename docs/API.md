@@ -126,6 +126,14 @@ Body `{ "password" }` → `{ "token" }`。密码错误 `401 INVALID_AUTH`。
 
 注释行 `: ping` 为心跳，客户端必须忽略。`matches.start/end` 是 **UTF-16 码元**（给 JS `string` 切片），不是字节。
 
+搜索时的边界情况：
+
+| 情况 | 行为 |
+| --- | --- |
+| 有路径读不了（没权限、符号链接环等） | rg 此时退出码为 2，但其余文件都已搜完。只要 rg 的 stderr 里全是这类「某个路径读不了」的错误，就照常以 `done` 收尾，服务端记一条 warn。不会再因为一个读不了的文件让整次搜索变成 `error`。正则错误、参数错误等其它 rg 失败仍以 `error`（`ENGINE`）收尾 |
+| 符号链接 | `follow_symlinks` 开着（默认）时，rg 会跟进符号链接。服务端对每条命中解析真实路径：落在根外的命中**丢弃**，不计入 `matchCount`、`fileCount` 和 `maxResults`，与 `GET /api/file` 对同一路径返回 `INVALID_PATH` 保持一致。指向根内的链接照常可搜，同一文件经链接与原路径都会命中时会各出现一次 |
+| `filterTerms` 某项 `regex:true` 但正则非法 | 以 `error`（`ENGINE`，message 含 rg 的 `regex parse error`）终止，不会挂起 |
+
 取消：关掉 fetch（AbortController）。超时：`done.timedOut=true`，不是 `error`。
 
 ### `GET /api/tree`（设置了密码时需会话）

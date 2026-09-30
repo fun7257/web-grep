@@ -371,6 +371,12 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		acceptHit = sandbox.CompileHitFilter(nil, nil, pre.GlobIntersect)
 	}
 
+	// rg follows symlinks when follow_symlinks is on, and RelUnderRoot only
+	// checks how a path is spelled. Resolve each hit's real path so a link
+	// that leads outside the root cannot surface files from outside it.
+	guard := sandbox.NewRealPathGuard(cfg.RootReal)
+	outsideRoot := 0
+
 	lastProg := time.Now()
 	var err error
 	if ctx.Err() == nil {
@@ -383,6 +389,10 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 				return nil
 			}
 			if !acceptHit(hit.Path) {
+				return nil
+			}
+			if !guard.Inside(hit.Path) {
+				outsideRoot++
 				return nil
 			}
 			if err := stream.Event("hit", hit); err != nil {
@@ -405,6 +415,9 @@ func (s *Service) Run(parent context.Context, pre Preflight, stream Stream) {
 		})
 	}
 	_ = stream.Flush()
+	if outsideRoot > 0 {
+		logx.Warn("dropped hits outside root", map[string]any{"searchId": pre.SearchID, "count": outsideRoot})
+	}
 
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
 	cancelled := parent.Err() != nil && !timedOut
