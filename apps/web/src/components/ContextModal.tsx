@@ -3,21 +3,37 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import type { SseHit } from "@web-grep/shared";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
+  anchoredScrollTop,
+  captureLineAnchor,
   parseGotoLine,
   pickGotoLine,
   rangeForLine,
+  upwardRange,
 } from "../fileWindow.ts";
-import { DEFAULT_HL_OPTS, type HlOpts, type HlTermInput } from "../highlight.ts";
+import {
+  DEFAULT_HL_OPTS,
+  type HlOpts,
+  type HlTermInput,
+} from "../highlight.ts";
 import { useFileWindow } from "../hooks/useFileWindow.ts";
 import { useLivePreviewChunk } from "../hooks/useLivePreviewChunk.ts";
-import { livePreviewChunkMax } from "../previewChunk.ts";
 import { useLocale } from "../hooks/useLocale.ts";
+import { livePreviewChunkMax } from "../previewChunk.ts";
 import { AppModal } from "./AppModal.tsx";
 import { HighlightedText } from "./ResultRow.tsx";
 
 export const CONTEXT_BEFORE = 30;
 
 const LINE_ROW = 26;
+const OVERSCAN = 16;
+/** First rendered row at or above this index is clear of the top edge. */
+const TOP_EDGE = 8;
+const BOTTOM_EDGE = 12;
+/**
+ * scrollTop past this is not the top edge. A prepend restore lands far
+ * below it; the trigger zone (edge + overscan) does not.
+ */
+const TOP_SCROLL_SLACK = 4;
 
 export type ContextTarget = {
   path: string;
@@ -93,9 +109,17 @@ export function ContextModal({
   const linesRef = useRef(lines);
   const fetchAcRef = useRef<AbortController | null>(null);
   const pendingUp = useRef<{
+    id: number;
     prevFirst: number;
+    line: number;
+    offset: number;
     scrollTop: number;
   } | null>(null);
+  const upToken = useRef(0);
+  // One upward page per visit to the top edge. Re-armed only after the
+  // viewport leaves that edge, so a prepend cannot chain the next page.
+  const topArmed = useRef(true);
+  const beginUpRef = useRef<() => void>(() => {});
   const focusReq = useRef<number | null>(null);
   const focusAlign = useRef<"start" | "center" | "end">("start");
   const focusTries = useRef(0);
@@ -127,6 +151,8 @@ export function ContextModal({
       focusReq.current = null;
       focusTries.current = 0;
       pendingUp.current = null;
+      topArmed.current = true;
+      upToken.current += 1;
       fetchAcRef.current?.abort();
       fetchAcRef.current = null;
       return;
@@ -135,6 +161,9 @@ export function ContextModal({
       return;
     }
     const signal = replaceSignal();
+    pendingUp.current = null;
+    topArmed.current = true;
+    upToken.current += 1;
     const around =
       highlightLine !== undefined
         ? rangeForLine(highlightLine, chunk, livePreviewChunkMax())
@@ -169,7 +198,7 @@ export function ContextModal({
     count: lines.length,
     getScrollElement: () => listRef.current,
     estimateSize: () => LINE_ROW,
-    overscan: 16,
+    overscan: OVERSCAN,
     initialRect: { width: 800, height: 600 },
     getItemKey: (index) => lines[index]?.n ?? index,
     measureElement: (element) => {
@@ -180,66 +209,111 @@ export function ContextModal({
 
   const virtualItems = virtualizer.getVirtualItems();
 
-  useEffect(() => {
+  beginUpRef.current = () => {
     if (
-      !open ||
-      path === null ||
-      !chunkReady ||
+      !topArmed.current ||
+      pendingUp.current !== null ||
       loadingRef.current ||
-      lines.length === 0
+      focusReq.current !== null ||
+      !chunkReady ||
+      path === null ||
+      chunk == null
     ) {
       return;
     }
-    const first = virtualItems[0];
-    const last = virtualItems[virtualItems.length - 1];
+    const list = listRef.current;
+    const loaded = linesRef.current;
+    if (list === null || loaded.length === 0) {
+      return;
+    }
+    const firstN = loaded[0]?.n ?? 1;
+    const range = upwardRange(firstN, chunk);
+    if (range === null) {
+      return;
+    }
+    const liveItems = virtualizer.getVirtualItems();
+    const liveFirst = liveItems[0];
+    if (liveFirst !== undefined && liveFirst.index > TOP_EDGE) {
+      return;
+    }
+    // The scroll handler can flush a render before this effect's closure
+    // sees the restored offset. A long scrollTop is already past the edge.
+    if (list.scrollTop > LINE_ROW * (TOP_EDGE + OVERSCAN + TOP_SCROLL_SLACK)) {
+      return;
+    }
+    const anchor = captureLineAnchor(loaded, liveItems, list.scrollTop);
+    if (anchor === null) {
+      return;
+    }
+    const id = ++upToken.current;
+    topArmed.current = false;
+    pendingUp.current = {
+      id,
+      prevFirst: anchor.prevFirst,
+      line: anchor.line,
+      offset: anchor.offset,
+      scrollTop: list.scrollTop,
+    };
+    void loadSlice(
+      { path, from: range.from, count: range.count },
+      { mode: "merge", dir: "up", signal: activeSignal() },
+    ).then((next) => {
+      const pending = pendingUp.current;
+      if (pending === null || pending.id !== id) {
+        return;
+      }
+      // Keep the hold for layout when the page arrived. Dropping it here
+      // used to run before paint and let the viewport chain the next page.
+      if (next === null || next.length === 0) {
+        pendingUp.current = null;
+      }
+    });
+  };
+
+  useEffect(() => {
+    if (!open || path === null || chunk == null || lines.length === 0) {
+      return;
+    }
+    const items = virtualizer.getVirtualItems();
+    const first = items[0];
+    const last = items[items.length - 1];
     if (first === undefined || last === undefined) {
       return;
     }
+    if (first.index > TOP_EDGE) {
+      topArmed.current = true;
+    }
+    if (loadingRef.current) {
+      return;
+    }
     const firstN = lines[0]?.n ?? 1;
-    const lastN = lines[lines.length - 1]?.n ?? 1;
     if (
       focusReq.current === null &&
+      topArmed.current &&
+      pendingUp.current === null &&
       firstN > 1 &&
-      first.index <= 8 &&
-      pendingUp.current === null
+      first.index <= TOP_EDGE
     ) {
-      const from = Math.max(1, firstN - chunk);
-      if (from < firstN) {
-        pendingUp.current = {
-          prevFirst: firstN,
-          scrollTop: listRef.current?.scrollTop ?? 0,
-        };
-        void loadSlice(
-          { path, from, count: firstN - from },
-          { mode: "merge", dir: "up", signal: activeSignal() },
-        ).then((next) => {
-          const pending = pendingUp.current;
-          if (pending === null) {
-            return;
-          }
-          const first = next?.[0]?.n ?? pending.prevFirst;
-          if (next === null || first >= pending.prevFirst) {
-            pendingUp.current = null;
-          }
-        });
-      }
-    } else if (!eof && last.index >= lines.length - 12) {
+      beginUpRef.current();
+      return;
+    }
+    if (!eof && last.index >= lines.length - BOTTOM_EDGE) {
+      const lastN = lines[lines.length - 1]?.n ?? 1;
       void loadSlice(
         { path, from: lastN + 1, count: chunk },
         { mode: "merge", dir: "down", signal: activeSignal() },
       );
     }
   }, [
+    chunk,
     eof,
     lines,
     loadSlice,
     loadingRef,
     open,
     path,
-    chunk,
-    chunkReady,
-    previewChunk,
     virtualItems,
+    virtualizer,
   ]);
 
   useLayoutEffect(() => {
@@ -250,19 +324,47 @@ export function ContextModal({
     const list = listRef.current;
     if (list === null) {
       pendingUp.current = null;
+      topArmed.current = true;
       return;
     }
     const newFirst = lines[0]?.n ?? pending.prevFirst;
-    const added = pending.prevFirst - newFirst;
-    if (added <= 0) {
+    if (newFirst >= pending.prevFirst) {
       pendingUp.current = null;
       return;
     }
-    list.scrollTop = pending.scrollTop + added * LINE_ROW;
-    pendingUp.current = null;
-  }, [lines]);
+    const index = lines.findIndex((line) => line.n === pending.line);
+    if (index < 0) {
+      pendingUp.current = null;
+      return;
+    }
+    // Measured start, not added*LINE_ROW: real rows are shorter than the
+    // estimate, and that gap is more than a line once a page is prepended.
+    virtualizer.getTotalSize();
+    const anchorStart = virtualizer.measurementsCache[index]?.start ?? null;
+    const nextTop = anchoredScrollTop({
+      prevFirst: pending.prevFirst,
+      nextFirst: newFirst,
+      anchorIndex: index,
+      anchorStart,
+      anchorOffset: pending.offset,
+      prevScrollTop: pending.scrollTop,
+      rowHeight: LINE_ROW,
+    });
+    void list.firstElementChild?.getBoundingClientRect();
+    if (list.scrollTop !== nextTop) {
+      list.scrollTop = nextTop;
+    }
+  }, [lines, virtualizer]);
 
   useLayoutEffect(() => {
+    const pending = pendingUp.current;
+    if (pending !== null) {
+      const newFirst = lines[0]?.n ?? pending.prevFirst;
+      if (newFirst < pending.prevFirst) {
+        pendingUp.current = null;
+      }
+      return;
+    }
     const n = focusReq.current;
     if (n === null || lines.length === 0) {
       return;
@@ -273,9 +375,6 @@ export function ContextModal({
     }
     const align = focusAlign.current;
     const root = listRef.current;
-    if (pendingUp.current !== null) {
-      return;
-    }
     if (align === "start" && index === 0 && root !== null) {
       root.scrollTop = 0;
       virtualizer.scrollToOffset(0);
@@ -284,7 +383,11 @@ export function ContextModal({
     }
     const current =
       root === null ? null : root.querySelector(".preview-line.current");
-    if (root !== null && current !== null && lineIsPinned(root, current, align)) {
+    if (
+      root !== null &&
+      current !== null &&
+      lineIsPinned(root, current, align)
+    ) {
       focusReq.current = null;
       focusTries.current = 0;
       return;
@@ -304,45 +407,16 @@ export function ContextModal({
     if (el === null) {
       return;
     }
-    const pageEarlier = (): void => {
-      const firstN = linesRef.current[0]?.n ?? 1;
-      if (
-        firstN <= 1 ||
-        loadingRef.current ||
-        !chunkReady ||
-        focusReq.current !== null
-      ) {
-        return;
-      }
-      const from = Math.max(1, firstN - chunk);
-      if (from >= firstN) {
-        return;
-      }
-      pendingUp.current = { prevFirst: firstN, scrollTop: el.scrollTop };
-      void loadSlice(
-        { path, from, count: firstN - from },
-        { mode: "merge", dir: "up", signal: activeSignal() },
-      ).then((next) => {
-        const pending = pendingUp.current;
-        if (pending === null) {
-          return;
-        }
-        const first = next?.[0]?.n ?? pending.prevFirst;
-        if (next === null || first >= pending.prevFirst) {
-          pendingUp.current = null;
-        }
-      });
-    };
     const onWheel = (event: WheelEvent): void => {
       if (event.deltaY < 0 && el.scrollTop <= 0) {
-        pageEarlier();
+        beginUpRef.current();
       }
     };
     el.addEventListener("wheel", onWheel, { passive: true });
     return () => {
       el.removeEventListener("wheel", onWheel);
     };
-  }, [chunk, chunkReady, lines.length, loadSlice, loadingRef, open, path]);
+  }, [lines.length, open, path]);
 
   const jumpToLine = (requested: number): void => {
     if (path === null || !chunkReady) {
@@ -353,14 +427,12 @@ export function ContextModal({
       return;
     }
     pendingUp.current = null;
+    topArmed.current = true;
+    upToken.current += 1;
     const openedPath = path;
     const signal = replaceSignal();
     void (async () => {
-      const around = rangeForLine(
-        requested,
-        chunk,
-        livePreviewChunkMax(),
-      );
+      const around = rangeForLine(requested, chunk, livePreviewChunkMax());
       let next = await loadSlice(
         { path, from: around.from, count: around.count },
         { mode: "replace", signal },
@@ -411,10 +483,8 @@ export function ContextModal({
     })();
   };
 
-  const titleLine =
-    focusedLine !== undefined ? `:${focusedLine}` : "";
-  const fileEmpty =
-    !loading && error === null && !binary && lines.length === 0;
+  const titleLine = focusedLine !== undefined ? `:${focusedLine}` : "";
+  const fileEmpty = !loading && error === null && !binary && lines.length === 0;
   const noticeText =
     gotoNotice === null
       ? null
