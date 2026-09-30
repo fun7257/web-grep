@@ -91,7 +91,11 @@ export function useSearch(opts?: {
         }
         if (err instanceof SearchHttpError) {
           onAuthFailureRef.current?.(err);
-          dispatch({ type: "search/error", error: err.body });
+          dispatch({
+            type: "search/error",
+            error: err.body,
+            beforeStream: true,
+          });
           return;
         }
         dispatch({

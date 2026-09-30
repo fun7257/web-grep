@@ -109,16 +109,18 @@ export function useAuth(): AuthState {
   );
 
   const logout = useCallback(async () => {
+    // Start the revoke request before the stored token is cleared: fetchApi
+    // reads the token when it is called, and a request sent without one
+    // leaves the server session alive.
+    const revoked = logoutSession().catch(() => {
+      // still clear the local session
+    });
     writeToken("");
     setHasSession(false);
     setMeta(null);
     setLivePreviewLimits(undefined);
     setPromptOpen(true);
-    try {
-      await logoutSession();
-    } catch {
-      // still clear the local session
-    }
+    await revoked;
     try {
       const status = await fetchAuthStatus();
       setPromptOpen(status.authRequired);
