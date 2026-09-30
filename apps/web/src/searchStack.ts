@@ -1,16 +1,9 @@
 import type { SearchRequestInput } from "@web-grep/shared";
-import type { TimeRange } from "./timeRange.ts";
 
 export type SearchModifiers = {
   caseSensitive: boolean;
   wordMatch: boolean;
   regex: boolean;
-};
-
-export const DEFAULT_MODIFIERS: SearchModifiers = {
-  caseSensitive: false,
-  wordMatch: false,
-  regex: false,
 };
 
 export type QueryPart = {
@@ -49,151 +42,11 @@ export function newPart(
   };
 }
 
-export function parseDraft(raw: string): QueryPart | null {
-  const trimmed = raw.trim();
-  if (trimmed === "") {
-    return null;
-  }
-  return newPart(trimmed);
-}
-
-/** Split a search box into AND terms. Spaces stay in the term; only AND splits. */
-export function parseQueryInput(raw: string, regex = false): string[] {
-  const trimmed = raw.trim();
-  if (trimmed === "") {
-    return [];
-  }
-  if (regex) {
-    return [trimmed];
-  }
-  const terms: string[] = [];
-  let buf = "";
-  let quote: '"' | "'" | null = null;
-  const push = (): void => {
-    const value = buf.trim();
-    if (value !== "") {
-      terms.push(value);
-    }
-    buf = "";
-  };
-  for (let i = 0; i < trimmed.length; i++) {
-    const ch = trimmed[i] ?? "";
-    if (quote !== null) {
-      if (ch === quote) {
-        quote = null;
-      } else {
-        buf += ch;
-      }
-      continue;
-    }
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      const and = trimmed.slice(i).match(/^\s+AND(?:\s+|$)/i);
-      if (and !== null) {
-        push();
-        i += and[0].length - 1;
-        continue;
-      }
-    }
-    buf += ch;
-  }
-  push();
-  return terms;
-}
-
-export function formatQueryInput(terms: string[]): string {
-  if (terms.length <= 1) {
-    return terms[0] ?? "";
-  }
-  return terms
-    .map((term) => {
-      if (/(^|\s)AND(\s|$)/i.test(term)) {
-        return `"${term.replaceAll('"', "")}"`;
-      }
-      return term;
-    })
-    .join(" AND ");
-}
-
-export function commitDraft(parts: QueryPart[], draft: string): QueryPart[] {
-  const part = parseDraft(draft);
-  if (part === null) {
-    return parts;
-  }
-  return [...parts, part];
-}
-
-export function escapeRegex(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function permutations(items: string[]): string[][] {
-  if (items.length <= 1) {
-    return [items];
-  }
-  const out: string[][] = [];
-  for (let i = 0; i < items.length; i++) {
-    const head = items[i] ?? "";
-    const rest = items.filter((_, j) => j !== i);
-    for (const perm of permutations(rest)) {
-      out.push([head, ...perm]);
-    }
-  }
-  return out;
-}
-
-export function stackedQuery(
-  terms: string[],
-  forceRegex = false,
-): { query: string; regex: boolean } {
-  const list = terms.map((item) => item.trim()).filter((item) => item !== "");
-  if (list.length === 0) {
-    return { query: "", regex: forceRegex };
-  }
-  if (list.length === 1) {
-    return { query: list[0] ?? "", regex: forceRegex };
-  }
-  const escaped = forceRegex ? list : list.map(escapeRegex);
-  const orders = escaped.length <= 3 ? permutations(escaped) : [escaped];
-  return {
-    query: orders.map((order) => order.join(".*")).join("|"),
-    regex: true,
-  };
-}
-
-/** First term is the rg source; extra terms are piped `rg | rg`. */
-export function splitAndTerms(
-  parts: string[],
-  _regex = false,
-): { query: string; andTerms: string[] } {
-  const list = parts.map((item) => item.trim()).filter((item) => item !== "");
-  if (list.length <= 1) {
-    return { query: list[0] ?? "", andTerms: [] };
-  }
-  return { query: list[0] ?? "", andTerms: list.slice(1) };
-}
-
 /** Funnel / rail badge: extra AND slots with a non-empty trimmed value. */
 export function countNonEmptyAndTerms(
   parts: ReadonlyArray<Pick<QueryPart, "value">>,
 ): number {
   return parts.slice(1).filter((part) => part.value.trim() !== "").length;
-}
-
-export function compileParts(
-  parts: QueryPart[],
-  forceRegex = false,
-): {
-  query: string;
-  regex: boolean;
-} {
-  return stackedQuery(
-    parts.map((part) => part.value),
-    forceRegex,
-  );
 }
 
 export function shQuote(value: string): string {
@@ -212,17 +65,6 @@ export function joinAbs(root: string, rel: string): string {
     return base;
   }
   return `${base}${sep}${rest}`;
-}
-
-export function findMtimePredicate(range: TimeRange): string {
-  switch (range) {
-    case "today":
-      return "-mmin -$(( $(date +%H) * 60 + $(date +%M) + 1 ))";
-    case "24h":
-      return "-mmin -1440";
-    case "7d":
-      return "-mtime -7";
-  }
 }
 
 function rgContentFlags(

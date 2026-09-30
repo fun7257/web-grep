@@ -9,7 +9,6 @@ import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchHistoryItem } from "../searchHistory.ts";
 import type { QueryPart } from "../searchStack.ts";
 import { countNonEmptyAndTerms, newPart } from "../searchStack.ts";
-import type { TimeRange } from "../timeRange.ts";
 import {
   IconAnd,
   IconHistory,
@@ -29,7 +28,6 @@ export function SearchBar({
   canClear,
   onClear,
   queryRef,
-  timeRange: _timeRange = null,
   history = [],
   onRestoreHistory,
   canGoBack = false,
@@ -46,7 +44,6 @@ export function SearchBar({
   canClear: boolean;
   onClear: () => void;
   queryRef: RefObject<HTMLInputElement | null>;
-  timeRange?: TimeRange | null;
   history?: SearchHistoryItem[];
   onRestoreHistory?: (item: SearchHistoryItem) => void;
   canGoBack?: boolean;
