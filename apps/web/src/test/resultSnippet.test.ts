@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   clipLineEnd,
-  LOG_LINE_CHAR_BUDGET,
+  clipLogLine,
   clipResultSnippet,
   clipResultSnippets,
+  LOG_LINE_CHAR_BUDGET,
   RESULT_SNIPPET_BUDGET,
   RESULT_SNIPPET_LINE_CHARS,
   RESULT_SNIPPET_MAX_BUDGET,
@@ -150,4 +151,118 @@ describe("clipResultSnippet", () => {
     expect(at - clip.start).toBe(RESULT_SNIPPET_PREFIX_MAX);
     expect(clip.end).toBe(text.length);
   });
+
+  it("does not split a surrogate in a snippet prefix", () => {
+    const text = `${"x".repeat(9)}😀${"y".repeat(20)}`;
+    const clip = clipResultSnippets(text, [], 10)[0]!;
+    expect(text.slice(clip.start, clip.end)).toBe("x".repeat(9));
+    expect(loneSurrogate(text.slice(clip.start, clip.end))).toBe(false);
+  });
+
+  it("pulls a window start back onto a surrogate pair", () => {
+    const text = `😀${"x".repeat(149)}needle${"y".repeat(400)}`;
+    const at = text.indexOf("needle");
+    expect(at).toBe(151);
+    const clip = clipResultSnippet(text, [{ start: at, end: at + 6 }]);
+    const view = text.slice(clip.start, clip.end);
+    expect(view.startsWith("😀")).toBe(true);
+    expect(view).toContain("needle");
+    expect(loneSurrogate(view)).toBe(false);
+  });
 });
+
+describe("clipLogLine", () => {
+  it("keeps a line within the list budget whole", () => {
+    const text = `${"x".repeat(100)}needle`;
+    const at = text.indexOf("needle");
+    expect(clipLogLine(text, [{ start: at, end: at + 6 }])).toEqual([
+      { start: 0, end: text.length },
+    ]);
+    const exact = "n".repeat(LOG_LINE_CHAR_BUDGET);
+    expect(
+      clipLogLine(exact, [{ start: exact.length - 1, end: exact.length }]),
+    ).toEqual([{ start: 0, end: exact.length }]);
+  });
+
+  it("reuses the snippet window when the hit is past the prefix", () => {
+    const text = `${"x".repeat(20000)}needle`;
+    const spans = [{ start: 20000, end: 20006 }];
+    expect(clipLogLine(text, spans)).toEqual(clipResultSnippets(text, spans));
+    const clip = clipLogLine(text, spans)[0]!;
+    expect(clip.start).toBe(20000 - RESULT_SNIPPET_PREFIX_MAX);
+    expect(clip.end).toBe(text.length);
+    expect(text.slice(clip.start, clip.end).endsWith("needle")).toBe(true);
+    expect(clip.start).toBeGreaterThan(0);
+  });
+
+  it("keeps only a trailing cut when the hit is near the start", () => {
+    const text = `${"q".repeat(40)}needle${"z".repeat(4000)}`;
+    const at = 40;
+    const clip = clipLogLine(text, [{ start: at, end: at + 6 }])[0]!;
+    expect(clip.start).toBe(0);
+    expect(clip.end).toBeLessThan(text.length);
+    expect(text.slice(clip.start, clip.end)).toContain("needle");
+  });
+
+  it("cuts both sides when the hit is in the middle", () => {
+    const at = 8000;
+    const text = `${"a".repeat(at)}needle${"b".repeat(8000)}`;
+    const clip = clipLogLine(text, [{ start: at, end: at + 6 }])[0]!;
+    expect(clip.start).toBe(at - RESULT_SNIPPET_PREFIX_MAX);
+    expect(clip.end).toBe(at + 6 + RESULT_SNIPPET_PREFIX_MAX);
+    expect(text.slice(clip.start, clip.end)).toContain("needle");
+  });
+
+  it("keeps the first hit when later clusters are dropped", () => {
+    let text = "x".repeat(3500 + 8 * 800 + 10);
+    const spans: Array<{ start: number; end: number }> = [];
+    for (let i = 0; i < 8; i++) {
+      const start = 3500 + i * 800;
+      const word = `T${String(i).padStart(3, "0")}`;
+      text = `${text.slice(0, start)}${word}${text.slice(start + word.length)}`;
+      spans.push({ start, end: start + word.length });
+    }
+    const clips = clipLogLine(text, spans);
+    expect(clips[0]!.start).toBeGreaterThan(0);
+    expect(text.slice(clips[0]!.start, clips[0]!.end)).toContain("T000");
+    expect(clips.length).toBeLessThanOrEqual(RESULT_SNIPPET_MAX_CLUSTERS);
+  });
+
+  it("falls back to the prefix cut when nothing matches", () => {
+    const text = `head${"h".repeat(4000)}`;
+    expect(clipLogLine(text, [])).toEqual([clipLineEnd(text)]);
+    expect(clipLogLine(text, [{ start: 5, end: 5 }])).toEqual([
+      clipLineEnd(text),
+    ]);
+  });
+
+  it("does not split a surrogate around a late CJK hit", () => {
+    const cjk = "前缀😀目标词后缀";
+    expect(cjk.slice(4, 7)).toBe("目标词");
+    const text = `${"x".repeat(4000)}${cjk}`;
+    const at = 4000 + 4;
+    const clip = clipLogLine(text, [{ start: at, end: at + 3 }])[0]!;
+    const view = text.slice(clip.start, clip.end);
+    expect(view.slice(at - clip.start, at - clip.start + 3)).toBe("目标词");
+    expect(view).toContain("😀");
+    expect(loneSurrogate(view)).toBe(false);
+  });
+});
+
+function loneSurrogate(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    const unit = text.charCodeAt(i);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (!(next >= 0xdc00 && next <= 0xdfff)) {
+        return true;
+      }
+      i += 1;
+      continue;
+    }
+    if (unit >= 0xdc00 && unit <= 0xdfff) {
+      return true;
+    }
+  }
+  return false;
+}

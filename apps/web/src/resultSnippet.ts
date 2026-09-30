@@ -34,10 +34,7 @@ function clampSpan(
   return { start, end };
 }
 
-function clusterHits(
-  hits: SnippetClip[],
-  gap: number,
-): SnippetClip[] {
+function clusterHits(hits: SnippetClip[], gap: number): SnippetClip[] {
   const clusters: SnippetClip[] = [];
   for (const hit of hits) {
     const last = clusters[clusters.length - 1];
@@ -85,6 +82,33 @@ function mergeClips(clips: SnippetClip[]): SnippetClip[] {
   return out;
 }
 
+/** Keep both edges off a dangling surrogate so a later slice cannot split a pair. */
+function snapClip(text: string, clip: SnippetClip): SnippetClip {
+  const n = text.length;
+  let start = Math.max(0, Math.min(clip.start, n));
+  let end = Math.max(start, Math.min(clip.end, n));
+  if (start > 0) {
+    const unit = text.charCodeAt(start);
+    if (unit >= 0xdc00 && unit <= 0xdfff) {
+      start -= 1;
+    }
+  }
+  if (end > start && end < n) {
+    const unit = text.charCodeAt(end - 1);
+    if (unit >= 0xd800 && unit <= 0xdbff) {
+      end -= 1;
+    }
+  }
+  if (end < start) {
+    end = start;
+  }
+  return { start, end };
+}
+
+function finishClips(text: string, clips: SnippetClip[]): SnippetClip[] {
+  return mergeClips(clips.map((clip) => snapClip(text, clip)));
+}
+
 export function clipResultSnippets(
   text: string,
   spans: Array<{ start: number; end: number }>,
@@ -100,7 +124,7 @@ export function clipResultSnippets(
   }
   hits.sort((a, b) => a.start - b.start || a.end - b.end);
   if (hits.length === 0) {
-    return [{ start: 0, end: Math.min(n, budget) }];
+    return finishClips(text, [{ start: 0, end: Math.min(n, budget) }]);
   }
 
   const clusters = clusterHits(hits, RESULT_SNIPPET_JOIN_GAP).slice(
@@ -114,13 +138,11 @@ export function clipResultSnippets(
     elastic = Math.min(
       RESULT_SNIPPET_MAX_BUDGET,
       RESULT_SNIPPET_MIN_BUDGET +
-        Math.max(0, clusters.length - 1) *
-          2 *
-          RESULT_SNIPPET_LINE_CHARS,
+        Math.max(0, clusters.length - 1) * 2 * RESULT_SNIPPET_LINE_CHARS,
     );
   }
   if (clusters.length === 1 || last.end - first.start <= elastic) {
-    return [
+    return finishClips(text, [
       windowAround(
         text,
         first.start,
@@ -128,14 +150,15 @@ export function clipResultSnippets(
         elastic,
         RESULT_SNIPPET_PREFIX_MAX,
       ),
-    ];
+    ]);
   }
 
   const per = Math.max(
     RESULT_SNIPPET_LINE_CHARS,
     Math.floor(elastic / clusters.length),
   );
-  return mergeClips(
+  return finishClips(
+    text,
     clusters.map((cluster) =>
       windowAround(
         text,
@@ -155,14 +178,38 @@ export function clipLineEnd(
   text: string,
   budget = LOG_LINE_CHAR_BUDGET,
 ): SnippetClip {
-  let end = Math.min(text.length, Math.max(0, budget));
-  if (end > 0 && end < text.length) {
-    const unit = text.charCodeAt(end - 1);
-    if (unit >= 0xd800 && unit <= 0xdbff) {
-      end -= 1;
+  return snapClip(text, {
+    start: 0,
+    end: Math.min(text.length, Math.max(0, budget)),
+  });
+}
+
+/**
+ * Clip one result-list row.
+ * Lines within the list budget stay whole. Longer lines reuse the snippet
+ * windows so the first hit stays near the front of the row: a prefix cut
+ * hides it, and the row's line clamp never reaches a marker parked at the
+ * end of 3000 characters. With no hit, the prefix cut remains.
+ */
+export function clipLogLine(
+  text: string,
+  spans: Array<{ start: number; end: number }> = [],
+  budget = LOG_LINE_CHAR_BUDGET,
+): SnippetClip[] {
+  if (text.length <= budget) {
+    return [{ start: 0, end: text.length }];
+  }
+  const hits: SnippetClip[] = [];
+  for (const span of spans) {
+    const clamped = clampSpan(span, text.length);
+    if (clamped !== null) {
+      hits.push(clamped);
     }
   }
-  return { start: 0, end };
+  if (hits.length === 0) {
+    return [clipLineEnd(text, budget)];
+  }
+  return clipResultSnippets(text, hits);
 }
 
 export function clipResultSnippet(
@@ -170,10 +217,12 @@ export function clipResultSnippet(
   spans: Array<{ start: number; end: number }>,
   budget = RESULT_SNIPPET_BUDGET,
 ): SnippetClip {
-  return clipResultSnippets(text, spans, budget)[0] ?? {
-    start: 0,
-    end: Math.min(text.length, budget),
-  };
+  return (
+    clipResultSnippets(text, spans, budget)[0] ?? {
+      start: 0,
+      end: Math.min(text.length, budget),
+    }
+  );
 }
 
 export function shiftSpans(

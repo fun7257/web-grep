@@ -19,6 +19,7 @@ export function ThemeToggle() {
       className="theme-toggle"
       onClick={toggle}
       aria-label={t("themeToggle")}
+      aria-pressed={theme === "dark"}
       title={theme === "dark" ? t("themeLight") : t("themeDark")}
     >
       {theme === "dark" ? <IconSun /> : <IconMoon />}
