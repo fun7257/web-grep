@@ -3071,9 +3071,44 @@ describe("search flow", () => {
     });
     expect(screen.getByText("ENGINE")).toBeTruthy();
     expect(screen.queryByText("ENGINE_UNSUPPORTED")).toBeNull();
+    // One failed search (a bad regex, a partial rg failure) must not lock the
+    // next one; only a missing engine does (see the engine:"none" test).
     expect(
       (document.querySelector(".search-go") as HTMLButtonElement).disabled,
-    ).toBe(true);
+    ).toBe(false);
+  });
+
+  it("lets you search again after a search-time ENGINE error", async () => {
+    let calls = 0;
+    mockFetch(() => {
+      calls += 1;
+      if (calls === 1) {
+        return sseResponse([
+          sseEvent("error", {
+            code: "ENGINE",
+            message: "rg: regex parse error:",
+          }),
+        ]);
+      }
+      return sseResponse([
+        sseEvent("hit", HIT_A),
+        sseEvent("done", donePayload({ matchCount: 1, fileCount: 1 })),
+      ]);
+    });
+    render(<App />);
+    typeQuery("(");
+    clickSearch();
+    await waitFor(() => {
+      expect(document.querySelector(".empty-title")?.textContent).toBe(
+        "Search engine unavailable",
+      );
+    });
+    typeQuery("hello");
+    clickSearch();
+    await waitFor(() => {
+      expect(fileRow("src/a.ts")).toBeTruthy();
+    });
+    expect(calls).toBe(2);
   });
 
   it("demotes raw engine stderr under the ENGINE empty-state title", async () => {
@@ -3103,9 +3138,10 @@ describe("search flow", () => {
     const alert = screen.getByRole("alert");
     expect(alert.textContent).toMatch(/Search engine unavailable/);
     expect(alert.textContent).not.toMatch(/exit status 2/);
+    // A search-time ENGINE error does not lock the next search.
     expect(
       (document.querySelector(".search-go") as HTMLButtonElement).disabled,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("disables Search when meta.engine is none", async () => {

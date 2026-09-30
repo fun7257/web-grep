@@ -14,6 +14,13 @@ export type SearchState = {
   meta: SseMeta | null;
   done: SseDone | null;
   error: JsonError | null;
+  /**
+   * True when the error came back as an HTTP response before the stream
+   * opened (preflight: BUSY, ENGINE, INVALID_*), false when it ended an
+   * open stream. An ENGINE error before the stream means there is no rg; one
+   * inside the stream is just that search failing.
+   */
+  errorBeforeStream: boolean;
   progress: SseProgress | null;
   searchCount: number;
 };
@@ -25,7 +32,7 @@ export type SearchAction =
   | { type: "search/progress"; progress: SseProgress }
   | { type: "search/hit"; hit: SseHit }
   | { type: "search/done"; done: SseDone }
-  | { type: "search/error"; error: JsonError }
+  | { type: "search/error"; error: JsonError; beforeStream?: boolean }
   | { type: "search/cancelled" }
   | { type: "search/reset" };
 
@@ -35,6 +42,7 @@ export const initialSearchState: SearchState = {
   meta: null,
   done: null,
   error: null,
+  errorBeforeStream: false,
   progress: null,
   searchCount: 0,
 };
@@ -51,6 +59,7 @@ export function searchReducer(
         meta: null,
         done: null,
         error: null,
+        errorBeforeStream: false,
         progress: null,
       };
     case "search/stream":
@@ -72,7 +81,12 @@ export function searchReducer(
         done: action.done,
       };
     case "search/error":
-      return { ...state, status: "error", error: action.error };
+      return {
+        ...state,
+        status: "error",
+        error: action.error,
+        errorBeforeStream: action.beforeStream === true,
+      };
     case "search/cancelled":
       return { ...state, status: "cancelled" };
     case "search/reset":

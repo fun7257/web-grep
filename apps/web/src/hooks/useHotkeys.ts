@@ -32,6 +32,8 @@ export function useHotkeys(opts: {
   onToggleHelp?: () => void;
   running: boolean;
   modalOpen: boolean;
+  /** True while the shortcut help is open; `?` then closes it. */
+  helpOpen?: boolean;
   queryRef: RefObject<HTMLInputElement | null>;
   listRef: RefObject<HTMLElement | null>;
   previewRef: RefObject<HTMLElement | null>;
@@ -45,6 +47,7 @@ export function useHotkeys(opts: {
     onToggleHelp,
     running,
     modalOpen,
+    helpOpen = false,
     queryRef,
     listRef,
     previewRef,
@@ -73,6 +76,11 @@ export function useHotkeys(opts: {
           event.preventDefault();
           active.blur();
         }
+        return;
+      }
+      if (event.key === "?" && helpOpen && !isTypingTarget(event.target)) {
+        event.preventDefault();
+        onToggleHelp?.();
         return;
       }
       if (isTypingTarget(event.target) || modalOpen) {
@@ -130,6 +138,7 @@ export function useHotkeys(opts: {
     };
   }, [
     hitCount,
+    helpOpen,
     listRef,
     modalOpen,
     onCancel,

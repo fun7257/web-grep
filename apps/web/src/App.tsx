@@ -112,8 +112,13 @@ function AppShell() {
     };
   }, []);
 
+  // Lock when there is no engine: meta says so, or the server refused the
+  // request with ENGINE before opening a stream. An ENGINE error that ends an
+  // open stream (a bad regex, say) is that one search failing, so the next
+  // one may still run.
   const engineDown =
-    token.meta?.engine === "none" || search.error?.code === "ENGINE";
+    token.meta?.engine === "none" ||
+    (search.error?.code === "ENGINE" && search.errorBeforeStream);
   const searchLocked = token.hostForbidden || engineDown;
   const authOpen = token.promptOpen && !token.hostForbidden;
 
@@ -260,6 +265,7 @@ function AppShell() {
       setHelpOpen((open) => !open);
     },
     running: search.status === "running",
+    helpOpen,
     modalOpen:
       helpOpen ||
       shareOpen ||
