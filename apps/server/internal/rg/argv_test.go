@@ -112,7 +112,7 @@ func TestFilterLineArgvInsertsPassthruBeforePattern(t *testing.T) {
 	got := filterLineArgv(base)
 	want := []string{
 		"--no-config", "-F", "-i", "-w",
-		"--passthru", "--line-number", "--no-filename", "--line-buffered", "-a", "--encoding", "none",
+		"--passthru", "--line-number", "--no-filename", "-a", "--encoding", "none",
 		"--", "host",
 	}
 	if !slices.Equal(got, want) {

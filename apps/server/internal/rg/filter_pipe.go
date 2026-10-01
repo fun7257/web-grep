@@ -2,27 +2,56 @@ package rg
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
+	"time"
 
 	"web-grep/internal/logx"
 )
 
-// filterInflight bounds matches that have been handed to the filter
-// processes but not yet judged, and the per-filter result channels.
-const filterInflight = 32
+// Batch flush knobs. rg 15 keeps match lines in its stdout buffer until the
+// filter sees EOF, even with --line-buffered, so a long-lived filter pipe
+// deadlocks against it. Judging a closed batch does not depend on when rg
+// decides to write. Tune these together: a larger batch spends less time in
+// process startup, a smaller one returns the first interactive hits sooner.
+const (
+	// maxBatchHits flushes once this many surviving matches are queued.
+	maxBatchHits = 4096
+
+	// maxBatchBytes flushes once queued raw line bytes (each line already
+	// ends with one '\n') reach this size. A single line at least this
+	// long is its own batch, so one huge line is not stuck waiting for
+	// more input that may never come.
+	maxBatchBytes = 2 << 20
+
+	// idleFlush flushes a non-empty batch after the head has produced no
+	// further match for this long. That is the interactive first-hit path.
+	idleFlush = 20 * time.Millisecond
+
+	// maxBatchAge flushes once the oldest queued match has waited this
+	// long, even if matches are still arriving slowly.
+	maxBatchAge = 150 * time.Millisecond
+
+	// headQueue is the bound on matches sitting between the head reader
+	// and the batcher. The head keeps scanning while a batch is judged,
+	// and a full queue is what applies backpressure.
+	headQueue = maxBatchHits
+)
 
 // filterLineArgv is BuildFilterArgv plus the flags that make each stdin
-// line produce exactly one stdout line: "N:text" when it matches and
-// "N-text" when it does not. Flags sit before "--".
+// line produce exactly one stdout line: "N:text" on a match and "N-text"
+// otherwise. Flags sit before "--".
+//
+// --line-buffered is intentionally absent. rg 15.0.0 does not stream with
+// it; the batch is closed (stdin EOF) before its stdout is read, so the
+// filter's own buffering does not matter.
 //
 // --encoding none matches the raw bytes of each line. The text written here
 // is the line already taken from the head rg's JSON, so this rg must not
@@ -33,7 +62,7 @@ const filterInflight = 32
 // quotes, and CRLF) agrees. Sniffing once per process would also make one
 // line's verdict depend on the lines before it.
 func filterLineArgv(base []string) []string {
-	extra := []string{"--passthru", "--line-number", "--no-filename", "--line-buffered", "-a", "--encoding", "none"}
+	extra := []string{"--passthru", "--line-number", "--no-filename", "-a", "--encoding", "none"}
 	n := len(base)
 	out := make([]string, 0, n+len(extra))
 	if n >= 2 && base[n-2] == "--" {
@@ -47,136 +76,143 @@ func filterLineArgv(base []string) []string {
 	return out
 }
 
-type filterDecision struct {
-	n    int
-	pass bool
+type queuedMatch struct {
+	m       Match
+	payload []byte
 }
 
-type filterStage struct {
-	cmd         *exec.Cmd
-	stdin       io.WriteCloser
-	bw          *bufio.Writer
-	stdout      io.ReadCloser
-	decisions   chan filterDecision
-	nextN       int
-	readErr     error
-	inputClosed bool
+type headEvent struct {
+	begin bool
+	match queuedMatch
+	err   error
+}
+
+// liveProcs is the set of rg processes this search has started and not yet
+// waited. Cancel terminates the current set; finished commands are removed
+// so a later cancel does not signal a reused pid.
+type liveProcs struct {
+	mu   sync.Mutex
+	cmds []*exec.Cmd
+}
+
+func (p *liveProcs) add(cmd *exec.Cmd) {
+	p.mu.Lock()
+	p.cmds = append(p.cmds, cmd)
+	p.mu.Unlock()
+}
+
+func (p *liveProcs) remove(cmd *exec.Cmd) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i, c := range p.cmds {
+		if c != cmd {
+			continue
+		}
+		last := len(p.cmds) - 1
+		p.cmds[i] = p.cmds[last]
+		p.cmds[last] = nil
+		p.cmds = p.cmds[:last]
+		return
+	}
+}
+
+func (p *liveProcs) terminate() {
+	p.mu.Lock()
+	cmds := append([]*exec.Cmd(nil), p.cmds...)
+	p.mu.Unlock()
+	terminateAll(cmds)
 }
 
 func (e Engine) runFiltered(ctx context.Context, dir string, argv []string, filters [][]string, emit func(Match) error, progress func(files int), filesAlready int) (int, error) {
 	// parent is the caller's context. The child is canceled when this
 	// function decides to stop the pipeline; that must not be reported as
-	// the caller's cancel, or a dead filter looks like a clean abort.
+	// the caller's cancel, or a filter failure looks like a clean abort.
 	parent := ctx
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
-	head := exec.Command(e.Bin, argv...)
+	procs := &liveProcs{}
+	head := exec.CommandContext(ctx, e.Bin, argv...)
 	head.Dir = dir
 	head.Env = Env()
+	head.Cancel = terminateCmd(head)
 	setProcAttr(head)
 	headOut, err := head.StdoutPipe()
 	if err != nil {
 		return filesAlready, err
 	}
-
-	cmds := make([]*exec.Cmd, 0, 1+len(filters))
-	cmds = append(cmds, head)
-	stderrs := make([]strings.Builder, 1+len(filters))
-	head.Stderr = &limitWriter{w: &stderrs[0], n: stderrLimit}
-
-	stages := make([]*filterStage, len(filters))
-	for i, fargv := range filters {
-		cmd := exec.Command(e.Bin, filterLineArgv(fargv)...)
-		cmd.Dir = dir
-		cmd.Env = Env()
-		setProcAttr(cmd)
-		stdin, err := cmd.StdinPipe()
-		if err != nil {
-			_ = headOut.Close()
-			closeFilterPipes(stages)
-			return filesAlready, err
-		}
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			_ = stdin.Close()
-			_ = headOut.Close()
-			closeFilterPipes(stages)
-			return filesAlready, err
-		}
-		cmd.Stderr = &limitWriter{w: &stderrs[i+1], n: stderrLimit}
-		stages[i] = &filterStage{
-			cmd:       cmd,
-			stdin:     stdin,
-			bw:        bufio.NewWriterSize(stdin, 32*1024),
-			stdout:    stdout,
-			decisions: make(chan filterDecision, filterInflight),
-			nextN:     1,
-		}
-		cmds = append(cmds, cmd)
-	}
+	var headStderr strings.Builder
+	head.Stderr = &limitWriter{w: &headStderr, n: stderrLimit}
 
 	if logx.DebugEnabled() {
 		logged := formatCmd(e.Bin, argv)
-		for _, st := range stages {
-			logged += " | " + formatCmd(st.cmd.Args[0], st.cmd.Args[1:])
+		for _, fargv := range filters {
+			logged += " | " + formatCmd(e.Bin, filterLineArgv(fargv))
 		}
 		logx.Debug("rg", map[string]any{"cwd": dir, "cmd": logged})
 	}
 
-	for i, cmd := range cmds {
-		if err := cmd.Start(); err != nil {
-			terminateAll(cmds[:i])
-			_ = headOut.Close()
-			closeFilterPipes(stages)
-			for _, started := range cmds[:i] {
-				_ = started.Wait()
-			}
-			return filesAlready, err
-		}
+	if err := head.Start(); err != nil {
+		_ = headOut.Close()
+		return filesAlready, err
 	}
+	procs.add(head)
 
-	var wg sync.WaitGroup
-	for _, st := range stages {
-		wg.Add(1)
-		go func(st *filterStage) {
-			defer wg.Done()
-			defer close(st.decisions)
-			st.readErr = readFilterDecisions(ctx, st.stdout, st.decisions)
-		}(st)
-	}
-
+	// The watch is a second path next to CommandContext's Cancel: both end
+	// the process group. Closing stopWatch makes the goroutine exit without
+	// signaling, so a late wake cannot kill a pid that Wait already reaped.
+	// Search waits for that goroutine before returning.
 	stopWatch := make(chan struct{})
+	watchDone := make(chan struct{})
 	go func() {
+		defer close(watchDone)
 		select {
 		case <-ctx.Done():
-			terminateAll(cmds)
+			procs.terminate()
 		case <-stopWatch:
 		}
 	}()
+	defer func() {
+		close(stopWatch)
+		<-watchDone
+	}()
 
-	// judgeMatches closes each filter stdin itself once the head scan has
-	// finished and every match line has been written. rg does not emit a
-	// verdict for a still-open stdin until the 3-byte encoding peek fills,
-	// even with --encoding none. Closing first is what unblocks a short
-	// line. Error paths return before that close; closeInput below covers
-	// them and is a no-op after a successful finish.
-	files, emitErr, runErr := judgeMatches(ctx, headOut, stages, emit, progress, filesAlready)
+	events := make(chan headEvent, headQueue)
+	var readerWG sync.WaitGroup
+	readerWG.Add(1)
+	go func() {
+		defer readerWG.Done()
+		defer close(events)
+		readHead(ctx, headOut, events)
+	}()
+
+	// Empty-stdin preflight runs beside the head. An illegal filter
+	// pattern exits 2 before any match exists, including when the head
+	// has nothing to judge. It must not be on the path of the first hit.
+	preflightCh := make(chan error, 1)
+	var preflightWG sync.WaitGroup
+	preflightWG.Add(1)
+	go func() {
+		defer preflightWG.Done()
+		err := e.preflightFilters(ctx, dir, filters, procs)
+		select {
+		case preflightCh <- err:
+		case <-ctx.Done():
+		}
+	}()
+
+	files, emitErr, runErr := e.consume(ctx, dir, filters, events, preflightCh, emit, progress, filesAlready, procs)
 
 	if emitErr != nil || runErr != nil || parent.Err() != nil {
-		terminateAll(cmds)
 		cancel()
+		procs.terminate()
 	}
-	for _, st := range stages {
-		st.closeInput()
-	}
-	wg.Wait()
-
-	waitErr, partial := waitCmds(cmds, stderrs)
-	close(stopWatch)
-	if partial > 0 && waitErr == nil && emitErr == nil && runErr == nil && parent.Err() == nil {
-		logx.Warn("rg skipped unreadable paths", map[string]any{"stages": partial})
-	}
+	readerWG.Wait()
+	// Drop the head from the live set before Wait so the watch's snapshot
+	// cannot include it once the pid is eligible for reuse.
+	procs.remove(head)
+	headErr := head.Wait()
+	preflightWG.Wait()
 
 	if emitErr != nil {
 		return files, emitErr
@@ -184,155 +220,59 @@ func (e Engine) runFiltered(ctx context.Context, dir string, argv []string, filt
 	if err := parent.Err(); err != nil {
 		return files, err
 	}
-	msg := joinedStderr(stderrs)
-	if waitErr != nil && msg != "" {
-		headMsg, n := logx.ClipForLog(msg, dir, filepath.Base(dir))
-		logx.Warn("rg stderr", map[string]any{"stderr": headMsg, "lines": n})
-		logx.Debug("rg stderr", map[string]any{"stderr": msg})
-		return files, fmt.Errorf("%s", msg)
-	}
-	if runErr != nil && !isClosedPipe(runErr) {
+	if runErr != nil && !errors.Is(runErr, context.Canceled) && !errors.Is(runErr, context.DeadlineExceeded) {
 		return files, runErr
 	}
-	if waitErr != nil {
-		if msg != "" {
-			headMsg, n := logx.ClipForLog(msg, dir, filepath.Base(dir))
-			logx.Warn("rg stderr", map[string]any{"stderr": headMsg, "lines": n})
-			logx.Debug("rg stderr", map[string]any{"stderr": msg})
-			return files, fmt.Errorf("%s", msg)
+	msg := strings.TrimSpace(headStderr.String())
+	if headErr != nil && !benignRgExit(headErr) {
+		if partialRgExit(headErr, msg) && runErr == nil {
+			logx.Warn("rg skipped unreadable paths", map[string]any{"stages": 1})
+		} else if msg != "" {
+			return files, rgStderrError(dir, msg)
+		} else if runErr == nil {
+			return files, headErr
 		}
-		return files, waitErr
+	}
+	if runErr != nil {
+		return files, runErr
 	}
 	return files, nil
 }
 
-func closeFilterPipes(stages []*filterStage) {
-	for _, st := range stages {
-		if st == nil {
-			continue
-		}
-		st.closeInput()
-		if st.stdout != nil {
-			_ = st.stdout.Close()
-		}
-	}
-}
-
-// closeInput drops the write side without flushing. Used when the search is
-// abandoning the pipeline; flushing here can block on a filter that is
-// already dead or stopped.
-func (st *filterStage) closeInput() {
-	if st == nil || st.inputClosed {
-		return
-	}
-	st.inputClosed = true
-	if st.stdin != nil {
-		_ = st.stdin.Close()
-	}
-}
-
-// finishInput flushes buffered match lines and then closes stdin so rg sees
-// EOF. Callers must not write to the filter after this returns.
-func (st *filterStage) finishInput() error {
-	if st == nil || st.inputClosed {
+func terminateCmd(cmd *exec.Cmd) func() error {
+	return func() error {
+		terminate(cmd)
 		return nil
 	}
-	var err error
-	if st.bw != nil {
-		err = st.bw.Flush()
-	}
-	st.closeInput()
-	return err
 }
 
-func finishFilterInputs(stages []*filterStage) error {
-	var first error
-	for i, st := range stages {
-		if err := st.finishInput(); err != nil && first == nil {
-			first = filterWriteErr(i, err)
-		}
-	}
-	return first
+func rgStderrError(dir, msg string) error {
+	msg = strings.TrimSpace(msg)
+	head, n := logx.ClipForLog(msg, dir, filepath.Base(dir))
+	logx.Warn("rg stderr", map[string]any{"stderr": head, "lines": n})
+	logx.Debug("rg stderr", map[string]any{"stderr": msg})
+	return fmt.Errorf("%s", msg)
 }
 
-func waitCmds(cmds []*exec.Cmd, stderrs []strings.Builder) (error, int) {
-	var waitErr error
-	partial := 0
-	for i := len(cmds) - 1; i >= 0; i-- {
-		err := cmds[i].Wait()
-		if err == nil || benignRgExit(err) {
-			continue
-		}
-		if partialRgExit(err, stderrs[i].String()) {
-			partial++
-			continue
-		}
-		if waitErr == nil {
-			waitErr = err
-		}
-	}
-	return waitErr, partial
-}
-
-func joinedStderr(stderrs []strings.Builder) string {
-	msg := ""
-	for i := range stderrs {
-		part := strings.TrimSpace(stderrs[i].String())
-		if part == "" {
-			continue
-		}
-		if msg != "" {
-			msg += "; "
-		}
-		msg += part
-	}
-	return msg
-}
-
-func judgeMatches(ctx context.Context, head io.Reader, stages []*filterStage, emit func(Match) error, progress func(int), filesAlready int) (files int, emitErr, runErr error) {
-	sc := bufio.NewScanner(head)
+func readHead(ctx context.Context, r io.Reader, out chan<- headEvent) {
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
-	files = filesAlready
-	pending := make([]Match, 0, filterInflight)
-	fed := 0
-
-	flushOne := func() (error, error) {
-		m := pending[0]
-		copy(pending, pending[1:])
-		pending[len(pending)-1] = Match{}
-		pending = pending[:len(pending)-1]
-		passAll := true
-		for i, st := range stages {
-			d, err := recvDecision(ctx, i, st)
-			if err != nil {
-				return nil, err
-			}
-			if d.n != st.nextN {
-				return nil, fmt.Errorf("rg filter %d result %d out of order, want %d", i+1, d.n, st.nextN)
-			}
-			st.nextN++
-			if !d.pass {
-				passAll = false
-			}
+	send := func(ev headEvent) bool {
+		select {
+		case out <- ev:
+			return true
+		case <-ctx.Done():
+			return false
 		}
-		if !passAll {
-			return nil, nil
-		}
-		if err := emit(m); err != nil {
-			return err, nil
-		}
-		return nil, nil
 	}
-
 	for sc.Scan() {
-		if err := ctx.Err(); err != nil {
-			return files, nil, err
+		if ctx.Err() != nil {
+			return
 		}
 		line := sc.Bytes()
 		if IsBeginLine(line) {
-			files++
-			if progress != nil {
-				progress(files)
+			if !send(headEvent{begin: true}) {
+				return
 			}
 			continue
 		}
@@ -341,122 +281,336 @@ func judgeMatches(ctx context.Context, head io.Reader, stages []*filterStage, em
 			continue
 		}
 		if payload == nil {
-			return files, nil, errors.New("rg match line has undecodable bytes")
+			send(headEvent{err: errors.New("rg match line has undecodable bytes")})
+			return
 		}
-		if len(pending) == filterInflight {
-			if eErr, rErr := flushOne(); eErr != nil || rErr != nil {
-				return files, eErr, rErr
-			}
-		}
-		if err := writeFilterLine(stages, payload); err != nil {
-			return files, nil, err
-		}
-		pending = append(pending, m)
-		fed++
-	}
-	if err := sc.Err(); err != nil && !isClosedPipe(err) {
-		return files, nil, err
-	}
-	if err := ctx.Err(); err != nil {
-		return files, nil, err
-	}
-	// Head is done. Flush and close every filter stdin before reading the
-	// verdicts still in flight. A short stream (under 3 bytes, the encoding
-	// peek) stays silent until EOF, even with --encoding none. Streaming
-	// waits above are unchanged: they only run once a full window of lines
-	// has already been written, which is enough for rg to emit.
-	if err := finishFilterInputs(stages); err != nil {
-		return files, nil, err
-	}
-	for len(pending) > 0 {
-		if err := ctx.Err(); err != nil {
-			return files, nil, err
-		}
-		if eErr, rErr := flushOne(); eErr != nil || rErr != nil {
-			return files, eErr, rErr
+		if !send(headEvent{match: queuedMatch{m: m, payload: payload}}) {
+			return
 		}
 	}
-	for i, st := range stages {
-		if st.nextN != fed+1 {
-			return files, nil, fmt.Errorf("rg filter %d judged %d matches, fed %d", i+1, st.nextN-1, fed)
-		}
+	if err := sc.Err(); err != nil && ctx.Err() == nil && !isClosedPipe(err) {
+		send(headEvent{err: err})
 	}
-	return files, nil, nil
 }
 
-func writeFilterLine(stages []*filterStage, payload []byte) error {
-	for i, st := range stages {
-		if _, err := st.bw.Write(payload); err != nil {
-			return filterWriteErr(i, err)
+func (e Engine) preflightFilters(ctx context.Context, dir string, filters [][]string, procs *liveProcs) error {
+	errc := make(chan error, len(filters))
+	var wg sync.WaitGroup
+	for i, fargv := range filters {
+		wg.Add(1)
+		go func(i int, fargv []string) {
+			defer wg.Done()
+			if _, err := e.runOneFilter(ctx, dir, fargv, nil, 0, i, procs); err != nil {
+				errc <- err
+			}
+		}(i, fargv)
+	}
+	wg.Wait()
+	close(errc)
+	for err := range errc {
+		if err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func filterWriteErr(i int, err error) error {
-	if isBrokenPipe(err) {
-		return fmt.Errorf("rg filter %d closed its pipe: %w", i+1, err)
+func (e Engine) consume(ctx context.Context, dir string, filters [][]string, events <-chan headEvent, preflightCh chan error, emit func(Match) error, progress func(int), filesAlready int, procs *liveProcs) (files int, emitErr, runErr error) {
+	files = filesAlready
+	var (
+		batch      []queuedMatch
+		batchBytes int
+		batchFirst time.Time
+		batchLast  time.Time
+		timer      *time.Timer
+		wakeC      <-chan time.Time
+	)
+	stopWake := func() {
+		if timer == nil {
+			wakeC = nil
+			return
+		}
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		wakeC = nil
+	}
+	armWake := func() {
+		stopWake()
+		if len(batch) == 0 {
+			return
+		}
+		d := batchWakeDelay(batchFirst, batchLast)
+		if timer == nil {
+			timer = time.NewTimer(d)
+		} else {
+			timer.Reset(d)
+		}
+		wakeC = timer.C
+	}
+	defer stopWake()
+
+	flush := func() (error, error) {
+		if len(batch) == 0 {
+			stopWake()
+			return nil, nil
+		}
+		hits := batch
+		batch = nil
+		batchBytes = 0
+		batchFirst = time.Time{}
+		batchLast = time.Time{}
+		stopWake()
+		return e.judgeBatch(ctx, dir, filters, hits, emit, procs)
+	}
+
+	for {
+		if preflightCh != nil {
+			select {
+			case err := <-preflightCh:
+				preflightCh = nil
+				if err != nil {
+					return files, nil, err
+				}
+			default:
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return files, nil, ctx.Err()
+		case err := <-preflightCh:
+			preflightCh = nil
+			if err != nil {
+				return files, nil, err
+			}
+		case <-wakeC:
+			if eErr, rErr := flush(); eErr != nil || rErr != nil {
+				return files, eErr, rErr
+			}
+		case ev, ok := <-events:
+			if !ok {
+				if err := ctx.Err(); err != nil {
+					return files, nil, err
+				}
+				if eErr, rErr := flush(); eErr != nil || rErr != nil {
+					return files, eErr, rErr
+				}
+				if preflightCh != nil {
+					select {
+					case err := <-preflightCh:
+						if err != nil {
+							return files, nil, err
+						}
+					case <-ctx.Done():
+						return files, nil, ctx.Err()
+					}
+				}
+				return files, nil, nil
+			}
+			if ev.err != nil {
+				return files, nil, ev.err
+			}
+			if ev.begin {
+				files++
+				if progress != nil {
+					progress(files)
+				}
+				continue
+			}
+			if eErr, rErr := enqueueMatch(&batch, &batchBytes, &batchFirst, &batchLast, ev.match, flush, armWake); eErr != nil || rErr != nil {
+				return files, eErr, rErr
+			}
+		}
+	}
+}
+
+// enqueueMatch appends one match and flushes when the batch is full.
+// A line of maxBatchBytes or more is flushed as a batch by itself.
+func enqueueMatch(batch *[]queuedMatch, batchBytes *int, first, last *time.Time, m queuedMatch, flush func() (error, error), armWake func()) (error, error) {
+	if len(m.payload) >= maxBatchBytes {
+		if eErr, rErr := flush(); eErr != nil || rErr != nil {
+			return eErr, rErr
+		}
+		*batch = append(*batch, m)
+		*batchBytes = len(m.payload)
+		now := time.Now()
+		*first = now
+		*last = now
+		return flush()
+	}
+	if len(*batch) > 0 && *batchBytes+len(m.payload) > maxBatchBytes {
+		if eErr, rErr := flush(); eErr != nil || rErr != nil {
+			return eErr, rErr
+		}
+	}
+	now := time.Now()
+	if len(*batch) == 0 {
+		*first = now
+	}
+	*batch = append(*batch, m)
+	*batchBytes += len(m.payload)
+	*last = now
+	if len(*batch) >= maxBatchHits || *batchBytes >= maxBatchBytes {
+		return flush()
+	}
+	armWake()
+	return nil, nil
+}
+
+func batchWakeDelay(first, last time.Time) time.Duration {
+	now := time.Now()
+	deadline := last.Add(idleFlush)
+	if age := first.Add(maxBatchAge); age.Before(deadline) {
+		deadline = age
+	}
+	d := deadline.Sub(now)
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+// judgeBatch runs each filter over the lines the previous filter kept.
+// Passing hits are emitted in the head's order.
+func (e Engine) judgeBatch(ctx context.Context, dir string, filters [][]string, hits []queuedMatch, emit func(Match) error, procs *liveProcs) (emitErr, runErr error) {
+	idx := make([]int, len(hits))
+	for i := range hits {
+		idx[i] = i
+	}
+	for fi, fargv := range filters {
+		if len(idx) == 0 {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		var buf bytes.Buffer
+		for _, i := range idx {
+			buf.Write(hits[i].payload)
+		}
+		pass, err := e.runOneFilter(ctx, dir, fargv, buf.Bytes(), len(idx), fi, procs)
+		if err != nil {
+			return nil, err
+		}
+		if len(pass) != len(idx) {
+			return nil, fmt.Errorf("rg filter ended before judging every match: filter %d judged %d, fed %d", fi+1, len(pass), len(idx))
+		}
+		next := make([]int, 0, len(idx))
+		for j, i := range idx {
+			if pass[j] {
+				next = append(next, i)
+			}
+		}
+		idx = next
+	}
+	for _, i := range idx {
+		if err := emit(hits[i].m); err != nil {
+			return err, nil
+		}
+	}
+	return nil, nil
+}
+
+// runOneFilter runs one filter rg over stdin and returns one bool per fed
+// line. fed == 0 (empty preflight) still runs rg so a bad pattern fails
+// before the head has any match. Exit 0 and 1 are success; any other exit
+// is returned with stderr. partialRgExit stays a non-error. The number of
+// parsed stdout lines must equal fed.
+func (e Engine) runOneFilter(ctx context.Context, dir string, base []string, stdin []byte, fed, index int, procs *liveProcs) ([]bool, error) {
+	cmd := exec.CommandContext(ctx, e.Bin, filterLineArgv(base)...)
+	cmd.Dir = dir
+	cmd.Env = Env()
+	cmd.Cancel = terminateCmd(cmd)
+	setProcAttr(cmd)
+	if stdin == nil {
+		stdin = []byte{}
+	}
+	cmd.Stdin = bytes.NewReader(stdin)
+	var stderr strings.Builder
+	cmd.Stderr = &limitWriter{w: &stderr, n: stderrLimit}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
+		return nil, err
+	}
+	procs.add(cmd)
+	defer procs.remove(cmd)
+
+	out, readErr := io.ReadAll(stdout)
+	waitErr := cmd.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if readErr != nil && !isClosedPipe(readErr) {
+		return nil, readErr
+	}
+	if err := filterExitError(dir, waitErr, stderr.String()); err != nil {
+		return nil, err
+	}
+	return parsePassthruOutput(out, fed, index)
+}
+
+func filterExitError(dir string, err error, stderr string) error {
+	if err == nil || benignFilterExit(err) {
+		return nil
+	}
+	if partialRgExit(err, stderr) {
+		logx.Warn("rg skipped unreadable paths", map[string]any{"stages": 1})
+		return nil
+	}
+	if msg := strings.TrimSpace(stderr); msg != "" {
+		return rgStderrError(dir, msg)
 	}
 	return err
 }
 
-func recvDecision(ctx context.Context, i int, st *filterStage) (filterDecision, error) {
-	select {
-	case d, open := <-st.decisions:
-		if !open {
-			return filterDecision{}, filterClosedErr(st)
-		}
-		return d, nil
-	case <-ctx.Done():
-		return filterDecision{}, ctx.Err()
+func benignFilterExit(err error) bool {
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		return false
+	}
+	switch ee.ExitCode() {
+	case 0, 1:
+		return true
 	default:
-	}
-	// Only this filter is waiting on input. Flushing the others can block
-	// on a filter whose stdout reader is already parked on a full channel.
-	// After finishInput the buffer is empty and the write end is closed;
-	// flushing again would write to a closed pipe.
-	if !st.inputClosed {
-		if err := st.bw.Flush(); err != nil {
-			return filterDecision{}, filterWriteErr(i, err)
-		}
-	}
-	select {
-	case d, open := <-st.decisions:
-		if !open {
-			return filterDecision{}, filterClosedErr(st)
-		}
-		return d, nil
-	case <-ctx.Done():
-		return filterDecision{}, ctx.Err()
+		return false
 	}
 }
 
-func filterClosedErr(st *filterStage) error {
-	if st.readErr != nil && !errors.Is(st.readErr, context.Canceled) && !isClosedPipe(st.readErr) {
-		return st.readErr
+func parsePassthruOutput(out []byte, fed, index int) ([]bool, error) {
+	pass := make([]bool, 0, fed)
+	if len(out) == 0 {
+		if fed == 0 {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("rg filter ended before judging every match: filter %d judged %d, fed %d", index+1, 0, fed)
 	}
-	return errors.New("rg filter ended before judging every match")
-}
-
-func readFilterDecisions(ctx context.Context, r io.ReadCloser, out chan<- filterDecision) error {
-	defer r.Close()
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+	sc := bufio.NewScanner(bytes.NewReader(out))
+	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024+4096)
 	for sc.Scan() {
-		n, pass, ok := parsePassthruPrefix(sc.Bytes())
+		n, okPass, ok := parsePassthruPrefix(sc.Bytes())
 		if !ok {
-			return fmt.Errorf("rg filter: unexpected output %q", clipLine(sc.Bytes()))
+			return nil, fmt.Errorf("rg filter %d: unexpected output %q", index+1, clipLine(sc.Bytes()))
 		}
-		select {
-		case out <- filterDecision{n: n, pass: pass}:
-		case <-ctx.Done():
-			return ctx.Err()
+		want := len(pass) + 1
+		if n != want {
+			return nil, fmt.Errorf("rg filter %d result %d out of order, want %d", index+1, n, want)
 		}
+		pass = append(pass, okPass)
 	}
-	if err := sc.Err(); err != nil && !isClosedPipe(err) {
-		return err
+	if err := sc.Err(); err != nil {
+		return nil, err
 	}
-	return nil
+	if len(pass) != fed {
+		return nil, fmt.Errorf("rg filter ended before judging every match: filter %d judged %d, fed %d", index+1, len(pass), fed)
+	}
+	return pass, nil
 }
 
 func parsePassthruPrefix(line []byte) (n int, pass, ok bool) {
@@ -489,15 +643,4 @@ func clipLine(b []byte) string {
 		b = b[:80]
 	}
 	return string(b)
-}
-
-func isBrokenPipe(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, syscall.EPIPE) || errors.Is(err, io.ErrClosedPipe) || errors.Is(err, os.ErrClosed) {
-		return true
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "broken pipe") || strings.Contains(msg, "closed pipe")
 }
