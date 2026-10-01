@@ -2446,11 +2446,6 @@ html[data-theme="dark"] .icon,
   overflow: hidden;
 }
 
-.result-virtual-row .result-group-header {
-  height: auto;
-  min-height: 0;
-}
-
 .result-loc {
   flex: none;
   white-space: nowrap;
@@ -3402,6 +3397,10 @@ html[data-theme="light"] .search-filter-hint {
   font-weight: 700;
 }
 
+html[data-theme="light"] .result-log.selected .result-line-pill {
+  color: var(--accent-hover);
+}
+
 .result-log .result-text {
   grid-column: 2;
   min-width: 0;
@@ -3481,6 +3480,10 @@ html[data-theme="light"] .search-filter-hint {
 .result-group-dir {
   color: var(--faint);
   font-weight: 450;
+}
+
+html[data-theme="light"] .result-group-dir {
+  color: var(--muted);
 }
 
 .result-group-name {

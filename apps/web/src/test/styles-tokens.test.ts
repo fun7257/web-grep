@@ -387,6 +387,66 @@ describe("shipped stylesheet tokens", () => {
     expect(css).toContain(".tree-row:has(:focus-visible) .tree-check");
   });
 
+  it("keeps in-list file headers at 36px and light result text at 4.5:1", () => {
+    expect(css).not.toMatch(
+      /\.result-virtual-row\s+\.result-group-header\s*\{[^}]*height:\s*auto/,
+    );
+    const header = ruleBody(".result-group-header");
+    expect(header).toContain("height: 36px");
+    expect(header).toContain("min-height: 36px");
+    expect(header).not.toContain("!important");
+    expect(ruleBody(".result-group-dir")).toContain("color: var(--faint)");
+    expect(ruleBody(".result-log.selected .result-line-pill")).toContain(
+      "color: var(--accent)",
+    );
+    expect(css).toContain(
+      'html[data-theme="light"] .result-group-dir {\n  color: var(--muted);',
+    );
+    expect(css).toContain(
+      'html[data-theme="light"] .result-log.selected .result-line-pill {\n  color: var(--accent-hover);',
+    );
+
+    const blocks = {
+      dark: css.slice(
+        css.indexOf('html[data-theme="dark"]'),
+        css.indexOf('html[data-theme="light"]'),
+      ),
+      light: css.slice(css.indexOf('html[data-theme="light"]')),
+    };
+    const hex = (block: string, name: string): number[] => {
+      const m = block.match(new RegExp(`${name}:\\s*#([0-9a-fA-F]{6})`));
+      if (m?.[1] === undefined) {
+        throw new Error(`missing ${name}`);
+      }
+      const v = m[1];
+      return [0, 2, 4].map((i) => Number.parseInt(v.slice(i, i + 2), 16));
+    };
+    const lum = ([r, g, b]: number[]): number => {
+      const lin = (c: number): number => {
+        const v = c / 255;
+        return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+      };
+      return 0.2126 * lin(r ?? 0) + 0.7152 * lin(g ?? 0) + 0.0722 * lin(b ?? 0);
+    };
+    const ratio = (fg: number[], bg: number[]): number => {
+      const a = lum(fg);
+      const b = lum(bg);
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    };
+    expect(
+      ratio(hex(blocks.light, "--muted"), hex(blocks.light, "--bg")),
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(
+      ratio(hex(blocks.light, "--accent-hover"), hex(blocks.light, "--bg")),
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(
+      ratio(hex(blocks.dark, "--faint"), hex(blocks.dark, "--bg")),
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(
+      ratio(hex(blocks.dark, "--accent"), hex(blocks.dark, "--bg")),
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
   it("keeps the primary button text at 4.5:1 or better in both themes", () => {
     const blocks = {
       dark: css.slice(
