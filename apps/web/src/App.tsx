@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AuthDialog } from "./components/AuthDialog.tsx";
 import {
   ContextModal,
   type ContextTarget,
@@ -11,13 +12,16 @@ import {
   useTreeOpen,
 } from "./components/FileTree.tsx";
 import { HotkeyHelpModal } from "./components/HotkeyHelpModal.tsx";
-
 import { ResultList } from "./components/ResultList.tsx";
 import { SearchBar } from "./components/SearchBar.tsx";
 import { ShareModal } from "./components/ShareModal.tsx";
-import { InfoCue, StatusBar, WarnBanners } from "./components/StatusBar.tsx";
+import { InfoCue, ResultHead, WarnBanners } from "./components/StatusBar.tsx";
 import { Toast } from "./components/Toast.tsx";
-import { AuthDialog } from "./components/AuthDialog.tsx";
+import { copyText } from "./copyText.ts";
+import { parseGlobs } from "./globs.ts";
+import type { HlTermInput } from "./highlight.ts";
+import { useAuth } from "./hooks/useAuth.ts";
+import { useBatchedHits } from "./hooks/useBatchedHits.ts";
 import { useHotkeys } from "./hooks/useHotkeys.ts";
 import { LocaleProvider, useLocale } from "./hooks/useLocale.ts";
 import { useResizablePanes } from "./hooks/useResizablePanes.ts";
@@ -25,25 +29,16 @@ import { useSearch } from "./hooks/useSearch.ts";
 import { useSearchSession } from "./hooks/useSearchSession.ts";
 import { useSearchTrail } from "./hooks/useSearchTrail.ts";
 import { useShareLink } from "./hooks/useShareLink.ts";
-import { copyText } from "./copyText.ts";
-import { parseGlobs } from "./globs.ts";
-import type { HlTermInput } from "./highlight.ts";
 import { resolvePreviewChunk } from "./previewChunk.ts";
-import { useAuth } from "./hooks/useAuth.ts";
-import { useBatchedHits } from "./hooks/useBatchedHits.ts";
 import type { SearchNavEntry } from "./searchNav.ts";
 import {
   buildShareUrl,
   captureShareState,
   type ShareState,
 } from "./searchShare.ts";
-import { buildRgShareCommand } from "./shareCommand.ts";
 import { newPart } from "./searchStack.ts";
-import {
-  loadTimeRange,
-  saveTimeRange,
-  type TimeRange,
-} from "./timeRange.ts";
+import { buildRgShareCommand } from "./shareCommand.ts";
+import { loadTimeRange, saveTimeRange, type TimeRange } from "./timeRange.ts";
 import {
   prunePicksByExclude,
   removePick,
@@ -232,6 +227,79 @@ function AppShell() {
     [searchWithParts],
   );
 
+  const retrySearch = useCallback(() => {
+    if (lastStack === null) {
+      return;
+    }
+    searchWithParts(lastStack.parts);
+  }, [lastStack, searchWithParts]);
+
+  const clearTimeAndSearch = useCallback(() => {
+    setTimeRange(null);
+    saveTimeRange(null);
+    if (lastStack === null) {
+      return;
+    }
+    // Pass null explicitly: setTimeRange has not committed yet.
+    searchWithParts(lastStack.parts, [], null);
+  }, [lastStack, searchWithParts]);
+
+  const clearExcludeAndSearch = useCallback(() => {
+    setExcludeGlobs("");
+    if (lastStack === null) {
+      return;
+    }
+    searchWithParts(lastStack.parts, [], timeRange, picks, "");
+  }, [lastStack, picks, searchWithParts, timeRange]);
+
+  const pendingExcludeFocus = useRef(false);
+  const focusExcludeInput = useCallback(() => {
+    const focusNow = (): boolean => {
+      const input = document.querySelector<HTMLInputElement>(
+        ".exclude-chip-input",
+      );
+      if (input === null) {
+        return false;
+      }
+      input.focus();
+      pendingExcludeFocus.current = false;
+      return true;
+    };
+    if (focusNow()) {
+      return;
+    }
+    const scope = document.querySelector<HTMLButtonElement>(
+      "button.tree-scope-end[aria-expanded='false']",
+    );
+    if (scope !== null) {
+      scope.click();
+      window.requestAnimationFrame(() => {
+        focusNow();
+      });
+    }
+  }, []);
+
+  const onNarrowScope = useCallback(() => {
+    pendingExcludeFocus.current = true;
+    if (!treeOpen) {
+      toggleTree();
+      return;
+    }
+    focusExcludeInput();
+  }, [focusExcludeInput, toggleTree, treeOpen]);
+
+  useEffect(() => {
+    if (!treeOpen || !pendingExcludeFocus.current) {
+      return;
+    }
+    const id = window.requestAnimationFrame(() => {
+      focusExcludeInput();
+    });
+    return () => {
+      window.cancelAnimationFrame(id);
+    };
+  }, [focusExcludeInput, treeOpen]);
+
   const clearAll = useCallback(() => {
     resetSearch();
     resetDraft();
@@ -280,9 +348,7 @@ function AppShell() {
 
   return (
     <div
-      className={
-        authOpen || contextTarget !== null ? "app app-dimmed" : "app"
-      }
+      className={authOpen || contextTarget !== null ? "app app-dimmed" : "app"}
     >
       <FileTree
         open={treeOpen}
@@ -325,10 +391,7 @@ function AppShell() {
         }}
         sessionReady={token.sessionReady}
         canLogout={token.canLogout}
-        searchCount={Math.max(
-          search.searchCount,
-          token.meta?.searchCount ?? 0,
-        )}
+        searchCount={Math.max(search.searchCount, token.meta?.searchCount ?? 0)}
         excludeGlobs={excludeGlobs}
         onExcludeGlobsChange={setExcludeGlobs}
         onExcludeApply={(raw) => {
@@ -398,21 +461,20 @@ function AppShell() {
           searchLocked={searchLocked}
           onCancel={cancelSearch}
         />
-        <div className="pane-head">
-          <span className="pane-head-title">
-            {search.status === "running" ? t("loading") : t("paneHits")}
-          </span>
-          <div ref={setHitsHeadActions} className="pane-head-actions" />
-          <StatusBar
-            status={search.status}
-            done={search.done}
-            progress={search.progress}
-            error={search.error}
-            hostForbidden={token.hostForbidden}
-            meta={token.meta}
-            onCancel={cancelSearch}
-          />
-        </div>
+        <ResultHead
+          status={search.status}
+          done={search.done}
+          progress={search.progress}
+          error={search.error}
+          hostForbidden={token.hostForbidden}
+          hitCount={search.hits.length}
+          actionsRef={setHitsHeadActions}
+        />
+        {search.status === "running" ? (
+          <div className="result-progress" aria-hidden="true">
+            <i />
+          </div>
+        ) : null}
         <InfoCue message={infoCue} />
         <InfoCue
           message={
@@ -424,8 +486,12 @@ function AppShell() {
               : null
           }
         />
-        <WarnBanners done={search.done} />
-        {listHits.length === 0 ? (
+        <WarnBanners
+          done={search.done}
+          onNarrow={onNarrowScope}
+          onRetry={retrySearch}
+        />
+        {listHits.length === 0 || search.status === "cancelled" ? (
           <EmptyState
             status={search.status}
             hitCount={search.hits.length}
@@ -434,6 +500,11 @@ function AppShell() {
             hostForbidden={token.hostForbidden}
             engine={token.meta?.engine ?? null}
             treeCollapsed={!treeOpen}
+            timeActive={timeRange !== null}
+            excludeActive={excludeGlobs.trim() !== ""}
+            onClearTime={clearTimeAndSearch}
+            onClearExclude={clearExcludeAndSearch}
+            onRetry={retrySearch}
           />
         ) : (
           <ResultList
@@ -503,9 +574,7 @@ function AppShell() {
         terms={hlTerms}
         opts={hlOpts}
         previewChunk={
-          token.meta === null
-            ? null
-            : resolvePreviewChunk(token.meta.limits)
+          token.meta === null ? null : resolvePreviewChunk(token.meta.limits)
         }
         onClose={() => {
           setContextTarget(null);

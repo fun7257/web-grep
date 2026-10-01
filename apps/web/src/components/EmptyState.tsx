@@ -1,7 +1,16 @@
 import { type JsonError, type SseDone } from "@web-grep/shared";
 import { useLocale } from "../hooks/useLocale.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
-import { IdleMark } from "./icons.tsx";
+import { IconX } from "./icons.tsx";
+import { StateButton, StateView } from "./StateView.tsx";
+import {
+  IconStateBan,
+  IconStateClock,
+  IconStatePanel,
+  IconStateSearch,
+  IconStateServer,
+  IconStateWarn,
+} from "./stateIcons.tsx";
 
 function isEngineError(code: string | undefined): boolean {
   return code === "ENGINE";
@@ -13,10 +22,31 @@ export function isRawEngineStderr(message: string | undefined): boolean {
 }
 
 function EngineStderr({ message }: { message: string }) {
+  const { t } = useLocale();
   return (
     <details className="empty-detail">
-      <summary>{message}</summary>
+      <summary>
+        <IconStateWarn />
+        {t("engineDetail")}
+      </summary>
+      <p className="empty-detail-body">{message}</p>
     </details>
+  );
+}
+
+function IdleTips() {
+  const { t } = useLocale();
+  return (
+    <div className="empty-tips">
+      <span className="kbd">/</span>
+      <span>{t("tipFocus")}</span>
+      <span className="kbd">Shift ↵</span>
+      <span>{t("tipAddFilter")}</span>
+      <span className="kbd">Alt C / W / R</span>
+      <span>{t("tipMods")}</span>
+      <span className="kbd">?</span>
+      <span>{t("tipHotkeys")}</span>
+    </div>
   );
 }
 
@@ -28,6 +58,11 @@ export function EmptyState({
   hostForbidden,
   engine,
   treeCollapsed = false,
+  timeActive = false,
+  excludeActive = false,
+  onClearTime,
+  onClearExclude,
+  onRetry,
 }: {
   status: SearchStatus;
   hitCount: number;
@@ -36,6 +71,11 @@ export function EmptyState({
   hostForbidden: boolean;
   engine?: string | null;
   treeCollapsed?: boolean;
+  timeActive?: boolean;
+  excludeActive?: boolean;
+  onClearTime?: () => void;
+  onClearExclude?: () => void;
+  onRetry?: () => void;
 }) {
   const { t } = useLocale();
   const rawMessage = error?.message?.trim() ?? "";
@@ -44,26 +84,30 @@ export function EmptyState({
     isEngineError(error?.code) ||
     isRawEngineStderr(rawMessage);
 
-  if (hitCount > 0) {
+  // A cancelled search replaces the list with the state page, even when some
+  // hits already arrived — the bar keeps the count, and Search again reruns.
+  if (hitCount > 0 && status !== "cancelled") {
     return null;
   }
-  if (treeCollapsed) {
+  if (treeCollapsed && status !== "cancelled") {
     return (
-      <div className="empty-state empty-idle">
-        <IdleMark kind="rail" />
-        <p className="empty-title">{t("treeCollapsed")}</p>
-        <p className="empty-helper">{t("treeCollapsedHelper")}</p>
-      </div>
+      <StateView
+        icon={<IconStatePanel />}
+        title={t("treeCollapsed")}
+        helper={t("treeCollapsedHelper")}
+      />
     );
   }
   if (hostForbidden || error?.code === "FORBIDDEN_HOST") {
     return (
-      <div className="empty-state empty-idle">
-        <IdleMark kind="nomatch" />
-        <p className="empty-title danger">{t("hostNotAllowed")}</p>
-        <p className="empty-helper">{t("hostForbiddenHelper")}</p>
-        <p className="empty-code">{t("errorCodeHost")}</p>
-      </div>
+      <StateView
+        tone="danger"
+        alert
+        icon={<IconStateWarn />}
+        title={t("hostNotAllowed")}
+        helper={t("hostForbiddenHelper")}
+        code={t("errorCodeHost")}
+      />
     );
   }
   if (
@@ -75,67 +119,108 @@ export function EmptyState({
       rawMessage !== t("engineUnavailable") &&
       rawMessage !== t("engineUnavailableHelper");
     return (
-      <div className="empty-state empty-idle">
-        <IdleMark kind="nomatch" />
-        <p className="empty-title danger">{t("engineUnavailable")}</p>
-        <p className="empty-helper">{t("engineUnavailableHelper")}</p>
-        <p className="empty-code">{t("errorCodeEngine")}</p>
-        {showStderr ? <EngineStderr message={rawMessage} /> : null}
-      </div>
+      <StateView
+        tone="danger"
+        alert
+        icon={<IconStateServer />}
+        title={t("engineUnavailable")}
+        helper={t("engineUnavailableHelper")}
+        code={t("errorCodeEngine")}
+        detail={showStderr ? <EngineStderr message={rawMessage} /> : null}
+      />
     );
   }
   if (status === "running") {
     return (
-      <div className="empty-state empty-idle is-running">
-        <IdleMark kind="hits" />
-        <p className="empty-title">{t("loading")}</p>
-      </div>
+      <StateView
+        className="is-running"
+        icon={<IconStateSearch />}
+        title={t("loading")}
+      />
     );
   }
   if (status === "cancelled") {
     return (
-      <div className="empty-state empty-idle">
-        <IdleMark kind="nomatch" />
-        <p className="empty-title">{t("cancelled")}</p>
-        <p className="empty-helper">{t("cancelledHelper")}</p>
-        <p className="empty-code">{t("errorCodeCancelled")}</p>
-      </div>
+      <StateView
+        tone="warn"
+        icon={<IconStateBan />}
+        title={t("cancelled")}
+        helper={t("cancelledHelper")}
+        code={t("errorCodeCancelled")}
+        actions={
+          onRetry !== undefined ? (
+            <StateButton primary onClick={onRetry}>
+              {t("searchAgain")}
+            </StateButton>
+          ) : null
+        }
+      />
     );
   }
   if (status === "error" && error?.code === "BUSY") {
     return (
-      <div className="empty-state empty-idle">
-        <IdleMark kind="nomatch" />
-        <p className="empty-title">{t("searchBusy")}</p>
-        <p className="empty-helper">{t("searchBusyHelper")}</p>
-        <p className="empty-code">{t("errorCodeBusy")}</p>
-      </div>
+      <StateView
+        tone="warn"
+        alert
+        icon={<IconStateClock />}
+        title={t("searchBusy")}
+        helper={t("searchBusyHelper")}
+        code={t("errorCodeBusy")}
+        actions={
+          onRetry !== undefined ? (
+            <StateButton primary onClick={onRetry}>
+              {t("retry")}
+            </StateButton>
+          ) : null
+        }
+      />
     );
   }
   if (status === "error") {
     return (
-      <div className="empty-state empty-idle">
-        <IdleMark kind="nomatch" />
-        <p className="empty-title danger">
-          {rawMessage !== "" ? rawMessage : t("searchFailed")}
-        </p>
-      </div>
+      <StateView
+        tone="danger"
+        alert
+        icon={<IconStateWarn />}
+        title={rawMessage !== "" ? rawMessage : t("searchFailed")}
+      />
     );
   }
   if (status === "done" && (done?.matchCount === 0 || hitCount === 0)) {
+    const showTime = timeActive && onClearTime !== undefined;
+    const showExclude = excludeActive && onClearExclude !== undefined;
     return (
-      <div className="empty-state empty-idle">
-        <IdleMark kind="nomatch" />
-        <p className="empty-title">{t("noResults")}</p>
-        <p className="empty-helper">{t("noResultsHelper")}</p>
-      </div>
+      <StateView
+        icon={<IconStateSearch />}
+        title={t("noResults")}
+        helper={t("noResultsHelper")}
+        actions={
+          showTime || showExclude ? (
+            <>
+              {showTime ? (
+                <StateButton onClick={onClearTime}>
+                  <IconStateClock />
+                  {t("clearTimeRange")}
+                </StateButton>
+              ) : null}
+              {showExclude ? (
+                <StateButton onClick={onClearExclude}>
+                  <IconX />
+                  {t("clearExclude")}
+                </StateButton>
+              ) : null}
+            </>
+          ) : null
+        }
+      />
     );
   }
   return (
-    <div className="empty-state empty-idle">
-      <IdleMark kind="hits" />
-      <p className="empty-title">{t("emptyHint")}</p>
-      <p className="empty-helper">{t("emptyHintHelper")}</p>
-    </div>
+    <StateView
+      icon={<IconStateSearch />}
+      title={t("emptyHint")}
+      helper={t("emptyHintHelper")}
+      tips={<IdleTips />}
+    />
   );
 }
