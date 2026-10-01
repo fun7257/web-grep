@@ -2,7 +2,6 @@ package rg
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -102,27 +101,69 @@ exit 2
 
 // A filter that exits before producing one verdict per fed line must fail the
 // search. Treating the short stream as "all passed" or "all dropped" hides a
-// broken filter.
+// broken filter. The stand-in consumes stdin so the failure is the short
+// verdict stream, not EPIPE; an off-by-one verdict number is a different error.
 func TestFilterEarlyExitFewerResultsIsError(t *testing.T) {
 	bin := fakeRg(t, `case "$*" in
 *--json*)
   printf '%s\n' '`+matchLine+`' '`+matchLine+`' '`+matchLine+`'
   ;;
 *)
-  echo '1-skip'
+  cat >/dev/null
+  printf '%s\n' '1-skip'
   exit 0
   ;;
 esac
 `)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 	var n int
-	err := Engine{Bin: bin}.Search(context.Background(), Input{
+	err := Engine{Bin: bin}.Search(ctx, Input{
 		RootReal:    t.TempDir(),
 		RelativeDir: ".",
 		Query:       "hello",
 		FilterTerms: []FilterTerm{{Query: "hello"}},
 	}, func(Match) error { n++; return nil }, nil)
-	if err == nil || errors.Is(err, context.Canceled) {
-		t.Fatalf("filter exit after %d verdicts must be an error, emitted %d, err=%v", 1, n, err)
+	if err == nil || !strings.Contains(err.Error(), "rg filter ended before judging every match") {
+		t.Fatalf("err=%v, want rg filter ended before judging every match; emitted %d", err, n)
+	}
+}
+
+// A filter that closes stdin before the match line is flushed must surface
+// EPIPE as "rg filter N closed its pipe". Ignoring the broken pipe and
+// waiting for verdicts hides which filter died.
+func TestFilterBrokenPipeNamesTheFilter(t *testing.T) {
+	dir := t.TempDir()
+	dead := filepath.Join(dir, "dead")
+	bin := fakeRg(t, `dead='`+dead+`'
+case "$*" in
+*--json*)
+  i=0
+  while [ ! -f "$dead" ]; do
+    i=$((i+1))
+    if [ "$i" -gt 300 ]; then echo 'filter did not exit' >&2; exit 2; fi
+    sleep 0.01
+  done
+  # The filter has exited; give the kernel a moment to drop its stdin.
+  sleep 0.05
+  printf '%s\n' '`+matchLine+`'
+  ;;
+*)
+  : > "$dead"
+  exit 0
+  ;;
+esac
+`)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := Engine{Bin: bin}.Search(ctx, Input{
+		RootReal:    t.TempDir(),
+		RelativeDir: ".",
+		Query:       "hello",
+		FilterTerms: []FilterTerm{{Query: "hello"}},
+	}, func(Match) error { return nil }, nil)
+	if err == nil || !strings.Contains(err.Error(), "rg filter 1 closed its pipe") {
+		t.Fatalf("err=%v, want rg filter 1 closed its pipe", err)
 	}
 }
 

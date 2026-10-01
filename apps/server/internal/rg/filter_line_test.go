@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -256,6 +257,56 @@ func TestFilterAgreesWithDirectRg(t *testing.T) {
 			}
 		})
 	}
+	// Lines whose raw length is under 3 bytes used to be skipped: rg holds a
+	// still-open stdin until the 3-byte BOM peek fills, so judging before
+	// close deadlocks. They have to agree with printf | rg too.
+	shorts := shortOracleCases()
+	if len(shorts) != 211 {
+		t.Fatalf("short oracle cases = %d, want 211", len(shorts))
+	}
+	for i, tc := range shorts {
+		t.Run(fmt.Sprintf("short%03d", i), func(t *testing.T) {
+			root := t.TempDir()
+			writeRootFile(t, root, "line.txt", tc.line)
+			assertFilterAgrees(t, bin, root, tc.line, tc.terms)
+		})
+	}
+}
+
+type oracleCase struct {
+	line  []byte
+	terms []FilterTerm
+}
+
+func assertFilterAgrees(t *testing.T, bin, root string, line []byte, terms []FilterTerm) {
+	t.Helper()
+	wantPass, wantBad := directAll(bin, ensureNL(line), terms)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	var n int
+	err := Engine{Bin: bin}.Search(ctx, Input{
+		RootReal:    root,
+		RelativeDir: ".",
+		Query:       "^",
+		Regex:       true,
+		NoIgnore:    true,
+		FilterTerms: terms,
+	}, func(Match) error { n++; return nil }, nil)
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("hung on line %q terms %+v", line, terms)
+	}
+	if wantBad {
+		if err == nil {
+			t.Fatalf("direct rg failed, engine passed line %q terms %+v hits=%d", line, terms, n)
+		}
+		return
+	}
+	if err != nil {
+		t.Fatalf("engine err=%v line %q terms %+v directPass=%v", err, line, terms, wantPass)
+	}
+	if (n > 0) != wantPass {
+		t.Fatalf("line %q terms %+v enginePass=%v directPass=%v hits=%d", line, terms, n > 0, wantPass, n)
+	}
 }
 
 func ensureNL(line []byte) []byte {
@@ -270,20 +321,43 @@ func ensureNL(line []byte) []byte {
 
 func directRgMatch(t *testing.T, bin string, line []byte, term FilterTerm) bool {
 	t.Helper()
+	pass, bad := directFilterOutcome(bin, line, term)
+	if bad {
+		t.Fatalf("direct rg (%v) failed on %q", BuildFilterArgv(term), line)
+	}
+	return pass
+}
+
+// directFilterOutcome reports whether printf-style stdin matches, and whether
+// rg itself failed (exit other than 0 or 1).
+func directFilterOutcome(bin string, line []byte, term FilterTerm) (pass, bad bool) {
 	cmd := exec.Command(bin, BuildFilterArgv(term)...)
 	cmd.Stdin = bytes.NewReader(line)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	err := cmd.Run()
 	if err == nil {
-		return true
+		return true, false
 	}
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && ee.ExitCode() == 1 {
-		return false
+		return false, false
 	}
-	t.Fatalf("direct rg (%v): %v stderr=%s", BuildFilterArgv(term), err, stderr.Bytes())
-	return false
+	return false, true
+}
+
+func directAll(bin string, line []byte, terms []FilterTerm) (pass, bad bool) {
+	pass = true
+	for _, term := range terms {
+		ok, failed := directFilterOutcome(bin, line, term)
+		if failed {
+			return false, true
+		}
+		if !ok {
+			pass = false
+		}
+	}
+	return pass, false
 }
 
 func TestFilterProgressIgnoresFilterTerms(t *testing.T) {
@@ -408,6 +482,304 @@ func TestFilterManyHitsBoundedMemory(t *testing.T) {
 				t.Fatalf("peak HeapAlloc %d exceeds %d (in-flight matches look unbounded)", peak.Load(), ceil)
 			}
 		})
+	}
+}
+
+// shortOracleCases is the line/term matrix whose file bytes are shorter
+// than 3. A previous oracle skipped these because judging before closing
+// the filter stdin deadlocks. The generator matches that matrix, including
+// the seeded random rows, so the skipped count stays 211.
+func shortOracleCases() []oracleCase {
+	lines := [][]byte{
+		[]byte("\n"),
+		[]byte("\r\n"),
+		[]byte("\r"),
+		[]byte("a\n"),
+		[]byte("a"),
+		[]byte("great day\r\n"),
+		[]byte("great day\n"),
+		[]byte("go go go\n"),
+		[]byte("nothing here\n"),
+		[]byte("foo bar\n"),
+		[]byte("foobar\n"),
+		[]byte("path-like\n"),
+		[]byte("line_number\n"),
+		[]byte("submatches\n"),
+		[]byte("say \"hi\"\n"),
+		[]byte("a\\b\n"),
+		[]byte("a\tb\n"),
+		[]byte("你好\n"),
+		[]byte("你好 world\n"),
+		[]byte("你好world\n"),
+		[]byte("a😀b\n"),
+		[]byte(" \n"),
+		[]byte("I\n"),
+		[]byte("tail"),
+		[]byte("before \xff\xfe MARK\n"),
+		{0xff, 0xfe, 'M', 'A', 'R', 'K', '\n'},
+		[]byte("a\x00b\n"),
+		[]byte("g one\n"),
+		[]byte("{\"path\":1}\n"),
+	}
+	terms := []FilterTerm{
+		{Query: "i"},
+		{Query: "path"},
+		{Query: "line_number"},
+		{Query: "text"},
+		{Query: "lines"},
+		{Query: "submatches"},
+		{Query: "g"},
+		{Query: "G"},
+		{Query: "G", CaseSensitive: true},
+		{Query: "foo", WordMatch: true},
+		{Query: "foo"},
+		{Query: "path", WordMatch: true},
+		{Query: "^go", Regex: true},
+		{Query: "day$", Regex: true},
+		{Query: "^g.*y$", Regex: true},
+		{Query: "^$", Regex: true},
+		{Query: "^tail$", Regex: true},
+		{Query: `\bfoo\b`, Regex: true},
+		{Query: "你好"},
+		{Query: "你好", WordMatch: true},
+		{Query: "😀"},
+		{Query: `"hi"`},
+		{Query: `a\b`},
+		{Query: "a\tb"},
+		{Query: "MARK"},
+		{Query: "before"},
+		{Query: "x"},
+		{Query: ".", Regex: true},
+		{Query: "g.*y"},
+		{Query: "^[", Regex: true},
+	}
+	var out []oracleCase
+	for _, ln := range lines {
+		for _, term := range terms {
+			out = append(out, oracleCase{line: ln, terms: []FilterTerm{term}})
+		}
+	}
+	long := append(bytes.Repeat([]byte("x"), 70000), '\n')
+	long[0] = 'g'
+	for _, term := range []FilterTerm{{Query: "g"}, {Query: "x"}, {Query: "^g", Regex: true}, {Query: "ZZZ"}} {
+		out = append(out, oracleCase{line: long, terms: []FilterTerm{term}})
+	}
+	var sixteen []FilterTerm
+	for _, c := range "abcdefghijklmnop" {
+		sixteen = append(sixteen, FilterTerm{Query: string(c)})
+	}
+	out = append(out, oracleCase{line: []byte("abcdefghijklmnop\n"), terms: sixteen})
+	bad := append([]FilterTerm{}, sixteen...)
+	bad[3] = FilterTerm{Query: "ZZZ"}
+	out = append(out, oracleCase{line: []byte("abcdefghijklmnop\n"), terms: bad})
+	out = append(out, oracleCase{line: []byte("go go go\n"), terms: []FilterTerm{
+		{Query: "^go", Regex: true},
+		{Query: "go", WordMatch: true},
+		{Query: "GO"},
+	}})
+	out = append(out, oracleCase{line: []byte("Go Go\n"), terms: []FilterTerm{
+		{Query: "go"},
+		{Query: "Go", CaseSensitive: true},
+	}})
+	out = append(out, oracleCase{line: []byte("Go Go\n"), terms: []FilterTerm{
+		{Query: "go", CaseSensitive: true},
+	}})
+	rng := rand.New(rand.NewSource(20261001))
+	alphabet := []byte("abcXYZ你好😀 \t\"\\$^.\n")
+	for i := 0; i < 80; i++ {
+		n := 1 + rng.Intn(40)
+		buf := make([]byte, n)
+		for j := range buf {
+			buf[j] = alphabet[rng.Intn(len(alphabet))]
+		}
+		if rng.Intn(3) == 0 {
+			buf = append(buf, '\r')
+		}
+		if rng.Intn(4) != 0 {
+			buf = append(buf, '\n')
+		}
+		if rng.Intn(12) == 0 {
+			buf = append([]byte{0xff, 0xfe}, buf...)
+		}
+		qlen := 1 + rng.Intn(6)
+		q := string(alphabet[:1])
+		if n > 0 {
+			start := rng.Intn(len(buf))
+			end := start + qlen
+			if end > len(buf) {
+				end = len(buf)
+			}
+			q = string(buf[start:end])
+			q = strings.TrimRight(q, "\r\n")
+			if q == "" {
+				q = "a"
+			}
+		}
+		term := FilterTerm{Query: q, Regex: rng.Intn(3) == 0, CaseSensitive: rng.Intn(2) == 0, WordMatch: rng.Intn(4) == 0}
+		if term.Regex && term.WordMatch {
+			term.WordMatch = false
+		}
+		out = append(out, oracleCase{line: buf, terms: []FilterTerm{term}})
+	}
+	var short []oracleCase
+	for _, tc := range out {
+		if len(tc.line) < 3 {
+			short = append(short, tc)
+		}
+	}
+	return short
+}
+
+func TestFilterShortStdinReturnsBeforeDeadline(t *testing.T) {
+	bin := liveBin(t)
+	cases := []struct {
+		name    string
+		body    []byte
+		query   string
+		regex   bool
+		filters []FilterTerm
+		text    string // set when a pass must be this single hit text
+	}{
+		{"g-pass-one", []byte("g\n"), "g", false, []FilterTerm{{Query: "g"}}, "g"},
+		{"g-fail-one", []byte("g\n"), "g", false, []FilterTerm{{Query: "zzz"}}, ""},
+		{"g-pass-three", []byte("g\n"), "g", false, []FilterTerm{
+			{Query: "g"},
+			{Query: "g", CaseSensitive: true},
+			{Query: ".", Regex: true},
+		}, "g"},
+		{"g-fail-three", []byte("g\n"), "g", false, []FilterTerm{
+			{Query: "g"},
+			{Query: "zzz"},
+			{Query: "g"},
+		}, ""},
+		{"empty-pass-one", []byte("\n"), "^$", true, []FilterTerm{{Query: "^$", Regex: true}}, ""},
+		{"empty-fail-one", []byte("\n"), "^$", true, []FilterTerm{{Query: "g"}}, ""},
+		{"empty-three", []byte("\n"), "^$", true, []FilterTerm{
+			{Query: "^$", Regex: true},
+			{Query: ".", Regex: true},
+			{Query: "g"},
+		}, ""},
+		{"crlf-one", []byte("\r\n"), "^", true, []FilterTerm{{Query: "^", Regex: true}}, ""},
+		{"crlf-fail-one", []byte("\r\n"), "^", true, []FilterTerm{{Query: "g"}}, ""},
+		{"crlf-three", []byte("\r\n"), "^", true, []FilterTerm{
+			{Query: "^", Regex: true},
+			{Query: "$", Regex: true},
+			{Query: "g"},
+		}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			wantPass, wantBad := directAll(bin, ensureNL(tc.body), tc.filters)
+			if wantBad {
+				t.Fatalf("direct rg failed for %s", tc.name)
+			}
+			root := t.TempDir()
+			writeRootFile(t, root, "line.txt", tc.body)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			start := time.Now()
+			var texts []string
+			err := Engine{Bin: bin}.Search(ctx, Input{
+				RootReal:    root,
+				RelativeDir: ".",
+				Query:       tc.query,
+				Regex:       tc.regex,
+				NoIgnore:    true,
+				FilterTerms: tc.filters,
+			}, func(m Match) error {
+				texts = append(texts, strings.TrimRight(m.Text, "\r\n"))
+				return nil
+			}, nil)
+			elapsed := time.Since(start)
+			if err != nil {
+				t.Fatalf("err=%v elapsed=%s", err, elapsed)
+			}
+			if elapsed > time.Second {
+				t.Fatalf("elapsed %s, want under 1s", elapsed)
+			}
+			gotPass := len(texts) > 0
+			if gotPass != wantPass {
+				t.Fatalf("engine=%v direct=%v texts=%v", gotPass, wantPass, texts)
+			}
+			if tc.text != "" && wantPass && strings.Join(texts, "|") != tc.text {
+				t.Fatalf("texts=%v want %q", texts, tc.text)
+			}
+			if !wantPass && len(texts) != 0 {
+				t.Fatalf("reject case returned %v", texts)
+			}
+			if wantPass && len(texts) != 1 {
+				t.Fatalf("hits=%d want 1, texts=%v", len(texts), texts)
+			}
+		})
+	}
+}
+
+func TestFilterManyShortLinesDoNotHang(t *testing.T) {
+	bin := liveBin(t)
+	root := t.TempDir()
+	const n = 100_000
+	writeRootFile(t, root, "s.txt", bytes.Repeat([]byte("g\n"), n))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	start := time.Now()
+	var hits int
+	err := Engine{Bin: bin}.Search(ctx, Input{
+		RootReal:    root,
+		RelativeDir: ".",
+		Query:       "g",
+		NoIgnore:    true,
+		FilterTerms: []FilterTerm{{Query: "NO_SUCH_TERM"}, {Query: "zzz"}, {Query: "qq"}},
+	}, func(Match) error { hits++; return nil }, nil)
+	elapsed := time.Since(start)
+	t.Logf("lines=%d filters=3 elapsed=%s", n, elapsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hits != 0 {
+		t.Fatalf("hits=%d want 0", hits)
+	}
+}
+
+func TestFilterUTF16BOMFirstMatchDoesNotHang(t *testing.T) {
+	bin := liveBin(t)
+	root := t.TempDir()
+	body := []byte("zzz\n\xff\xfeg\n")
+	const extra = 40
+	body = append(body, bytes.Repeat([]byte("g\n"), extra)...)
+	writeRootFile(t, root, "a.txt", body)
+	filters := []FilterTerm{{Query: "g"}, {Query: "g", CaseSensitive: true}, {Query: ".", Regex: true}}
+	lines := [][]byte{[]byte{0xff, 0xfe, 'g', '\n'}}
+	for i := 0; i < extra; i++ {
+		lines = append(lines, []byte("g\n"))
+	}
+	want := 0
+	for _, line := range lines {
+		pass, bad := directAll(bin, line, filters)
+		if bad {
+			t.Fatalf("direct rg failed on %q", line)
+		}
+		if pass {
+			want++
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	var hits int
+	err := Engine{Bin: bin}.Search(ctx, Input{
+		RootReal:    root,
+		RelativeDir: ".",
+		Query:       "g",
+		NoIgnore:    true,
+		FilterTerms: filters,
+	}, func(Match) error { hits++; return nil }, nil)
+	elapsed := time.Since(start)
+	t.Logf("utf16-bom hits=%d want=%d elapsed=%s", hits, want, elapsed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hits != want {
+		t.Fatalf("hits=%d want %d", hits, want)
 	}
 }
 

@@ -131,6 +131,49 @@ func TestPinLiveFilterOnLineText(t *testing.T) {
 	}
 }
 
+func TestPinLiveFilterShortLine(t *testing.T) {
+	s := liveRgServer(t, func(root string) {
+		writeRel(t, root, "only.txt", []byte("g\n"))
+	})
+	cases := []struct {
+		name string
+		body string
+		want []string
+	}{
+		{"pass", `{"query":"g","regex":false,"filterTerms":[{"query":"g","regex":false}]}`, []string{"g"}},
+		{"fail", `{"query":"g","filterTerms":["zzz"]}`, nil},
+		{"three", `{"query":"g","filterTerms":[{"query":"g","regex":false},{"query":"g","caseSensitive":true},{"query":".","regex":true}]}`, []string{"g"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start := time.Now()
+			sse := searchLive(t, s, tc.body)
+			elapsed := time.Since(start)
+			t.Logf("elapsed=%s", elapsed)
+			if elapsed > time.Second {
+				t.Fatalf("short line took %s", elapsed)
+			}
+			if sse.errEv != nil {
+				t.Fatalf("error event %v", sse.errEv)
+			}
+			if sse.done == nil {
+				t.Fatal("missing done")
+			}
+			if sse.done["timedOut"] == true {
+				t.Fatalf("done timed out: %v", sse.done)
+			}
+			got := hitTexts(sse.hits)
+			if !sameSet(got, tc.want) {
+				t.Fatalf("got %v want %v", got, tc.want)
+			}
+			wantN := float64(len(tc.want))
+			if sse.done["matchCount"] != wantN {
+				t.Fatalf("matchCount=%v want %v", sse.done["matchCount"], wantN)
+			}
+		})
+	}
+}
+
 func TestPinLiveFilterJSONFieldNames(t *testing.T) {
 	s := liveRgServer(t, func(root string) {
 		writeRel(t, root, "c.txt", []byte("go go go\n"))

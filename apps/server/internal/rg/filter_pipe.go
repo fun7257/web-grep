@@ -2,6 +2,7 @@ package rg
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -44,13 +45,14 @@ type filterDecision struct {
 }
 
 type filterStage struct {
-	cmd       *exec.Cmd
-	stdin     io.WriteCloser
-	bw        *bufio.Writer
-	stdout    io.ReadCloser
-	decisions chan filterDecision
-	nextN     int
-	readErr   error
+	cmd         *exec.Cmd
+	stdin       io.WriteCloser
+	bw          *bufio.Writer
+	stdout      io.ReadCloser
+	decisions   chan filterDecision
+	nextN       int
+	readErr     error
+	inputClosed bool
 }
 
 func (e Engine) runFiltered(ctx context.Context, dir string, argv []string, filters [][]string, emit func(Match) error, progress func(files int), filesAlready int) (int, error) {
@@ -145,21 +147,21 @@ func (e Engine) runFiltered(ctx context.Context, dir string, argv []string, filt
 		}
 	}()
 
+	// judgeMatches closes each filter stdin itself once the head scan has
+	// finished and every match line has been written. rg does not emit a
+	// verdict for a still-open stdin when the BOM peek has not filled
+	// (fewer than 3 bytes) or when a leading UTF-16 BOM never sees a
+	// UTF-16 newline. Closing first is what unblocks those verdicts.
+	// Error paths return before that close; closeInput below covers them
+	// and is a no-op after a successful finish.
 	files, emitErr, runErr := judgeMatches(ctx, headOut, stages, emit, progress, filesAlready)
 
-	if emitErr == nil && runErr == nil && parent.Err() == nil {
-		for i, st := range stages {
-			if ferr := st.bw.Flush(); ferr != nil && runErr == nil {
-				runErr = filterWriteErr(i, ferr)
-			}
-		}
-	}
 	if emitErr != nil || runErr != nil || parent.Err() != nil {
 		terminateAll(cmds)
 		cancel()
 	}
 	for _, st := range stages {
-		_ = st.stdin.Close()
+		st.closeInput()
 	}
 	wg.Wait()
 
@@ -202,13 +204,48 @@ func closeFilterPipes(stages []*filterStage) {
 		if st == nil {
 			continue
 		}
-		if st.stdin != nil {
-			_ = st.stdin.Close()
-		}
+		st.closeInput()
 		if st.stdout != nil {
 			_ = st.stdout.Close()
 		}
 	}
+}
+
+// closeInput drops the write side without flushing. Used when the search is
+// abandoning the pipeline; flushing here can block on a filter that is
+// already dead or stopped.
+func (st *filterStage) closeInput() {
+	if st == nil || st.inputClosed {
+		return
+	}
+	st.inputClosed = true
+	if st.stdin != nil {
+		_ = st.stdin.Close()
+	}
+}
+
+// finishInput flushes buffered match lines and then closes stdin so rg sees
+// EOF. Callers must not write to the filter after this returns.
+func (st *filterStage) finishInput() error {
+	if st == nil || st.inputClosed {
+		return nil
+	}
+	var err error
+	if st.bw != nil {
+		err = st.bw.Flush()
+	}
+	st.closeInput()
+	return err
+}
+
+func finishFilterInputs(stages []*filterStage) error {
+	var first error
+	for i, st := range stages {
+		if err := st.finishInput(); err != nil && first == nil {
+			first = filterWriteErr(i, err)
+		}
+	}
+	return first
 }
 
 func waitCmds(cmds []*exec.Cmd, stderrs []strings.Builder) (error, int) {
@@ -251,6 +288,13 @@ func judgeMatches(ctx context.Context, head io.Reader, stages []*filterStage, em
 	files = filesAlready
 	pending := make([]Match, 0, filterInflight)
 	fed := 0
+	// perLine is set when the first payload starts with a UTF-16 BOM.
+	// rg then decodes the whole stdin as UTF-16 and only breaks lines on
+	// UTF-16 newlines, so a shared stream of '\n'-terminated lines produces
+	// no per-line verdict until EOF — and not one verdict per match. Each
+	// line is judged on its own stdin instead. Ordinary streams stay on the
+	// bounded streaming path.
+	perLine := false
 
 	flushOne := func() (error, error) {
 		m := pending[0]
@@ -299,6 +343,18 @@ func judgeMatches(ctx context.Context, head io.Reader, stages []*filterStage, em
 		if payload == nil {
 			return files, nil, errors.New("rg match line has undecodable bytes")
 		}
+		if perLine || (fed == 0 && len(pending) == 0 && startsWithUTF16BOM(payload)) {
+			if !perLine {
+				perLine = true
+				for _, st := range stages {
+					st.closeInput()
+				}
+			}
+			if eErr, rErr := judgePerLine(ctx, stages, payload, m, emit); eErr != nil || rErr != nil {
+				return files, eErr, rErr
+			}
+			continue
+		}
 		if len(pending) == filterInflight {
 			if eErr, rErr := flushOne(); eErr != nil || rErr != nil {
 				return files, eErr, rErr
@@ -316,6 +372,14 @@ func judgeMatches(ctx context.Context, head io.Reader, stages []*filterStage, em
 	if err := ctx.Err(); err != nil {
 		return files, nil, err
 	}
+	// Head is done. Flush and close every filter stdin before reading the
+	// verdicts still in flight. A short stream (under 3 bytes, the BOM peek)
+	// or a UTF-16 BOM that never saw a UTF-16 newline stays silent until EOF.
+	// Streaming waits above are unchanged: they only run once a full window
+	// of lines has already been written, which is enough for rg to emit.
+	if err := finishFilterInputs(stages); err != nil {
+		return files, nil, err
+	}
 	for len(pending) > 0 {
 		if err := ctx.Err(); err != nil {
 			return files, nil, err
@@ -330,6 +394,107 @@ func judgeMatches(ctx context.Context, head io.Reader, stages []*filterStage, em
 		}
 	}
 	return files, nil, nil
+}
+
+func startsWithUTF16BOM(b []byte) bool {
+	return len(b) >= 2 && ((b[0] == 0xFF && b[1] == 0xFE) || (b[0] == 0xFE && b[1] == 0xFF))
+}
+
+func judgePerLine(ctx context.Context, stages []*filterStage, payload []byte, m Match, emit func(Match) error) (error, error) {
+	passAll := true
+	for i, st := range stages {
+		pass, err := passthruVerdict(ctx, st, payload)
+		if err != nil {
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return nil, err
+			}
+			return nil, fmt.Errorf("rg filter %d: %w", i+1, err)
+		}
+		if !pass {
+			passAll = false
+		}
+	}
+	if !passAll {
+		return nil, nil
+	}
+	if err := emit(m); err != nil {
+		return err, nil
+	}
+	return nil, nil
+}
+
+// passthruVerdict runs one filter rg over a single line and closes its stdin
+// (the reader hits EOF) before the verdict is read. That matches
+// `printf line | rg` and does not depend on rg emitting while stdin is open.
+func passthruVerdict(ctx context.Context, st *filterStage, payload []byte) (bool, error) {
+	cmd := exec.Command(st.cmd.Args[0], st.cmd.Args[1:]...)
+	cmd.Dir = st.cmd.Dir
+	cmd.Env = st.cmd.Env
+	setProcAttr(cmd)
+	cmd.Stdin = bytes.NewReader(payload)
+	var stderr strings.Builder
+	cmd.Stderr = &limitWriter{w: &stderr, n: stderrLimit}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return false, err
+	}
+	if err := cmd.Start(); err != nil {
+		return false, err
+	}
+
+	type scanned struct {
+		line  []byte
+		extra bool
+		err   error
+	}
+	readDone := make(chan scanned, 1)
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
+		var out scanned
+		if sc.Scan() {
+			out.line = append([]byte(nil), sc.Bytes()...)
+		}
+		if sc.Scan() {
+			out.extra = true
+		}
+		out.err = sc.Err()
+		_, _ = io.Copy(io.Discard, stdout)
+		readDone <- out
+	}()
+
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- cmd.Wait() }()
+
+	var waitErr error
+	select {
+	case <-ctx.Done():
+		terminate(cmd)
+		waitErr = ctx.Err()
+		<-waitDone
+	case waitErr = <-waitDone:
+	}
+	out := <-readDone
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	if waitErr != nil && !benignRgExit(waitErr) {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return false, fmt.Errorf("%s", msg)
+		}
+		return false, waitErr
+	}
+	if out.err != nil {
+		return false, out.err
+	}
+	if out.extra || len(out.line) == 0 {
+		return false, errors.New("rg filter ended before judging every match")
+	}
+	n, pass, ok := parsePassthruPrefix(out.line)
+	if !ok || n != 1 {
+		return false, fmt.Errorf("rg filter: unexpected output %q", clipLine(out.line))
+	}
+	return pass, nil
 }
 
 func writeFilterLine(stages []*filterStage, payload []byte) error {
@@ -361,8 +526,12 @@ func recvDecision(ctx context.Context, i int, st *filterStage) (filterDecision, 
 	}
 	// Only this filter is waiting on input. Flushing the others can block
 	// on a filter whose stdout reader is already parked on a full channel.
-	if err := st.bw.Flush(); err != nil {
-		return filterDecision{}, filterWriteErr(i, err)
+	// After finishInput the buffer is empty and the write end is closed;
+	// flushing again would write to a closed pipe.
+	if !st.inputClosed {
+		if err := st.bw.Flush(); err != nil {
+			return filterDecision{}, filterWriteErr(i, err)
+		}
 	}
 	select {
 	case d, open := <-st.decisions:
