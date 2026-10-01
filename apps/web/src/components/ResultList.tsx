@@ -10,14 +10,28 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { DEFAULT_HL_OPTS, type HlOpts, type HlTermInput } from "../highlight.ts";
+import {
+  DEFAULT_HL_OPTS,
+  type HlOpts,
+  type HlTermInput,
+} from "../highlight.ts";
 import { useLocale } from "../hooks/useLocale.ts";
 import { pickSticky, type StickyHeader } from "../resultSticky.ts";
 import { FileIcon, IconChevron, IconFoldAll, IconUnfoldAll } from "./icons.tsx";
 import { LogLineText } from "./ResultRow.tsx";
 
-const FILE_ROW = 40;
-const LOG_ROW = 72;
+// Header is a fixed 36px row (border included). A hit is one 12.5/1.6 line
+// plus 7px padding on each side. Two-line hits are measured, not estimated.
+const FILE_ROW = 36;
+const LOG_ROW = 34;
+
+function splitPath(path: string): { dir: string; name: string } {
+  const slash = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  if (slash < 0) {
+    return { dir: "", name: path };
+  }
+  return { dir: path.slice(0, slash + 1), name: path.slice(slash + 1) };
+}
 
 type Group = {
   path: string;
@@ -72,9 +86,11 @@ export const ResultList = memo(function ResultList({
     }
     return Array.from(map.entries()).map(([path, fileHits]) => {
       const dir = sortDir[path] ?? "asc";
-      const ordered = fileHits.slice().sort((a, b) =>
-        dir === "asc" ? a.hit.line - b.hit.line : b.hit.line - a.hit.line,
-      );
+      const ordered = fileHits
+        .slice()
+        .sort((a, b) =>
+          dir === "asc" ? a.hit.line - b.hit.line : b.hit.line - a.hit.line,
+        );
       return { path, hits: ordered };
     });
   }, [hits, sortDir]);
@@ -96,16 +112,16 @@ export const ResultList = memo(function ResultList({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => listRef.current,
-    estimateSize: (index) => (rows[index]?.kind === "header" ? FILE_ROW : LOG_ROW),
+    estimateSize: (index) =>
+      rows[index]?.kind === "header" ? FILE_ROW : LOG_ROW,
     measureElement: (element) => {
       const inner = element.firstElementChild as HTMLElement | null;
       const height = (inner ?? element).getBoundingClientRect().height;
+      const kind = rows[Number(element.getAttribute("data-index"))]?.kind;
       if (height <= 0) {
-        return FILE_ROW;
+        return kind === "hit" ? LOG_ROW : FILE_ROW;
       }
-      return rows[Number(element.getAttribute("data-index"))]?.kind === "hit"
-        ? height + 8
-        : height;
+      return height;
     },
     overscan: 12,
     scrollPaddingStart: stickyH,
@@ -171,9 +187,6 @@ export const ResultList = memo(function ResultList({
       return;
     }
     const apply = (): void => {
-      const linePx = 12.5 * 1.5;
-      const lines = Math.max(4, Math.floor(root.clientHeight / 2 / linePx));
-      root.style.setProperty("--log-lines", String(lines));
       root.style.setProperty("--sticky-h", `${stickyH}px`);
     };
     const onScroll = (): void => {
@@ -212,7 +225,12 @@ export const ResultList = memo(function ResultList({
   useLayoutEffect(() => {
     const path = sticky?.path ?? null;
     const prev = stickyPathRef.current;
-    if (path !== null && prev !== null && path !== prev && sticky?.pushing !== true) {
+    if (
+      path !== null &&
+      prev !== null &&
+      path !== prev &&
+      sticky?.pushing !== true
+    ) {
       setSwapPath(path);
       const timer = window.setTimeout(() => {
         setSwapPath((current) => (current === path ? null : current));
@@ -261,16 +279,20 @@ export const ResultList = memo(function ResultList({
   const sortGroup = (path: string): void => {
     const next = dirOf(path) === "asc" ? "desc" : "asc";
     const group = groups.find((item) => item.path === path);
-    const ordered = (group?.hits ?? []).slice().sort((a, b) =>
-      next === "asc" ? a.hit.line - b.hit.line : b.hit.line - a.hit.line,
-    );
+    const ordered = (group?.hits ?? [])
+      .slice()
+      .sort((a, b) =>
+        next === "asc" ? a.hit.line - b.hit.line : b.hit.line - a.hit.line,
+      );
     setSortDir((prev) => ({ ...prev, [path]: next }));
     if (ordered[0] !== undefined) {
       onSelect(ordered[0].originalIndex);
     }
   };
 
-  const foldLabel = allCollapsed ? t("resultExpandAll") : t("resultCollapseAll");
+  const foldLabel = allCollapsed
+    ? t("resultExpandAll")
+    : t("resultCollapseAll");
   const foldButton =
     groups.length === 0 ? null : (
       <button
@@ -288,7 +310,9 @@ export const ResultList = memo(function ResultList({
 
   return (
     <div className="result-list grouped">
-      {headActions !== null ? createPortal(foldButton, headActions) : foldButton}
+      {headActions !== null
+        ? createPortal(foldButton, headActions)
+        : foldButton}
       {sticky !== null ? (
         <div
           ref={stickyRef}
@@ -302,23 +326,28 @@ export const ResultList = memo(function ResultList({
           style={{ transform: `translateY(${sticky.shift}px)` }}
         >
           <div className="result-group-header">
-          <GroupHeader
-            path={sticky.path}
-            count={sticky.count}
-            expanded={!collapsed.has(sticky.path)}
-            dir={dirOf(sticky.path)}
-            onToggle={() => {
-              toggleGroup(sticky.path);
-            }}
-            onSort={() => {
-              sortGroup(sticky.path);
-            }}
-            t={t}
-          />
+            <GroupHeader
+              path={sticky.path}
+              count={sticky.count}
+              expanded={!collapsed.has(sticky.path)}
+              dir={dirOf(sticky.path)}
+              onToggle={() => {
+                toggleGroup(sticky.path);
+              }}
+              onSort={() => {
+                sortGroup(sticky.path);
+              }}
+              t={t}
+            />
           </div>
         </div>
       ) : null}
-      <div ref={listRef} className="result-list-scroll" role="list" tabIndex={0}>
+      <div
+        ref={listRef}
+        className="result-list-scroll"
+        role="list"
+        tabIndex={0}
+      >
         <div
           className="result-list-inner"
           style={{ height: `${virtualizer.getTotalSize()}px` }}
@@ -373,7 +402,9 @@ export const ResultList = memo(function ResultList({
                         ? "result-log selected"
                         : "result-log"
                     }
-                    aria-current={row.index === selectedIndex ? "true" : undefined}
+                    aria-current={
+                      row.index === selectedIndex ? "true" : undefined
+                    }
                     onClick={() => {
                       onSelect(row.index);
                     }}
@@ -416,6 +447,7 @@ function GroupHeader({
   onSort: () => void;
   t: (key: "resultSortAsc" | "resultSortDesc" | "resultSortLine") => string;
 }) {
+  const parts = splitPath(path);
   return (
     <>
       <button
@@ -427,9 +459,14 @@ function GroupHeader({
       >
         <IconChevron open={expanded} />
         <FileIcon path={path} />
-        <span className="result-group-path">{path}</span>
-        <span className="result-group-badge">{count}</span>
+        <span className="result-group-path">
+          {parts.dir !== "" ? (
+            <span className="result-group-dir">{parts.dir}</span>
+          ) : null}
+          <span className="result-group-name">{parts.name}</span>
+        </span>
       </button>
+      <span className="result-group-badge">{count}</span>
       <button
         type="button"
         className="result-sort"

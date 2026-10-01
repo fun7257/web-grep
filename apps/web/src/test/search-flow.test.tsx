@@ -985,7 +985,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("No matches")).toBeTruthy();
     });
-    expect(document.querySelector(".empty-idle .idle-mark")).toBeTruthy();
+    expect(document.querySelector(".empty-idle .state-art")).toBeTruthy();
   });
 
   it("shows cancelled after abort", async () => {
@@ -3067,7 +3067,10 @@ describe("search flow", () => {
       ).toBeGreaterThan(0);
     });
     expect(document.querySelector(".search-go.cancel")).toBeTruthy();
-    expect(document.querySelector(".status-cancel")).toBeTruthy();
+    // Cancel stays on the search button. The result bar no longer repeats it.
+    expect(document.querySelector(".status-cancel")).toBeNull();
+    expect(document.querySelector(".result-spin")).toBeTruthy();
+    expect(document.querySelector(".result-progress")).toBeTruthy();
     expect(document.querySelector(".pane-head-title")?.textContent).toBe(
       "Searching…",
     );
