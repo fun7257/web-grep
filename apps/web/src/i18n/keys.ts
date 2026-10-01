@@ -131,6 +131,15 @@ export const MSG_KEYS = [
   "sharePendingSelect",
   "hotkeysTitle",
   "close",
+  "filterRowLabel",
+  "filterRemoveRow",
+  "filterMustMatch",
+  "queryFieldClear",
+  "searchHistoryClear",
+  "searchHistoryFilterOne",
+  "searchHistoryFilters",
+  "searchLockedNote",
+  "historyWord",
 ] as const;
 
 export type MsgKey = (typeof MSG_KEYS)[number];

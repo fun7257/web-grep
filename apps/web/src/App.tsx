@@ -31,6 +31,7 @@ import type { HlTermInput } from "./highlight.ts";
 import { resolvePreviewChunk } from "./previewChunk.ts";
 import { useAuth } from "./hooks/useAuth.ts";
 import { useBatchedHits } from "./hooks/useBatchedHits.ts";
+import { clearSearchHistory } from "./searchHistory.ts";
 import type { SearchNavEntry } from "./searchNav.ts";
 import {
   buildShareUrl,
@@ -394,6 +395,9 @@ function AppShell() {
             }
           }}
           onRestoreHistory={replayEntry}
+          onClearHistory={() => {
+            clearSearchHistory();
+          }}
           running={search.status === "running"}
           searchLocked={searchLocked}
           onCancel={cancelSearch}

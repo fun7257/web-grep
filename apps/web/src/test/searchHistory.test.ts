@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  clearSearchHistory,
   loadSearchHistory,
   pushSearchHistory,
   SEARCH_HISTORY_KEY,
@@ -43,7 +44,43 @@ describe("searchHistory", () => {
       ],
       timeRange: "today",
     });
-    expect(again.map((item) => item.parts[0]?.value)).toEqual(["hello", "world"]);
+    expect(again.map((item) => item.parts[0]?.value)).toEqual([
+      "hello",
+      "world",
+    ]);
     expect(loadSearchHistory()).toHaveLength(2);
+  });
+
+  it("clears storage and does not resurrect a stale in-memory list", () => {
+    localStorage.removeItem(SEARCH_HISTORY_KEY);
+    const stale = pushSearchHistory([], {
+      parts: [
+        {
+          value: "old",
+          caseSensitive: false,
+          wordMatch: false,
+          regex: false,
+        },
+      ],
+      timeRange: null,
+    });
+    expect(loadSearchHistory()).toHaveLength(1);
+    clearSearchHistory();
+    expect(loadSearchHistory()).toEqual([]);
+    const next = pushSearchHistory(stale, {
+      parts: [
+        {
+          value: "new",
+          caseSensitive: false,
+          wordMatch: false,
+          regex: false,
+        },
+      ],
+      timeRange: "today",
+    });
+    expect(loadSearchHistory().map((item) => item.parts[0]?.value)).toEqual([
+      "new",
+    ]);
+    expect(next.map((item) => item.parts[0]?.value)).toEqual(["new"]);
   });
 });

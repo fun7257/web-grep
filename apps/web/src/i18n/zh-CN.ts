@@ -3,7 +3,7 @@ import type { MsgKey } from "./keys.ts";
 export const zhCN = {
   appTitle: "Web Grep",
   queryPlaceholder: "搜索文件内容",
-  filterPlaceholder: "过滤…",
+  filterPlaceholder: "再加一个必须命中的词…",
   filterAdd: "添加过滤",
   filterAddShort: "添加",
   filterAddHint: "添加过滤",
@@ -132,4 +132,13 @@ export const zhCN = {
   sharePendingSelect: "待选中 {path}:{line}",
   hotkeysTitle: "键盘快捷键速查",
   close: "关闭",
+  filterRowLabel: "过滤 {n}",
+  filterRemoveRow: "删除过滤 {n}",
+  filterMustMatch: "同一行必须都命中",
+  queryFieldClear: "清除查询",
+  searchHistoryClear: "清除全部",
+  searchHistoryFilterOne: "1 个过滤",
+  searchHistoryFilters: "{n} 个过滤",
+  searchLockedNote: "搜索已锁定",
+  historyWord: "整词",
 } as const satisfies Record<MsgKey, string>;

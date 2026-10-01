@@ -25,8 +25,10 @@ describe("i18n catalogs", () => {
   });
 
   it("ships S-AND filter placeholder copy in zh-CN and en-US", () => {
-    expect(catalogs["zh-CN"].filterPlaceholder).toBe("过滤…");
-    expect(catalogs["en-US"].filterPlaceholder).toBe("Filter…");
+    expect(catalogs["zh-CN"].filterPlaceholder).toBe("再加一个必须命中的词…");
+    expect(catalogs["en-US"].filterPlaceholder).toBe(
+      "Another term that must match…",
+    );
     expect(catalogs["zh-CN"].filterAddShort).toBe("添加");
     expect(catalogs["zh-CN"].filterAddHintShort).toBe("加过滤");
     expect(catalogs["en-US"].filterAddShort).toBe("Add");

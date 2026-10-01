@@ -3,7 +3,7 @@ import type { MsgKey } from "./keys.ts";
 export const enUS = {
   appTitle: "Web Grep",
   queryPlaceholder: "Search in files",
-  filterPlaceholder: "Filter…",
+  filterPlaceholder: "Another term that must match…",
   filterAdd: "Add filter",
   filterAddShort: "Add",
   filterAddHint: "to add a filter",
@@ -135,4 +135,13 @@ export const enUS = {
   sharePendingSelect: "Pending select {path}:{line}",
   hotkeysTitle: "Keyboard Shortcuts",
   close: "Close",
+  filterRowLabel: "Filter {n}",
+  filterRemoveRow: "Remove filter {n}",
+  filterMustMatch: "Every term must match on the same line",
+  queryFieldClear: "Clear query",
+  searchHistoryClear: "Clear all",
+  searchHistoryFilterOne: "1 filter",
+  searchHistoryFilters: "{n} filters",
+  searchLockedNote: "Search is locked",
+  historyWord: "Whole word",
 } as const satisfies Record<MsgKey, string>;

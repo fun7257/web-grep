@@ -105,6 +105,29 @@ export function saveSearchHistory(items: SearchHistoryItem[]): void {
   }
 }
 
+export function clearSearchHistory(): void {
+  try {
+    localStorage.setItem(SEARCH_HISTORY_KEY, "[]");
+  } catch {
+    // ignore
+  }
+}
+
+function sameHistoryIds(
+  stored: SearchHistoryItem[],
+  items: SearchHistoryItem[],
+): boolean {
+  if (stored.length !== items.length) {
+    return false;
+  }
+  for (let i = 0; i < stored.length; i++) {
+    if (stored[i]?.id !== items[i]?.id) {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function pushSearchHistory(
   items: SearchHistoryItem[],
   next: Omit<SearchHistoryItem, "id">,
@@ -112,8 +135,13 @@ export function pushSearchHistory(
   if (next.parts.length === 0) {
     return items;
   }
+  // A clear writes `[]` under the same key while a caller may still hold the
+  // previous list. Trust storage when the two diverge so the next search
+  // does not write the cleared entries back.
+  const stored = loadSearchHistory();
+  const base = sameHistoryIds(stored, items) ? items : stored;
   const key = historyKey(next);
-  const rest = items.filter((item) => historyKey(item) !== key);
+  const rest = base.filter((item) => historyKey(item) !== key);
   const item: SearchHistoryItem = {
     ...next,
     id: `h${Date.now().toString(36)}`,
