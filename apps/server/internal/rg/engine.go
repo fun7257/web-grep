@@ -92,10 +92,15 @@ func splitFileList(files []string, budget int) [][]string {
 }
 
 func (e Engine) run(ctx context.Context, dir string, argv []string, filters [][]string, emit func(Match) error, progress func(files int), filesAlready int) (int, error) {
-	cmds := make([]*exec.Cmd, 0, 1+len(filters))
-	// readers[i] is the read end of cmds[i]'s stdout. Every one but the last
-	// is handed to the next stage as its stdin.
-	var readers []io.ReadCloser
+	// No filter terms: one rg process, same as before. Do not pay for the
+	// line pipeline or change how stdout is consumed.
+	if len(filters) == 0 {
+		return e.runDirect(ctx, dir, argv, emit, progress, filesAlready)
+	}
+	return e.runFiltered(ctx, dir, argv, filters, emit, progress, filesAlready)
+}
+
+func (e Engine) runDirect(ctx context.Context, dir string, argv []string, emit func(Match) error, progress func(files int), filesAlready int) (int, error) {
 	head := exec.Command(e.Bin, argv...)
 	head.Dir = dir
 	head.Env = Env()
@@ -104,49 +109,18 @@ func (e Engine) run(ctx context.Context, dir string, argv []string, filters [][]
 	if err != nil {
 		return filesAlready, err
 	}
-	cmds = append(cmds, head)
-	readers = append(readers, stdout)
-	prev := stdout
-	for _, filter := range filters {
-		next := exec.Command(e.Bin, filter...)
-		next.Dir = dir
-		next.Env = Env()
-		setProcAttr(next)
-		next.Stdin = prev
-		out, err := next.StdoutPipe()
-		if err != nil {
-			return filesAlready, err
-		}
-		cmds = append(cmds, next)
-		readers = append(readers, out)
-		prev = out
-	}
-	stderrs := make([]strings.Builder, len(cmds))
-	for i, cmd := range cmds {
-		cmd.Stderr = &limitWriter{w: &stderrs[i], n: stderrLimit}
-	}
+	cmds := []*exec.Cmd{head}
+	stderrs := make([]strings.Builder, 1)
+	head.Stderr = &limitWriter{w: &stderrs[0], n: stderrLimit}
 	// The command includes the query and the absolute root. Build it only when
 	// debug is on, and record it at debug — never at info, even in dev mode.
 	if logx.DebugEnabled() {
-		cmd := formatCmd(e.Bin, argv)
-		for _, filter := range filters {
-			cmd += " | " + formatCmd(e.Bin, filter)
-		}
-		logx.Debug("rg", map[string]any{"cwd": dir, "cmd": cmd})
+		logx.Debug("rg", map[string]any{"cwd": dir, "cmd": formatCmd(e.Bin, argv)})
 	}
-	for i, cmd := range cmds {
-		if err := cmd.Start(); err != nil {
-			terminateAll(cmds[:i])
-			return filesAlready, err
-		}
+	if err := head.Start(); err != nil {
+		return filesAlready, err
 	}
-	// The children now hold their own copies of the pipes between stages.
-	// Keeping ours open would stop an upstream rg from ever seeing EPIPE when
-	// a downstream one exits early (e.g. an invalid filter regex), so it would
-	// block on a full pipe and Wait below would never return.
-	for _, r := range readers[:len(readers)-1] {
-		_ = r.Close()
-	}
+	prev := stdout
 
 	stopWatch := make(chan struct{})
 	go func() {

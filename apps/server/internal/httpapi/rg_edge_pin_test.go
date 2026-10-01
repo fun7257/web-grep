@@ -32,7 +32,7 @@ func TestPinLiveRipgrepFilterTermsRequireAll(t *testing.T) {
 		writeRel(t, root, "noquery.txt", []byte(
 			`"industryType":"4","route":"/trade-users/v1/me","accountHost":"ok"`+"\n",
 		))
-		// Terms split across lines: pipe AND is per JSON match line.
+		// Terms split across lines: filter AND is per matched line's content.
 		writeRel(t, root, "split.txt", []byte(
 			`"account":"030680228968","industryType":"4"`+"\n"+
 				`"route":"/trade-users/v1/me","accountHost":"ok"`+"\n",

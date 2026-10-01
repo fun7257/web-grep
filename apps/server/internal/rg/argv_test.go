@@ -107,6 +107,23 @@ func TestBuildFilterArgvPipesLiteralFlags(t *testing.T) {
 	}
 }
 
+func TestFilterLineArgvInsertsPassthruBeforePattern(t *testing.T) {
+	base := BuildFilterArgv(FilterTerm{Query: "host", WordMatch: true})
+	got := filterLineArgv(base)
+	want := []string{
+		"--no-config", "-F", "-i", "-w",
+		"--passthru", "--line-number", "--no-filename", "-a", "--encoding", "none",
+		"--", "host",
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("got %v want %v", got, want)
+	}
+	// The term builder itself stays the flags the pipeline starts from.
+	if !slices.Equal(base, []string{"--no-config", "-F", "-i", "-w", "--", "host"}) {
+		t.Fatalf("BuildFilterArgv changed: %v", base)
+	}
+}
+
 func TestBuildFilterArgvUsesPerTermModifiers(t *testing.T) {
 	got := BuildFilterArgv(FilterTerm{Query: "H.llo", Regex: true, CaseSensitive: true})
 	want := []string{"--no-config", "-s", "--", "H.llo"}

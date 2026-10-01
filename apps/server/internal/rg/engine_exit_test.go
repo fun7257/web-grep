@@ -99,6 +99,81 @@ exit 2
 	}
 }
 
+// A filter that exits before producing one verdict per fed line must fail the
+// search. Treating the short stream as "all passed" or "all dropped" hides a
+// broken filter. The stand-in consumes stdin so the failure is the short
+// verdict stream, not EPIPE; an off-by-one verdict number is a different error.
+func TestFilterEarlyExitFewerResultsIsError(t *testing.T) {
+	bin := fakeRg(t, `case "$*" in
+*--json*)
+  printf '%s\n' '`+matchLine+`' '`+matchLine+`' '`+matchLine+`'
+  ;;
+*)
+  # Empty stdin is the preflight: a real rg exits 1 with no stdout. A
+  # non-empty batch gets one verdict for several lines.
+  tmp=$(mktemp)
+  cat > "$tmp"
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp"
+    exit 1
+  fi
+  rm -f "$tmp"
+  printf '%s\n' '1-skip'
+  exit 0
+  ;;
+esac
+`)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var n int
+	err := Engine{Bin: bin}.Search(ctx, Input{
+		RootReal:    t.TempDir(),
+		RelativeDir: ".",
+		Query:       "hello",
+		FilterTerms: []FilterTerm{{Query: "hello"}},
+	}, func(Match) error { n++; return nil }, nil)
+	if err == nil || !strings.Contains(err.Error(), "rg filter ended before judging every match") {
+		t.Fatalf("err=%v, want rg filter ended before judging every match; emitted %d", err, n)
+	}
+	if n != 0 {
+		t.Fatalf("emitted %d matches from a filter that did not judge them", n)
+	}
+}
+
+// Head exit 2 that is only an unreadable path stays a warning when filters
+// are attached. The filter judges the line text, not the JSON record.
+func TestFilterKeepsPartialUnreadableSuccess(t *testing.T) {
+	bin := fakeRg(t, `case "$*" in
+*--json*)
+  printf '%s\n' '`+matchLine+`'
+  echo 'rg: priv/locked.txt: Permission denied (os error 13)' >&2
+  exit 2
+  ;;
+*)
+  n=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n+1))
+    printf '%s:%s\n' "$n" "$line"
+  done
+  exit 0
+  ;;
+esac
+`)
+	var n int
+	err := Engine{Bin: bin}.Search(context.Background(), Input{
+		RootReal:    t.TempDir(),
+		RelativeDir: ".",
+		Query:       "hello",
+		FilterTerms: []FilterTerm{{Query: "hello"}},
+	}, func(Match) error { n++; return nil }, nil)
+	if err != nil {
+		t.Fatalf("unreadable path plus a live filter must not fail: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("emitted %d, want 1", n)
+	}
+}
+
 // A filter that dies right away (invalid regex) used to leave the upstream rg
 // blocked on a full pipe forever, because the parent kept the pipe's read end
 // open. The search must fail promptly with the filter's error instead.
