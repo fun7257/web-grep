@@ -328,10 +328,42 @@ func directRgMatch(t *testing.T, bin string, line []byte, term FilterTerm) bool 
 	return pass
 }
 
+// lineStartsWithBOM reports a UTF-8 or UTF-16 BOM at the first bytes of a line.
+func lineStartsWithBOM(b []byte) bool {
+	return bytes.HasPrefix(b, []byte{0xEF, 0xBB, 0xBF}) ||
+		bytes.HasPrefix(b, []byte{0xFF, 0xFE}) ||
+		bytes.HasPrefix(b, []byte{0xFE, 0xFF})
+}
+
+// encodingNoneArgv inserts --encoding none in front of "--".
+func encodingNoneArgv(argv []string) []string {
+	out := make([]string, 0, len(argv)+2)
+	if n := len(argv); n >= 2 && argv[n-2] == "--" {
+		out = append(out, argv[:n-2]...)
+		out = append(out, "--encoding", "none")
+		out = append(out, argv[n-2:]...)
+		return out
+	}
+	out = append(out, "--encoding", "none")
+	out = append(out, argv...)
+	return out
+}
+
 // directFilterOutcome reports whether printf-style stdin matches, and whether
 // rg itself failed (exit other than 0 or 1).
+//
+// A line that starts with a BOM is compared with `rg --encoding none`. Default
+// `printf line | rg` sniffs a BOM only at the start of that stdin and
+// transcodes the line; that is rg's stdin sniff, not the match itself. The
+// filter judges the raw bytes of a line the head search already decoded, so
+// those lines have to agree with --encoding none. Every other line is compared
+// with the default flags, which agree with --encoding none.
 func directFilterOutcome(bin string, line []byte, term FilterTerm) (pass, bad bool) {
-	cmd := exec.Command(bin, BuildFilterArgv(term)...)
+	argv := BuildFilterArgv(term)
+	if lineStartsWithBOM(line) {
+		argv = encodingNoneArgv(argv)
+	}
+	cmd := exec.Command(bin, argv...)
 	cmd.Stdin = bytes.NewReader(line)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -740,47 +772,259 @@ func TestFilterManyShortLinesDoNotHang(t *testing.T) {
 	}
 }
 
+// TestFilterUTF16BOMFirstMatchDoesNotHang pins the raw-byte rule for a match
+// whose payload starts with a UTF-16 BOM. The file itself starts with "zzz\n",
+// so the head rg does not transcode it; the first line fed to the filter is
+// "\xff\xfeg\n". That line contains the byte 'g' and is a hit, as are the
+// following "g\n" lines. Expecting that count goes red if the filter sniffs
+// the BOM (the shared stdin then is not one verdict per line) and also goes
+// red if a per-line rg without --encoding none transcodes the BOM line away.
 func TestFilterUTF16BOMFirstMatchDoesNotHang(t *testing.T) {
 	bin := liveBin(t)
 	root := t.TempDir()
-	body := []byte("zzz\n\xff\xfeg\n")
 	const extra = 40
-	body = append(body, bytes.Repeat([]byte("g\n"), extra)...)
+	body := append([]byte("zzz\n\xff\xfeg\n"), bytes.Repeat([]byte("g\n"), extra)...)
 	writeRootFile(t, root, "a.txt", body)
-	filters := []FilterTerm{{Query: "g"}, {Query: "g", CaseSensitive: true}, {Query: ".", Regex: true}}
-	lines := [][]byte{[]byte{0xff, 0xfe, 'g', '\n'}}
-	for i := 0; i < extra; i++ {
-		lines = append(lines, []byte("g\n"))
-	}
-	want := 0
-	for _, line := range lines {
-		pass, bad := directAll(bin, line, filters)
-		if bad {
-			t.Fatalf("direct rg failed on %q", line)
-		}
-		if pass {
-			want++
-		}
-	}
+	filters := []FilterTerm{{Query: "g"}, {Query: "g", CaseSensitive: true}, {Query: "g"}}
+	// The BOM line plus each extra "g\n". "zzz" does not match the query.
+	const want = 1 + extra
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	start := time.Now()
-	var hits int
+	var lines []int
 	err := Engine{Bin: bin}.Search(ctx, Input{
 		RootReal:    root,
 		RelativeDir: ".",
 		Query:       "g",
 		NoIgnore:    true,
 		FilterTerms: filters,
-	}, func(Match) error { hits++; return nil }, nil)
+	}, func(m Match) error {
+		lines = append(lines, m.Line)
+		return nil
+	}, nil)
 	elapsed := time.Since(start)
-	t.Logf("utf16-bom hits=%d want=%d elapsed=%s", hits, want, elapsed)
+	t.Logf("utf16-bom hits=%d want=%d elapsed=%s", len(lines), want, elapsed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if hits != want {
-		t.Fatalf("hits=%d want %d", hits, want)
+	if len(lines) != want {
+		t.Fatalf("hits=%d want %d lines=%v", len(lines), want, lines)
 	}
+	if lines[0] != 2 {
+		t.Fatalf("first hit line=%d, want 2 (the raw BOM line)", lines[0])
+	}
+	if elapsed > time.Second {
+		t.Fatalf("elapsed %s, want under 1s", elapsed)
+	}
+}
+
+// TestFilterBOMRawBytes locks the cases the UTF-16 special path got wrong.
+// Expectations are the raw bytes, not default `printf line | rg` (which
+// transcodes a line that starts with a BOM).
+func TestFilterBOMRawBytes(t *testing.T) {
+	bin := liveBin(t)
+	cases := []struct {
+		name    string
+		body    []byte
+		query   string
+		regex   bool
+		filters []FilterTerm
+		lines   []int
+	}{
+		{
+			name:    "three-lines-filter-g",
+			body:    []byte("g hello\n\xff\xfeg\ng zzz\n"),
+			query:   "g",
+			filters: []FilterTerm{{Query: "g"}},
+			lines:   []int{1, 2, 3},
+		},
+		{
+			name:    "feff-middle-filter-g",
+			body:    []byte("g hello\n\xfe\xffg\ng zzz\n"),
+			query:   "g",
+			filters: []FilterTerm{{Query: "g"}},
+			lines:   []int{1, 2, 3},
+		},
+		{
+			name:    "utf8-bom-dot",
+			body:    []byte("a\n\xef\xbb\xbf\nb\n"),
+			query:   ".",
+			regex:   true,
+			filters: []FilterTerm{{Query: ".", Regex: true}},
+			lines:   []int{1, 2, 3},
+		},
+		{
+			// The UTF-8 BOM line is not empty as raw bytes, so ^$ rejects it
+			// and the other non-empty lines.
+			name:    "utf8-bom-empty",
+			body:    []byte("a\n\xef\xbb\xbf\nb\n"),
+			query:   ".",
+			regex:   true,
+			filters: []FilterTerm{{Query: "^$", Regex: true}},
+			lines:   nil,
+		},
+		{
+			name:    "half-bom-still-matches-g",
+			body:    []byte("g hello\n\xffg\ng zzz\n"),
+			query:   "g",
+			filters: []FilterTerm{{Query: "g"}},
+			lines:   []int{1, 2, 3},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			writeRootFile(t, root, "a.txt", tc.body)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			start := time.Now()
+			var got []int
+			err := Engine{Bin: bin}.Search(ctx, Input{
+				RootReal:    root,
+				RelativeDir: ".",
+				Query:       tc.query,
+				Regex:       tc.regex,
+				NoIgnore:    true,
+				FilterTerms: tc.filters,
+			}, func(m Match) error {
+				got = append(got, m.Line)
+				return nil
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if time.Since(start) > time.Second {
+				t.Fatalf("elapsed %s", time.Since(start))
+			}
+			if len(got) != len(tc.lines) {
+				t.Fatalf("lines=%v want %v", got, tc.lines)
+			}
+			for i := range got {
+				if got[i] != tc.lines[i] {
+					t.Fatalf("lines=%v want %v", got, tc.lines)
+				}
+			}
+		})
+	}
+}
+
+// TestFilterBOMOracleUsesEncodingNone compares each fed line with rg.
+// BOM-leading lines use --encoding none; every other line uses default
+// `printf line | rg`. The file does not itself start with a BOM, so the head
+// search does not transcode the whole file.
+func TestFilterBOMOracleUsesEncodingNone(t *testing.T) {
+	bin := liveBin(t)
+	lines := [][]byte{
+		[]byte("g hello\n"),
+		{0xff, 0xfe, 'g', '\n'},
+		[]byte("g zzz\n"),
+		{0xfe, 0xff, 'g', '\n'},
+		[]byte("plain\n"),
+		{0xef, 0xbb, 0xbf, '\n'},
+		[]byte("before \xff\xfe after\n"),
+		{0xff, 'g', '\n'},
+		[]byte("你好\n"),
+	}
+	var body []byte
+	for _, ln := range lines {
+		body = append(body, ln...)
+	}
+	terms := []FilterTerm{
+		{Query: "g"},
+		{Query: ".", Regex: true},
+		{Query: "^$", Regex: true},
+		{Query: "你好"},
+		{Query: "hello"},
+	}
+	for _, term := range terms {
+		t.Run(term.Query, func(t *testing.T) {
+			root := t.TempDir()
+			writeRootFile(t, root, "a.txt", body)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			got := map[int]bool{}
+			err := Engine{Bin: bin}.Search(ctx, Input{
+				RootReal:    root,
+				RelativeDir: ".",
+				Query:       ".",
+				Regex:       true,
+				NoIgnore:    true,
+				FilterTerms: []FilterTerm{term},
+			}, func(m Match) error {
+				got[m.Line] = true
+				return nil
+			}, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, ln := range lines {
+				pass, bad := directFilterOutcome(bin, ensureNL(ln), term)
+				if bad {
+					t.Fatalf("oracle rg failed on line %d %q", i+1, ln)
+				}
+				if got[i+1] != pass {
+					t.Fatalf("line %d %q bom=%v engine=%v oracle=%v", i+1, ln, lineStartsWithBOM(ln), got[i+1], pass)
+				}
+			}
+		})
+	}
+}
+
+// TestFilterUTF16FileFilteredIsOrderedSubset covers a file whose first bytes
+// are a UTF-16 BOM. The head rg transcodes that file; the filter then sees
+// the decoded text. Hits with a filter are an ordered subset of the hits
+// without one.
+func TestFilterUTF16FileFilteredIsOrderedSubset(t *testing.T) {
+	bin := liveBin(t)
+	root := t.TempDir()
+	writeRootFile(t, root, "a.txt", utf16LEFile("g hello\nnope\ng zzz\nonly g\n"))
+	all := runSearch(t, bin, root, Input{Query: ".", Regex: true})
+	filt := runSearch(t, bin, root, Input{
+		Query:       ".",
+		Regex:       true,
+		FilterTerms: []FilterTerm{{Query: "g"}},
+	})
+	if len(all.texts) == 0 {
+		t.Fatal("unfiltered UTF-16 file produced no hits")
+	}
+	if !orderedTextSubset(all.texts, filt.texts) {
+		t.Fatalf("filtered %v is not an ordered subset of %v", filt.texts, all.texts)
+	}
+	for _, text := range filt.texts {
+		if !strings.Contains(strings.ToLower(text), "g") {
+			t.Fatalf("filtered hit %q does not contain g", text)
+		}
+	}
+	if len(filt.texts) == len(all.texts) {
+		t.Fatal("filter g dropped nothing; the fixture includes a line without g")
+	}
+}
+
+func utf16LEFile(s string) []byte {
+	out := []byte{0xFF, 0xFE}
+	for _, r := range s {
+		out = append(out, byte(r), byte(r>>8))
+	}
+	return out
+}
+
+func orderedTextSubset(all, sub []string) bool {
+	i := 0
+	for _, s := range sub {
+		found := false
+		for i < len(all) {
+			if all[i] == s {
+				found = true
+				i++
+				break
+			}
+			i++
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 func TestParsePassthruPrefix(t *testing.T) {
