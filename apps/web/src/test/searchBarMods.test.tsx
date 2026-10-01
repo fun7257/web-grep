@@ -85,15 +85,15 @@ describe("SearchBar option toggles", () => {
     fireEvent.keyDown(box, { key: "w", altKey: true });
     fireEvent.keyDown(box, { key: "r", altKey: true });
 
-    expect(screen.getByRole("button", { name: "Aa" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: "\\b" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: ".*" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
+    expect(
+      screen.getByRole("button", { name: "Aa" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      screen.getByRole("button", { name: "\\b" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      screen.getByRole("button", { name: ".*" }).getAttribute("aria-pressed"),
+    ).toBe("true");
     expect(onFlushSearch).not.toHaveBeenCalled();
   });
 
@@ -107,19 +107,18 @@ describe("SearchBar option toggles", () => {
     expect(onFlushSearch).toHaveBeenCalledTimes(2);
   });
 
-  it("searches from the AND panel Search button, not from extra-field mods", () => {
+  it("searches from the main Search button, not from extra-field mods", () => {
     const onFlushSearch = renderBar([newPart("hello"), newPart("world")]);
-    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
 
-    const extra = screen.getByRole("textbox", { name: "Add filter" });
+    const extra = screen.getByRole("textbox", { name: "Filter 1" });
     const extraMods = extra
-      .closest(".search-filter-item")
+      .closest(".search-filter-row")
       ?.querySelectorAll(".mod-btn");
     expect(extraMods?.length).toBe(3);
     fireEvent.click(extraMods?.[0] as HTMLButtonElement);
     expect(onFlushSearch).not.toHaveBeenCalled();
 
-    fireEvent.click(document.querySelector(".search-filter-go") as HTMLButtonElement);
+    fireEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(onFlushSearch).toHaveBeenCalledTimes(1);
     expect(
       onFlushSearch.mock.calls[0]?.[0]?.map((part: QueryPart) => part.value),

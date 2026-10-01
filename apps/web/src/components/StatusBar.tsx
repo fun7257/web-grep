@@ -1,14 +1,11 @@
-import type {
-  JsonError,
-  MetaResponse,
-  SseDone,
-  SseProgress,
-} from "@web-grep/shared";
+import type { JsonError, SseDone, SseProgress } from "@web-grep/shared";
+import type { ReactNode, Ref } from "react";
 import { useLocale } from "../hooks/useLocale.ts";
 import { useTheme } from "../hooks/useTheme.ts";
 import type { SearchStatus } from "../state/searchReducer.ts";
 import { isRawEngineStderr } from "./EmptyState.tsx";
-import { IconMoon, IconSun, IconWarn } from "./icons.tsx";
+import { IconMoon, IconSearch, IconSun, IconWarn } from "./icons.tsx";
+import { IconStateClock } from "./stateIcons.tsx";
 
 export function ThemeToggle() {
   const { theme, toggle } = useTheme();
@@ -76,12 +73,43 @@ export function InfoCue({ message }: { message: string | null }) {
   }
   return (
     <div className="info-cue" role="status">
+      <IconSearch />
       <span className="info-cue-label">{message}</span>
     </div>
   );
 }
 
-export function WarnBanners({ done }: { done: SseDone | null }) {
+function bannerParts(text: string): { title: string; rest: string } {
+  const mark = "—";
+  const idx = text.indexOf(mark);
+  if (idx === -1) {
+    return { title: text, rest: "" };
+  }
+  return {
+    title: text.slice(0, idx).trim(),
+    rest: text.slice(idx + mark.length).trim(),
+  };
+}
+
+function BannerBody({ text }: { text: string }) {
+  const parts = bannerParts(text);
+  return (
+    <span className="warn-label">
+      <b>{parts.title}</b>
+      {parts.rest !== "" ? ` ${parts.rest}` : null}
+    </span>
+  );
+}
+
+export function WarnBanners({
+  done,
+  onNarrow,
+  onRetry,
+}: {
+  done: SseDone | null;
+  onNarrow?: () => void;
+  onRetry?: () => void;
+}) {
   const { t } = useLocale();
   if (done === null || (!done.truncated && !done.timedOut)) {
     return null;
@@ -91,95 +119,174 @@ export function WarnBanners({ done }: { done: SseDone | null }) {
       {done.truncated ? (
         <div className="warn-banner">
           <IconWarn />
-          <span className="warn-label">{t("truncatedBanner")}</span>
+          <BannerBody text={t("truncatedBanner")} />
+          {onNarrow !== undefined ? (
+            <button type="button" className="banner-action" onClick={onNarrow}>
+              {t("narrowScope")}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {done.timedOut ? (
         <div className="warn-banner">
-          <IconWarn />
-          <span className="warn-label">{t("timedOutBanner")}</span>
+          <IconStateClock />
+          <BannerBody text={t("timedOutBanner")} />
+          {onRetry !== undefined ? (
+            <button type="button" className="banner-action" onClick={onRetry}>
+              {t("retry")}
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>
   );
 }
 
-export function StatusBar({
+function fmtCount(n: number, locale: string): string {
+  return n.toLocaleString(locale);
+}
+
+function RichLine({
+  template,
+  vars,
+  strong,
+}: {
+  template: string;
+  vars: Record<string, string | number>;
+  strong: ReadonlySet<string>;
+}) {
+  const nodes: ReactNode[] = [];
+  const re = /\{(\w+)\}/g;
+  let last = 0;
+  let match: RegExpExecArray | null;
+  let key = 0;
+  while ((match = re.exec(template)) !== null) {
+    if (match.index > last) {
+      nodes.push(template.slice(last, match.index));
+    }
+    const name = match[1] ?? "";
+    const value = vars[name];
+    const text = value === undefined ? match[0] : String(value);
+    if (strong.has(name)) {
+      nodes.push(
+        <b key={key} className="num">
+          {text}
+        </b>,
+      );
+    } else {
+      nodes.push(<span key={key}>{text}</span>);
+    }
+    key += 1;
+    last = match.index + match[0].length;
+  }
+  if (last < template.length) {
+    nodes.push(template.slice(last));
+  }
+  return <span className="pane-head-summary">{nodes}</span>;
+}
+
+function alertCopy(
+  t: ReturnType<typeof useLocale>["t"],
+  error: JsonError | null,
+  hostForbidden: boolean,
+): string {
+  if (hostForbidden || error?.code === "FORBIDDEN_HOST") {
+    return t("hostNotAllowed");
+  }
+  if (error?.code === "ENGINE" || isRawEngineStderr(error?.message)) {
+    return t("engineUnavailable");
+  }
+  if (error?.code === "BUSY") {
+    return t("searchBusy");
+  }
+  return error?.message ?? t("searchFailed");
+}
+
+/**
+ * Result-column heading. Cancel lives on the search button, not here.
+ * The live region stays on this bar so a hit-bearing error is still announced
+ * when the state page is hidden; zero-hit errors announce from the state title.
+ */
+export function ResultHead({
   status,
   done,
   progress,
   error,
   hostForbidden,
-  meta,
-  onCancel,
+  hitCount,
+  actionsRef,
 }: {
   status: SearchStatus;
   done: SseDone | null;
   progress: SseProgress | null;
   error: JsonError | null;
   hostForbidden: boolean;
-  meta: MetaResponse | null;
-  onCancel?: () => void;
+  hitCount: number;
+  actionsRef?: Ref<HTMLDivElement>;
 }) {
-  const { t } = useLocale();
-
-  let text = "";
-  if (hostForbidden) {
-    text = t("hostNotAllowed");
-  } else if (status === "running") {
-    text =
-      progress !== null
-        ? t("searchProgressMeta", {
-            files: progress.files,
-            matches: progress.matches,
-          })
-        : t("loading");
-  } else if (status === "cancelled") {
-    text = t("cancelled");
-  } else if (status === "error") {
-    if (error?.code === "FORBIDDEN_HOST") {
-      text = t("hostNotAllowed");
-    } else if (error?.code === "ENGINE" || isRawEngineStderr(error?.message)) {
-      text = t("engineUnavailable");
-    } else {
-      text = error?.message ?? t("searchFailed");
-    }
-  } else if (status === "done" && done !== null) {
-    text = t("resultsStatus", {
-      matchCount: done.matchCount,
-      fileCount: done.fileCount,
-      elapsedMs: Math.round(done.elapsedMs),
-    });
-  }
-
+  const { locale, t } = useLocale();
   const isAlert = hostForbidden || status === "error";
-  const isStatus =
+  const alertOnBar = isAlert && hitCount > 0;
+  const statusOnBar =
     !isAlert &&
     (status === "running" || status === "cancelled" || status === "done");
+  const role = alertOnBar ? "alert" : statusOnBar ? "status" : undefined;
 
-  if (text === "" && meta?.engine !== "none") {
-    return null;
+  let summary: ReactNode = null;
+  if (status === "running" && progress !== null) {
+    summary = (
+      <RichLine
+        template={t("searchProgressMeta")}
+        vars={{
+          files: fmtCount(progress.files, locale),
+          matches: fmtCount(progress.matches, locale),
+        }}
+        strong={new Set(["files", "matches"])}
+      />
+    );
+  } else if (status === "cancelled") {
+    summary = (
+      <RichLine
+        template={t("cancelledHits")}
+        vars={{ matches: fmtCount(hitCount, locale) }}
+        strong={new Set(["matches"])}
+      />
+    );
+  } else if (status === "done" && done !== null) {
+    summary = (
+      <RichLine
+        template={t("resultsStatus")}
+        vars={{
+          matchCount: fmtCount(done.matchCount, locale),
+          fileCount: fmtCount(done.fileCount, locale),
+          elapsedMs: Math.round(done.elapsedMs),
+        }}
+        strong={new Set(["matchCount", "fileCount"])}
+      />
+    );
+  } else if (alertOnBar) {
+    summary = (
+      <span className="pane-head-summary">
+        {alertCopy(t, error, hostForbidden)}
+      </span>
+    );
   }
 
   return (
-    <div className="status-bar" data-status={status}>
-      <div
-        className={
-          status === "running" ? "status-text progress-meta" : "status-text"
-        }
-        role={isAlert ? "alert" : isStatus ? "status" : undefined}
-        aria-live="polite"
-      >
-        {text}
-      </div>
-      {status === "running" && onCancel !== undefined ? (
-        <button type="button" className="status-cancel" onClick={onCancel}>
-          {t("cancel")}
-        </button>
+    <div
+      className="pane-head"
+      data-status={status}
+      role={role}
+      aria-live={role !== undefined ? "polite" : undefined}
+    >
+      {status === "running" ? (
+        <span className="result-spin" aria-hidden="true" />
       ) : null}
-      {meta?.engine === "none" ? (
-        <div className="status-banner">{t("engineNoneBanner")}</div>
-      ) : null}
+      <span className="pane-head-title">
+        {status === "running" ? t("loading") : t("paneHits")}
+      </span>
+      {summary}
+      <div ref={actionsRef} className="pane-head-actions" />
     </div>
   );
 }

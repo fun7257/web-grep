@@ -7,12 +7,11 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LIMITS } from "@web-grep/shared";
-import { TOKEN_STORAGE_KEY } from "../api/headers.ts";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
+import { TOKEN_STORAGE_KEY } from "../api/headers.ts";
 import { setLivePreviewLimits } from "../previewChunk.ts";
-
 
 const META = {
   engine: "rg",
@@ -334,14 +333,7 @@ function clickTreePick(name: string): void {
   fireEvent.click(treePickButton(name));
 }
 
-function openFilters(): void {
-  fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-}
-
 function addFilterField(): void {
-  if (document.querySelector(".search-filter-pop") === null) {
-    openFilters();
-  }
   fireEvent.click(screen.getByRole("button", { name: "Add filter" }));
 }
 
@@ -415,19 +407,17 @@ describe("search flow", () => {
     await waitFor(() => {
       const treeUrls = fetchMock.mock.calls
         .map((call) => requestUrl(call[0] as RequestInfo))
-        .filter((url) => url.includes("/api/tree") && url.includes("mtimeAfter="));
+        .filter(
+          (url) => url.includes("/api/tree") && url.includes("mtimeAfter="),
+        );
       expect(treeUrls.length).toBeGreaterThan(0);
     });
   });
 
   it("clears file picks when the time range changes", async () => {
-    mockFetch(
-      () => sseResponse([sseEvent("done", donePayload())]),
-      undefined,
-      {
-        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
-      },
-    );
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]), undefined, {
+      treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+    });
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
@@ -438,10 +428,15 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("0 selected")).toBeTruthy();
     });
-    expect(screen.queryByRole("button", { name: "Search selected" })).toBeNull();
     expect(
-      (screen.getByRole("button", { name: "Clear conditions" }) as HTMLButtonElement)
-        .disabled,
+      screen.queryByRole("button", { name: "Search selected" }),
+    ).toBeNull();
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Clear conditions",
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(false);
   });
 
@@ -560,7 +555,9 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    const input = screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement;
+    const input = screen.getByPlaceholderText(
+      "e.g. *.test.ts",
+    ) as HTMLInputElement;
     input.focus();
     fireEvent.change(input, { target: { value: "*.log" } });
     await new Promise((resolve) => {
@@ -590,7 +587,9 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    const input = screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement;
+    const input = screen.getByPlaceholderText(
+      "e.g. *.test.ts",
+    ) as HTMLInputElement;
     input.focus();
     fireEvent.change(input, { target: { value: "*.test.ts" } });
     fireEvent.blur(input);
@@ -613,7 +612,9 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
-    const input = screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement;
+    const input = screen.getByPlaceholderText(
+      "e.g. *.test.ts",
+    ) as HTMLInputElement;
     input.focus();
     fireEvent.change(input, { target: { value: "*.log" } });
     fireEvent.blur(input);
@@ -625,21 +626,19 @@ describe("search flow", () => {
       expect(urls.length).toBeGreaterThan(0);
       const last = urls.at(-1) ?? "";
       expect(last.indexOf("exclude=")).toBeGreaterThanOrEqual(0);
-      expect(last.indexOf("exclude=")).toBeLessThan(last.indexOf("mtimeAfter="));
+      expect(last.indexOf("exclude=")).toBeLessThan(
+        last.indexOf("mtimeAfter="),
+      );
     });
   });
 
   it("applying exclude unchecks matching files and updates the selected count", async () => {
-    mockFetch(
-      () => sseResponse([sseEvent("done", donePayload())]),
-      undefined,
-      {
-        treeEntries: [
-          { name: "ok.txt", path: "ok.txt", dir: false },
-          { name: "skip.log", path: "skip.log", dir: false },
-        ],
-      },
-    );
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]), undefined, {
+      treeEntries: [
+        { name: "ok.txt", path: "ok.txt", dir: false },
+        { name: "skip.log", path: "skip.log", dir: false },
+      ],
+    });
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
@@ -647,7 +646,9 @@ describe("search flow", () => {
     clickTreePick("ok.txt");
     clickTreePick("skip.log");
     expect(screen.getByText("2 selected")).toBeTruthy();
-    const exclude = screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement;
+    const exclude = screen.getByPlaceholderText(
+      "e.g. *.test.ts",
+    ) as HTMLInputElement;
     fireEvent.change(exclude, { target: { value: "*.log" } });
     fireEvent.blur(exclude);
     await waitFor(() => {
@@ -726,13 +727,9 @@ describe("search flow", () => {
   });
 
   it("file pick chips omit a trailing slash", async () => {
-    mockFetch(
-      () => sseResponse([sseEvent("done", donePayload())]),
-      undefined,
-      {
-        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
-      },
-    );
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]), undefined, {
+      treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+    });
     render(<App />);
     await waitFor(() => {
       expect(treeName("ok.txt")).toBeTruthy();
@@ -784,7 +781,9 @@ describe("search flow", () => {
     };
     expect(parsed.globInclude).toEqual(["skip.txt"]);
     expect(parsed.globExclude).toEqual(["*.log"]);
-    expect(screen.queryByRole("button", { name: "Exclude selected" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Exclude selected" }),
+    ).toBeNull();
     expect(screen.queryByPlaceholderText("*.ts, src/**")).toBeNull();
   });
 
@@ -830,7 +829,9 @@ describe("search flow", () => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
     });
     clickTreePick("ok.txt");
-    const exclude = screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement;
+    const exclude = screen.getByPlaceholderText(
+      "e.g. *.test.ts",
+    ) as HTMLInputElement;
     fireEvent.change(exclude, { target: { value: "*.log" } });
     fireEvent.blur(exclude);
     fireEvent.click(screen.getByRole("button", { name: "24h" }));
@@ -856,8 +857,11 @@ describe("search flow", () => {
       screen.getByRole("button", { name: "24h" }).getAttribute("aria-pressed"),
     ).toBe("false");
     expect(
-      (screen.getByRole("button", { name: "Clear conditions" }) as HTMLButtonElement)
-        .disabled,
+      (
+        screen.getByRole("button", {
+          name: "Clear conditions",
+        }) as HTMLButtonElement
+      ).disabled,
     ).toBe(true);
   });
 
@@ -981,7 +985,7 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(screen.getByText("No matches")).toBeTruthy();
     });
-    expect(document.querySelector(".empty-idle .idle-mark")).toBeTruthy();
+    expect(document.querySelector(".empty-idle .state-art")).toBeTruthy();
   });
 
   it("shows cancelled after abort", async () => {
@@ -1090,9 +1094,12 @@ describe("search flow", () => {
     );
     render(<App />);
     const dialog = await screen.findByRole("dialog");
-    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
-      target: { value: "secret1" },
-    });
+    fireEvent.change(
+      dialog.querySelector('input[name="password"]') as Element,
+      {
+        target: { value: "secret1" },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
@@ -1138,9 +1145,12 @@ describe("search flow", () => {
     clickSearch();
     const dialog = await screen.findByRole("dialog");
     fireEvent.click(screen.getByLabelText("Remember password"));
-    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
-      target: { value: "secret1" },
-    });
+    fireEvent.change(
+      dialog.querySelector('input[name="password"]') as Element,
+      {
+        target: { value: "secret1" },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => {
       expect(sessionStorage.getItem(TOKEN_STORAGE_KEY)).toBe("sess-abc");
@@ -1299,9 +1309,9 @@ describe("search flow", () => {
     fireEvent.change(goto, { target: { value: "5" } });
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
     await waitFor(() => {
-      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
-        /src\/a\.ts line 5/,
-      );
+      expect(
+        dialog.querySelector(".preview-line.current")?.textContent,
+      ).toMatch(/src\/a\.ts line 5/);
     });
     expect(document.querySelector(".app-dimmed")).toBeTruthy();
   });
@@ -1405,9 +1415,9 @@ describe("search flow", () => {
     fireEvent.change(goto, { target: { value: "5" } });
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
     await waitFor(() => {
-      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
-        /ok\.txt line 5/,
-      );
+      expect(
+        dialog.querySelector(".preview-line.current")?.textContent,
+      ).toMatch(/ok\.txt line 5/);
     });
     fireEvent.change(goto, { target: { value: "50" } });
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
@@ -1510,7 +1520,9 @@ describe("search flow", () => {
       expect(dialog.querySelector(".preview-line")).toBeTruthy();
     });
     fireEvent.change(goto, { target: { value: "50" } });
-    fireEvent.submit((goto as HTMLInputElement).closest("form") as HTMLFormElement);
+    fireEvent.submit(
+      (goto as HTMLInputElement).closest("form") as HTMLFormElement,
+    );
     await waitFor(() => {
       expect(dialog.querySelector("h2")?.textContent).toContain(":50");
     });
@@ -1525,15 +1537,15 @@ describe("search flow", () => {
     await waitFor(() => {
       expect(again.textContent).toMatch(/ok\.txt line 1/);
     });
-    expect(again.querySelector(".preview-line.current")?.textContent ?? "").not.toMatch(
-      /ok\.txt line 50/,
-    );
+    expect(
+      again.querySelector(".preview-line.current")?.textContent ?? "",
+    ).not.toMatch(/ok\.txt line 50/);
     const afterClose = fetchMock.mock.calls
       .map((call) => requestUrl(call[0] as RequestInfo))
       .filter((url) => url.includes("/api/file"));
-    expect(afterClose.filter((url) => url.includes("from=1")).length).toBeGreaterThan(
-      1,
-    );
+    expect(
+      afterClose.filter((url) => url.includes("from=1")).length,
+    ).toBeGreaterThan(1);
   });
 
   it("shows an empty state when the tree file has no content", async () => {
@@ -1568,7 +1580,8 @@ describe("search flow", () => {
       (screen.getByLabelText("Go to line") as HTMLInputElement).disabled,
     ).toBe(true);
     expect(
-      (screen.getByRole("button", { name: "Go" }) as HTMLButtonElement).disabled,
+      (screen.getByRole("button", { name: "Go" }) as HTMLButtonElement)
+        .disabled,
     ).toBe(true);
   });
 
@@ -1644,27 +1657,25 @@ describe("search flow", () => {
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
     await waitFor(() => {
       expect(screen.getByText("No line 50 · jumped to 8")).toBeTruthy();
-      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
-        /ok\.txt line 8/,
-      );
+      expect(
+        dialog.querySelector(".preview-line.current")?.textContent,
+      ).toMatch(/ok\.txt line 8/);
     });
     expect(goto.value).toBe("8");
     fireEvent.change(goto, { target: { value: "3" } });
     fireEvent.submit(goto.closest("form") as HTMLFormElement);
     await waitFor(() => {
-      expect(dialog.querySelector(".preview-line.current")?.textContent).toMatch(
-        /ok\.txt line 3/,
-      );
+      expect(
+        dialog.querySelector(".preview-line.current")?.textContent,
+      ).toMatch(/ok\.txt line 3/);
     });
     expect(screen.queryByText(/No line 50/)).toBeNull();
   });
 
   it("rejects an invalid line number in the tree file preview", async () => {
-    mockFetch(
-      () => sseResponse([sseEvent("done", donePayload())]),
-      undefined,
-      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
-    );
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]), undefined, {
+      treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+    });
     render(<App />);
     await waitFor(() => {
       expect(screen.getByText("ok.txt")).toBeTruthy();
@@ -1881,7 +1892,7 @@ describe("search flow", () => {
     render(<App />);
     typeQuery("hello");
     addFilterField();
-    fireEvent.change(await screen.findByRole("textbox", { name: "Add filter" }), {
+    fireEvent.change(await screen.findByRole("textbox", { name: "Filter 1" }), {
       target: { value: "world" },
     });
     clickSearch();
@@ -2008,12 +2019,12 @@ describe("search flow", () => {
         screen.getByRole("button", { name: "Aa" }).getAttribute("aria-pressed"),
       ).toBe("true");
     });
-    expect(screen.getByRole("button", { name: "\\b" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
-    expect(screen.getByRole("button", { name: ".*" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
+    expect(
+      screen.getByRole("button", { name: "\\b" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      screen.getByRole("button", { name: ".*" }).getAttribute("aria-pressed"),
+    ).toBe("true");
     expect(screen.queryByPlaceholderText("*.ts, src/**")).toBeNull();
     expect(
       (screen.getByPlaceholderText("e.g. *.test.ts") as HTMLInputElement).value,
@@ -2073,11 +2084,7 @@ describe("search flow", () => {
   });
 
   it("opens a shared AND query with tree picks as include", async () => {
-    window.history.replaceState(
-      {},
-      "",
-      "/?q=hello&q=world&f=skip.txt&t=7d",
-    );
+    window.history.replaceState({}, "", "/?q=hello&q=world&f=skip.txt&t=7d");
     const fetchMock = mockFetch(
       () =>
         sseResponse([
@@ -2096,7 +2103,13 @@ describe("search flow", () => {
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
       "hello",
     );
-    expect(document.querySelector(".search-add-count")?.textContent).toBe("1");
+    expect(document.querySelector(".search-filter-count")?.textContent).toBe(
+      "1 / 15",
+    );
+    expect(
+      (screen.getByRole("textbox", { name: "Filter 1" }) as HTMLInputElement)
+        .value,
+    ).toBe("world");
     expect(searchCallCount(fetchMock)).toBe(0);
     clickSearch();
     await waitFor(() => {
@@ -2355,26 +2368,28 @@ describe("search flow", () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
-    expect(screen.queryByRole("textbox", { name: "Add filter" })).toBeNull();
-    openFilters();
+    expect(screen.queryByRole("textbox", { name: "Filter 1" })).toBeNull();
     expect(
       (screen.getByRole("button", { name: "Add filter" }) as HTMLButtonElement)
         .disabled,
     ).toBe(true);
   });
 
-  it("Shift+Enter adds a filter even when the filter button is focused", async () => {
+  it("Shift+Enter adds a filter even when the add-filter button is focused", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     typeQuery("hello");
-    const caret = screen.getByRole("button", { name: "Filters" });
-    caret.focus();
+    const add = screen.getByRole("button", { name: "Add filter" });
+    add.focus();
     fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
     expect(
-      await screen.findByRole("textbox", { name: "Add filter" }),
+      await screen.findByRole("textbox", { name: "Filter 1" }),
     ).toBeTruthy();
-    expect(document.querySelector(".search-filter-pop")).toBeTruthy();
-    expect(document.querySelectorAll(".search-filter-item")).toHaveLength(1);
+    expect(document.querySelector(".search-filter-pop")).toBeNull();
+    expect(document.querySelectorAll(".search-filter-row")).toHaveLength(1);
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", { name: "Filter 1" }),
+    );
   });
 
   it("Shift+Enter adds a new AND condition", async () => {
@@ -2391,10 +2406,10 @@ describe("search flow", () => {
       expect(fileRow("src/a.ts")).toBeTruthy();
     });
     const searchesAfterFirst = searchCallCount(fetchMock);
-    const box = screen.getByRole("searchbox");
     fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
-    const extra = await screen.findByRole("textbox", { name: "Add filter" });
-    expect(document.querySelector(".search-filter-pop")).toBeTruthy();
+    const extra = await screen.findByRole("textbox", { name: "Filter 1" });
+    expect(document.querySelector(".search-filter-pop")).toBeNull();
+    expect(document.querySelectorAll(".search-filter-row")).toHaveLength(1);
     expect(searchCallCount(fetchMock)).toBe(searchesAfterFirst);
     fireEvent.change(extra, { target: { value: "world" } });
     clickSearch();
@@ -2427,7 +2442,9 @@ describe("search flow", () => {
       expect(fileRow("src/a.ts")).toBeTruthy();
     });
     await waitFor(() => {
-      expect(document.querySelector(".preview-pane .preview-line.current")).toBeTruthy();
+      expect(
+        document.querySelector(".preview-pane .preview-line.current"),
+      ).toBeTruthy();
     });
     fireEvent.click(
       document.querySelector(".search-clear") as HTMLButtonElement,
@@ -2435,7 +2452,9 @@ describe("search flow", () => {
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe("");
     expect(document.querySelectorAll(".q-chip")).toHaveLength(0);
     expect(queryLoc("src/a.ts:1")).toBeNull();
-    expect(document.querySelector(".preview-pane .preview-line.current")).toBeNull();
+    expect(
+      document.querySelector(".preview-pane .preview-line.current"),
+    ).toBeNull();
     expect(document.querySelector(".empty-idle")).toBeTruthy();
     expect(document.querySelector(".preview-idle")).toBeTruthy();
   });
@@ -2463,7 +2482,7 @@ describe("search flow", () => {
     render(<App />);
     typeQuery("hello");
     addFilterField();
-    const extra = await screen.findByRole("textbox", { name: "Add filter" });
+    const extra = await screen.findByRole("textbox", { name: "Filter 1" });
     fireEvent.change(extra, { target: { value: "world.*" } });
     const regexBtns = screen.getAllByRole("button", { name: ".*" });
     expect(regexBtns.length).toBeGreaterThan(1);
@@ -2492,7 +2511,7 @@ describe("search flow", () => {
     render(<App />);
     typeQuery("hello world");
     addFilterField();
-    const extra = await screen.findByRole("textbox", { name: "Add filter" });
+    const extra = await screen.findByRole("textbox", { name: "Filter 1" });
     fireEvent.change(extra, { target: { value: "timeout" } });
     clickSearch();
     await waitFor(() => {
@@ -2509,16 +2528,14 @@ describe("search flow", () => {
       expect(body.regex ?? false).toBe(false);
     });
     expect(document.querySelector(".search-filter-pop")).toBeNull();
-    expect(document.querySelector(".search-add-count")?.textContent).toBe("1");
-    expect(
-      document.querySelector(".search-add-field")?.classList.contains("is-on"),
-    ).toBe(true);
+    expect(document.querySelector(".search-filter-count")?.textContent).toBe(
+      "1 / 15",
+    );
     expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
       "hello world",
     );
-    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
     expect(
-      (screen.getByRole("textbox", { name: "Add filter" }) as HTMLInputElement)
+      (screen.getByRole("textbox", { name: "Filter 1" }) as HTMLInputElement)
         .value,
     ).toBe("timeout");
   });
@@ -2568,51 +2585,89 @@ describe("search flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Recent searches" }));
     expect(document.querySelector(".search-history-pop")).toBeTruthy();
     expect(screen.getByRole("button", { name: /needle-hist/ })).toBeTruthy();
-    expect(document.querySelector(".search-filter-pop")).toBeNull();
-  });
-
-  it("opens Filters from the filter button without adding a field", async () => {
-    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
-    render(<App />);
-    expect(document.querySelector(".search-filter-pop")).toBeNull();
-    expect(document.querySelector(".search-add-count")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    expect(document.querySelector(".search-filter-pop")).toBeTruthy();
-    expect(document.querySelector(".search-drop-backdrop")).toBeTruthy();
-    expect(screen.queryByText("Recent searches")).toBeNull();
     expect(
-      screen.queryByRole("textbox", { name: "Add filter" }),
-    ).toBeNull();
-    expect(document.querySelector(".search-filter-more")).toBeTruthy();
-    expect(document.querySelector(".search-filter-go")).toBeTruthy();
-    fireEvent.mouseDown(
-      document.querySelector(".search-drop-backdrop") as Element,
-    );
+      screen.getByRole("dialog", { name: "Recent searches" }),
+    ).toBeTruthy();
     expect(document.querySelector(".search-filter-pop")).toBeNull();
   });
 
-  it("puts the Shift+Enter hint left of a compact add/search pair", async () => {
+  it("keeps recent searches empty after Clear all and a remount", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    const view = render(<App />);
+    typeQuery("needle-hist");
+    clickSearch();
+    await waitFor(() => {
+      expect(document.querySelector(".search-go.cancel")).toBeNull();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Recent searches" }));
+    expect(screen.getByRole("button", { name: /needle-hist/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    expect(screen.getByText("No recent searches")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /needle-hist/ })).toBeNull();
+    view.unmount();
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: "Recent searches" }));
+    expect(screen.getByText("No recent searches")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /needle-hist/ })).toBeNull();
+  });
+
+  it("does not write cleared history back when the next search is recorded", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
-    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    const foot = document.querySelector(".search-filter-foot") as HTMLElement;
+    typeQuery("needle-hist");
+    clickSearch();
+    await waitFor(() => {
+      expect(document.querySelector(".search-go.cancel")).toBeNull();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Recent searches" }));
+    fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Recent searches" }));
+    typeQuery("second-hist");
+    clickSearch();
+    await waitFor(() => {
+      expect(document.querySelector(".search-go.cancel")).toBeNull();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Recent searches" }));
+    expect(screen.getByRole("button", { name: /second-hist/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /needle-hist/ })).toBeNull();
+  });
+
+  it("keeps the add-filter control in the footer until a row is actually added", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    expect(document.querySelector(".search-filter-pop")).toBeNull();
+    expect(document.querySelector(".search-filter-count")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Filter 1" })).toBeNull();
+    const add = screen.getByRole("button", {
+      name: "Add filter",
+    }) as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+    fireEvent.click(add);
+    expect(screen.queryByRole("textbox", { name: "Filter 1" })).toBeNull();
+    typeQuery("hello");
+    expect(
+      (screen.getByRole("button", { name: "Add filter" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(false);
+    expect(document.querySelector(".search-main .search-go")).toBeTruthy();
+  });
+
+  it("puts add-filter, the Shift hint, and the must-match note on the card footer", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    const foot = document.querySelector(".search-foot") as HTMLElement;
+    const add = foot.querySelector(".search-filter-add") as HTMLButtonElement;
     const hint = foot.querySelector(".search-filter-hint") as HTMLElement;
-    const actions = foot.querySelector(".search-filter-actions") as HTMLElement;
-    const add = document.querySelector(
-      ".search-filter-more",
-    ) as HTMLButtonElement;
-    expect(foot.firstElementChild).toBe(hint);
-    expect(hint.nextElementSibling).toBe(actions);
-    expect(foot.querySelector(".search-filter-limit")).toBeNull();
-    expect(hint.textContent?.replace(/\s+/g, " ").trim()).toBe(
-      "Shift+Enter to add",
-    );
-    expect(hint.title).toContain("Shift+Enter to add a filter");
-    expect(hint.title).toContain("Up to 16");
+    expect(foot.querySelector(".search-filter-count")).toBeNull();
+    expect(foot.querySelector(".search-go")).toBeNull();
+    expect(document.querySelector(".search-main .search-go")).toBeTruthy();
+    expect(foot.firstElementChild).toBe(add);
     expect(add.getAttribute("aria-label")).toBe("Add filter");
     expect(add.getAttribute("title")).toBe("Add filter");
-    expect(add.textContent?.replace(/\s+/g, " ").trim()).toBe("Add");
-    expect(actions.querySelector(".search-filter-go")).toBeTruthy();
+    expect(add.textContent?.replace(/\s+/g, " ").trim()).toBe("Add filter");
+    expect(foot.querySelector(".kbd")?.textContent).toBe("Shift ↵");
+    expect(hint.textContent).toBe("Every term must match on the same line");
+    expect(foot.lastElementChild).toBe(foot.querySelector(".search-clear"));
   });
 
   it("ignores empty AND fields when searching", async () => {
@@ -2622,12 +2677,13 @@ describe("search flow", () => {
     render(<App />);
     typeQuery("hello");
     addFilterField();
-    await screen.findByRole("textbox", { name: "Add filter" });
+    await screen.findByRole("textbox", { name: "Filter 1" });
     expect(
-      (document.querySelector(".search-filter-more") as HTMLButtonElement).disabled,
+      (screen.getByRole("button", { name: "Add filter" }) as HTMLButtonElement)
+        .disabled,
     ).toBe(true);
-    fireEvent.click(document.querySelector(".search-filter-more") as HTMLButtonElement);
-    expect(document.querySelectorAll(".search-filter-item")).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Add filter" }));
+    expect(document.querySelectorAll(".search-filter-row")).toHaveLength(1);
     clickSearch();
     await waitFor(() => {
       expect(lastSearchBody(fetchMock).query).toBe("hello");
@@ -2949,7 +3005,9 @@ describe("search flow", () => {
       );
     expect(pills()).toEqual(["1", "9", "2", "8"]);
     fireEvent.click(
-      screen.getAllByRole("button", { name: "Line number ascending" })[0] as HTMLButtonElement,
+      screen.getAllByRole("button", {
+        name: "Line number ascending",
+      })[0] as HTMLButtonElement,
     );
     await waitFor(() => {
       expect(pills()).toEqual(["9", "1", "2", "8"]);
@@ -2979,17 +3037,21 @@ describe("search flow", () => {
     render(<App />);
     const dialog = await screen.findByRole("dialog");
     expect(document.querySelector(".app-dimmed")).toBeTruthy();
-    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
-      target: { value: "wrong" },
-    });
+    fireEvent.change(
+      dialog.querySelector('input[name="password"]') as Element,
+      {
+        target: { value: "wrong" },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => {
       expect(screen.getByText("Wrong password (INVALID_AUTH)")).toBeTruthy();
     });
     expect(screen.getByRole("dialog")).toBeTruthy();
     expect(
-      (dialog.querySelector('input[name="password"]') as HTMLInputElement)
-        .classList.contains("invalid"),
+      (
+        dialog.querySelector('input[name="password"]') as HTMLInputElement
+      ).classList.contains("invalid"),
     ).toBe(true);
     expect(document.querySelector(".app-dimmed")).toBeTruthy();
   });
@@ -3000,10 +3062,15 @@ describe("search flow", () => {
     typeQuery("needle");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getAllByRole("button", { name: "Cancel" }).length).toBeGreaterThan(0);
+      expect(
+        screen.getAllByRole("button", { name: "Cancel" }).length,
+      ).toBeGreaterThan(0);
     });
     expect(document.querySelector(".search-go.cancel")).toBeTruthy();
-    expect(document.querySelector(".status-cancel")).toBeTruthy();
+    // Cancel stays on the search button. The result bar no longer repeats it.
+    expect(document.querySelector(".status-cancel")).toBeNull();
+    expect(document.querySelector(".result-spin")).toBeTruthy();
+    expect(document.querySelector(".result-progress")).toBeTruthy();
     expect(document.querySelector(".pane-head-title")?.textContent).toBe(
       "Searching…",
     );
@@ -3020,12 +3087,15 @@ describe("search flow", () => {
     mockFetch(() =>
       sseResponse([
         sseEvent("hit", HIT_A),
-        sseEvent("done", donePayload({
-          matchCount: 1,
-          fileCount: 1,
-          truncated: true,
-          timedOut: true,
-        })),
+        sseEvent(
+          "done",
+          donePayload({
+            matchCount: 1,
+            fileCount: 1,
+            truncated: true,
+            timedOut: true,
+          }),
+        ),
       ]),
     );
     render(<App />);
@@ -3052,7 +3122,9 @@ describe("search flow", () => {
     typeQuery("busyq");
     clickSearch();
     await waitFor(() => {
-      expect(screen.getByText("Search is busy, try again shortly")).toBeTruthy();
+      expect(
+        screen.getByText("Search is busy, try again shortly"),
+      ).toBeTruthy();
     });
     expect(screen.getByText("BUSY")).toBeTruthy();
     cleanup();
@@ -3213,9 +3285,12 @@ describe("search flow", () => {
     });
     render(<App />);
     const dialog = await screen.findByRole("dialog");
-    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
-      target: { value: "secret" },
-    });
+    fireEvent.change(
+      dialog.querySelector('input[name="password"]') as Element,
+      {
+        target: { value: "secret" },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => {
       expect(screen.getByText("Signing in…")).toBeTruthy();
@@ -3253,13 +3328,9 @@ describe("search flow", () => {
   });
 
   it("shows a retry when a nested folder fails to load", async () => {
-    mockFetch(
-      () => sseResponse([sseEvent("done", donePayload())]),
-      undefined,
-      {
-        treeEntries: [{ name: "logs", path: "logs", dir: true }],
-      },
-    );
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]), undefined, {
+      treeEntries: [{ name: "logs", path: "logs", dir: true }],
+    });
     const inner = globalThis.fetch as typeof fetch;
     vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
       if (
@@ -3290,14 +3361,10 @@ describe("search flow", () => {
   });
 
   it("says when a directory listing is truncated", async () => {
-    mockFetch(
-      () => sseResponse([sseEvent("done", donePayload())]),
-      undefined,
-      {
-        treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
-        treeTruncated: true,
-      },
-    );
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]), undefined, {
+      treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+      treeTruncated: true,
+    });
     render(<App />);
     await waitFor(() => {
       expect(
@@ -3308,11 +3375,9 @@ describe("search flow", () => {
 
   it("retries the file tree after a load error", async () => {
     let failTree = true;
-    mockFetch(
-      () => sseResponse([sseEvent("done", donePayload())]),
-      undefined,
-      { treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }] },
-    );
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]), undefined, {
+      treeEntries: [{ name: "ok.txt", path: "ok.txt", dir: false }],
+    });
     const inner = globalThis.fetch as typeof fetch;
     vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
       if (requestUrl(input).includes("/api/tree") && failTree) {
@@ -3408,127 +3473,120 @@ describe("search flow", () => {
     expect(dialog.querySelector(".preview-find")).toBeNull();
   });
 
-  it("counts only non-empty AND terms on the filter badge", async () => {
+  it("shows n / 15 for every filter row, including an empty draft", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     typeQuery("hello");
+    expect(document.querySelector(".search-filter-count")).toBeNull();
     addFilterField();
-    const extra = await screen.findByRole("textbox", { name: "Add filter" });
-    expect(document.querySelector(".search-add-count")).toBeNull();
+    const extra = await screen.findByRole("textbox", { name: "Filter 1" });
+    expect(document.querySelector(".search-filter-count")?.textContent).toBe(
+      "1 / 15",
+    );
     fireEvent.change(extra, { target: { value: "   " } });
-    expect(document.querySelector(".search-add-count")).toBeNull();
+    expect(document.querySelector(".search-filter-count")?.textContent).toBe(
+      "1 / 15",
+    );
     fireEvent.change(extra, { target: { value: "world" } });
-    expect(document.querySelector(".search-add-count")?.textContent).toBe("1");
-    fireEvent.change(extra, { target: { value: "" } });
-    expect(document.querySelector(".search-add-count")).toBeNull();
+    expect(document.querySelector(".search-filter-count")?.textContent).toBe(
+      "1 / 15",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Remove filter 1" }));
+    expect(document.querySelector(".search-filter-count")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Filter 1" })).toBeNull();
   });
 
-  it("shows badge 2 for two filled extras plus one empty draft row", async () => {
+  it("counts every inline filter row and gives each its own mods and remove control", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     typeQuery("hello");
     addFilterField();
-    const first = await screen.findByRole("textbox", { name: "Add filter" });
-    fireEvent.change(first, { target: { value: "alpha" } });
-    fireEvent.click(
-      document.querySelector(".search-filter-more") as HTMLButtonElement,
-    );
-    const boxes = screen.getAllByRole("textbox", {
-      name: "Add filter",
-    }) as HTMLInputElement[];
-    fireEvent.change(boxes[1] as HTMLInputElement, { target: { value: "beta" } });
-    fireEvent.click(
-      document.querySelector(".search-filter-more") as HTMLButtonElement,
-    );
+    fireEvent.change(await screen.findByRole("textbox", { name: "Filter 1" }), {
+      target: { value: "alpha" },
+    });
+    addFilterField();
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter 2" }), {
+      target: { value: "beta" },
+    });
+    addFilterField();
     const three = screen.getAllByRole("textbox", {
-      name: "Add filter",
+      name: /^Filter \d+$/,
     }) as HTMLInputElement[];
     expect(three).toHaveLength(3);
     expect(three[2]?.value).toBe("");
-    expect(document.querySelector(".search-add-count")?.textContent).toBe("2");
-    expect(document.querySelectorAll(".search-filter-join")).toHaveLength(2);
+    expect(document.querySelector(".search-filter-count")?.textContent).toBe(
+      "3 / 15",
+    );
+    expect(document.querySelectorAll(".search-filter-row")).toHaveLength(3);
     expect(
-      document
-        .querySelector(".search-filter-item")
-        ?.querySelector(".search-filter-join"),
-    ).toBeNull();
-    expect(document.querySelector(".search-filter-pop .q-chip")).toBeNull();
-    expect(document.querySelectorAll(".search-filter-clear")).toHaveLength(2);
-    expect(document.querySelectorAll(".search-field-remove")).toHaveLength(3);
-    expect(
-      document.querySelectorAll(".search-filter-row .search-filter-field"),
+      document.querySelectorAll(".search-filter-row .search-field-mods"),
     ).toHaveLength(3);
     expect(
-      document.querySelectorAll(".search-filter-row .search-filter-mods"),
+      document.querySelectorAll(".search-filter-row .search-field-remove"),
     ).toHaveLength(3);
-  });
-
-  it("focuses the first empty AND input when the panel opens", async () => {
-    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
-    render(<App />);
-    typeQuery("hello");
-    addFilterField();
-    const first = await screen.findByRole("textbox", { name: "Add filter" });
-    fireEvent.change(first, { target: { value: "filled" } });
-    fireEvent.click(
-      document.querySelector(".search-filter-more") as HTMLButtonElement,
-    );
-    const boxes = screen.getAllByRole("textbox", { name: "Add filter" });
-    expect(boxes).toHaveLength(2);
-    fireEvent.mouseDown(
-      document.querySelector(".search-drop-backdrop") as Element,
-    );
+    expect(
+      document.querySelectorAll(".search-filter-row .hl-dot"),
+    ).toHaveLength(3);
     expect(document.querySelector(".search-filter-pop")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
-    const reopened = screen.getAllByRole("textbox", {
-      name: "Add filter",
-    }) as HTMLInputElement[];
-    expect(reopened[1]?.value).toBe("");
-    expect(document.activeElement).toBe(reopened[1]);
+    expect(document.querySelector(".search-filter-join")).toBeNull();
+    const dots = document.querySelectorAll(".search-filter-row .hl-dot");
+    expect(dots[0]?.getAttribute("data-tone")).toBe("1");
+    expect(dots[1]?.getAttribute("data-tone")).toBe("2");
+    expect(dots[2]?.getAttribute("data-tone")).toBe("3");
   });
 
-  it("keeps unsubmitted AND drafts after Escape and click-outside", async () => {
+  it("focuses the filter input that was just added", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     typeQuery("hello");
     addFilterField();
-    const extra = await screen.findByRole("textbox", { name: "Add filter" });
+    const first = (await screen.findByRole("textbox", {
+      name: "Filter 1",
+    })) as HTMLInputElement;
+    expect(document.activeElement).toBe(first);
+    fireEvent.change(first, { target: { value: "filled" } });
+    addFilterField();
+    const second = screen.getByRole("textbox", { name: "Filter 2" });
+    expect(document.activeElement).toBe(second);
+    expect((second as HTMLInputElement).value).toBe("");
+  });
+
+  it("keeps filter drafts after Escape and a click outside the card", async () => {
+    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
+    render(<App />);
+    typeQuery("hello");
+    addFilterField();
+    const extra = await screen.findByRole("textbox", { name: "Filter 1" });
     fireEvent.change(extra, { target: { value: "draft-term" } });
     fireEvent.keyDown(extra, { key: "Escape" });
-    expect(document.querySelector(".search-filter-pop")).toBeNull();
-    expect(document.querySelector(".search-add-count")?.textContent).toBe("1");
-    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
     expect(
-      (screen.getByRole("textbox", { name: "Add filter" }) as HTMLInputElement)
+      (screen.getByRole("textbox", { name: "Filter 1" }) as HTMLInputElement)
         .value,
     ).toBe("draft-term");
-    fireEvent.mouseDown(
-      document.querySelector(".search-drop-backdrop") as Element,
+    expect(document.querySelector(".search-filter-count")?.textContent).toBe(
+      "1 / 15",
     );
-    expect(document.querySelector(".search-filter-pop")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Filters" }));
+    fireEvent.mouseDown(document.body);
     expect(
-      (screen.getByRole("textbox", { name: "Add filter" }) as HTMLInputElement)
+      (screen.getByRole("textbox", { name: "Filter 1" }) as HTMLInputElement)
         .value,
     ).toBe("draft-term");
+    expect(document.querySelector(".search-filter-pop")).toBeNull();
   });
 
-  it("submits the panel Search with the main query and non-empty filterTerms", async () => {
+  it("submits the main Search with the query and non-empty filterTerms", async () => {
     const fetchMock = mockFetch(() =>
       sseResponse([sseEvent("done", donePayload())]),
     );
     render(<App />);
     typeQuery("hello");
     addFilterField();
-    const extra = await screen.findByRole("textbox", { name: "Add filter" });
-    fireEvent.change(extra, { target: { value: "world" } });
-    fireEvent.click(
-      document.querySelector(".search-filter-more") as HTMLButtonElement,
-    );
-    expect(document.querySelectorAll(".search-filter-item")).toHaveLength(2);
-    fireEvent.click(
-      document.querySelector(".search-filter-go") as HTMLButtonElement,
-    );
+    fireEvent.change(await screen.findByRole("textbox", { name: "Filter 1" }), {
+      target: { value: "world" },
+    });
+    addFilterField();
+    expect(screen.getByRole("textbox", { name: "Filter 2" })).toBeTruthy();
+    clickSearch();
     await waitFor(() => {
       const body = lastSearchRequest(fetchMock);
       expect(body.query).toBe("hello");
@@ -3542,168 +3600,86 @@ describe("search flow", () => {
       ]);
     });
     expect(document.querySelector(".search-filter-pop")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Filter 2" })).toBeNull();
+    expect(
+      (screen.getByRole("textbox", { name: "Filter 1" }) as HTMLInputElement)
+        .value,
+    ).toBe("world");
   });
 
-  it("keeps long AND filter text readable in the scheme A row", async () => {
+  it("keeps long filter text in the inline row", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     typeQuery("hello");
     addFilterField();
     const extra = (await screen.findByRole("textbox", {
-      name: "Add filter",
+      name: "Filter 1",
     })) as HTMLInputElement;
     const long = `filter-${"x".repeat(160)}-end`;
     fireEvent.change(extra, { target: { value: long } });
     expect(extra.value).toBe(long);
     expect(extra.title).toBe(long);
     expect(extra.closest(".search-filter-field")).toBeTruthy();
+    expect(extra.closest(".search-card")).toBeTruthy();
     expect(
       extra.closest(".search-filter-row")?.querySelector(".search-icon"),
     ).toBeNull();
-    expect(document.querySelector(".search-filter-pop .search-icon")).toBeNull();
     expect(
-      document.querySelector(".search-filter-mods .search-field-mods"),
+      extra
+        .closest(".search-filter-row")
+        ?.querySelector(".search-field-mods .mod-btn"),
     ).toBeTruthy();
-    expect(document.querySelector(".search-filter-mods .mod-btn")).toBeTruthy();
-    expect(document.querySelector(".search-filter-clear")).toBeTruthy();
-    expect(document.querySelector(".search-filter-join")).toBeNull();
-    expect(document.querySelector(".search-filter-pop .q-chip")).toBeNull();
     expect(
-      extra.closest(".search-filter-row")?.querySelectorAll(".search-field-remove"),
+      extra
+        .closest(".search-filter-row")
+        ?.querySelectorAll(".search-field-remove"),
     ).toHaveLength(1);
+    expect(document.querySelector(".search-filter-pop")).toBeNull();
     expect(
-      document.querySelector(".search-filter-pop")?.classList.contains(
-        "search-filter-block",
-      ),
-    ).toBe(true);
+      (extra.closest(".search-filter-row") as HTMLElement).style.width,
+    ).toBe("");
   });
 
-  it("anchors the AND panel from the query field to the funnel inside the hits pane", async () => {
-    const rect = (
-      left: number,
-      width: number,
-      top = 8,
-      height = 40,
-    ): DOMRect =>
-      ({
-        x: left,
-        y: top,
-        left,
-        right: left + width,
-        top,
-        bottom: top + height,
-        width,
-        height,
-        toJSON() {
-          return {};
-        },
-      }) as DOMRect;
-    const spy = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: HTMLElement) {
-        if (this.classList.contains("hits-pane")) {
-          return rect(0, 360, 0, 640);
-        }
-        if (this.classList.contains("search-field")) {
-          return rect(80, 180);
-        }
-        if (this.classList.contains("search-add-field")) {
-          return rect(268, 40);
-        }
-        return rect(0, 0);
-      });
+  it("keeps filter rows inside the search card without a measured popover", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     typeQuery("hello");
     addFilterField();
-    const panel = await waitFor(() => {
-      const node = document.querySelector(
-        ".search-filter-pop",
-      ) as HTMLElement | null;
-      if (node === null || !node.classList.contains("is-anchored")) {
-        throw new Error("panel not anchored");
-      }
-      return node;
-    });
-    expect(panel.style.width).toBe("228px");
-    expect(panel.style.maxWidth).toBe("228px");
-    expect(80 + 228).toBeLessThanOrEqual(360);
-    spy.mockRestore();
+    const row = (
+      await screen.findByRole("textbox", { name: "Filter 1" })
+    ).closest(".search-filter-row") as HTMLElement;
+    expect(row.closest(".search-card")).toBeTruthy();
+    expect(document.querySelector(".search-filter-pop")).toBeNull();
+    expect(row.style.width).toBe("");
+    expect(row.style.maxWidth).toBe("");
+    const card = document.querySelector(".search-card") as HTMLElement;
+    expect(card.style.width).toBe("");
   });
 
-  it("clips a measured AND panel to the hits column instead of overflowing the preview", async () => {
-    const rect = (
-      left: number,
-      width: number,
-      top = 8,
-      height = 40,
-    ): DOMRect =>
-      ({
-        x: left,
-        y: top,
-        left,
-        right: left + width,
-        top,
-        bottom: top + height,
-        width,
-        height,
-        toJSON() {
-          return {};
-        },
-      }) as DOMRect;
-    const spy = vi
-      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: HTMLElement) {
-        if (this.classList.contains("hits-pane")) {
-          return rect(0, 300, 0, 640);
-        }
-        if (this.classList.contains("search-field")) {
-          return rect(80, 200);
-        }
-        if (this.classList.contains("search-add-field")) {
-          return rect(400, 40);
-        }
-        return rect(0, 0);
-      });
-    mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
-    render(<App />);
-    typeQuery("hello");
-    addFilterField();
-    const panel = await waitFor(() => {
-      const node = document.querySelector(
-        ".search-filter-pop",
-      ) as HTMLElement | null;
-      if (node === null || !node.classList.contains("is-anchored")) {
-        throw new Error("panel not anchored");
-      }
-      return node;
-    });
-    expect(panel.style.width).toBe("220px");
-    expect(80 + 220).toBeLessThanOrEqual(300);
-    spy.mockRestore();
-  });
-
-  it("caps AND fields at 16 and shows the limit hint", async () => {
+  it("caps filter rows at 15 and disables add at the limit", async () => {
     mockFetch(() => sseResponse([sseEvent("done", donePayload())]));
     render(<App />);
     typeQuery("term0");
     for (let i = 1; i <= 15; i++) {
       addFilterField();
-      const boxes = screen.getAllByRole("textbox", { name: "Add filter" });
-      fireEvent.change(boxes[boxes.length - 1] as HTMLInputElement, {
+      fireEvent.change(screen.getByRole("textbox", { name: `Filter ${i}` }), {
         target: { value: `term${i}` },
       });
     }
-    expect(document.querySelectorAll(".search-filter-item")).toHaveLength(15);
-    expect(
-      (document.querySelector(".search-filter-more") as HTMLButtonElement).disabled,
-    ).toBe(true);
-    const hint = document.querySelector(".search-filter-hint") as HTMLElement;
-    expect(hint.title).toContain("Up to 16 terms");
-    expect(hint.title).toContain("empty rows are dropped on submit");
-    expect(hint.textContent?.replace(/\s+/g, " ").trim()).toBe(
-      "Shift+Enter to add",
+    expect(document.querySelectorAll(".search-filter-row")).toHaveLength(15);
+    expect(document.querySelector(".search-filter-count")?.textContent).toBe(
+      "15 / 15",
     );
+    expect(
+      (screen.getByRole("button", { name: "Add filter" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(document.querySelector(".search-filter-hint")?.textContent).toBe(
+      "Every term must match on the same line",
+    );
+    fireEvent.keyDown(window, { key: "Enter", shiftKey: true });
+    expect(document.querySelectorAll(".search-filter-row")).toHaveLength(15);
+    expect(screen.queryByRole("textbox", { name: "Filter 16" })).toBeNull();
   });
 
   it("shows binary and DENIED preview gap states when browsing a tree file", async () => {
@@ -3850,9 +3826,12 @@ describe("search flow", () => {
     );
     render(<App />);
     const dialog = await screen.findByRole("dialog");
-    fireEvent.change(dialog.querySelector('input[name="password"]') as Element, {
-      target: { value: "secret1" },
-    });
+    fireEvent.change(
+      dialog.querySelector('input[name="password"]') as Element,
+      {
+        target: { value: "secret1" },
+      },
+    );
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
