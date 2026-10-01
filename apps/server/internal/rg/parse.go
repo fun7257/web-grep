@@ -42,8 +42,17 @@ type Span struct {
 }
 
 func ParseMatchLine(line []byte) (Match, bool) {
+	m, _, ok := parseMatchRecord(line)
+	return m, ok
+}
+
+// parseMatchRecord parses one rg JSON match line. The payload is the raw
+// line bytes to feed a filter (exactly one trailing '\n'; a CRLF '\r' is
+// kept). payload is nil when the line is a match but its bytes cannot be
+// recovered; ParseMatchLine still succeeds in that case.
+func parseMatchRecord(line []byte) (Match, []byte, bool) {
 	if !bytes.HasPrefix(line, matchTypePrefix) {
-		return Match{}, false
+		return Match{}, nil, false
 	}
 	var raw struct {
 		Type string `json:"type"`
@@ -63,10 +72,10 @@ func ParseMatchLine(line []byte) (Match, bool) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(line, &raw); err != nil {
-		return Match{}, false
+		return Match{}, nil, false
 	}
 	if raw.Type != "match" || raw.Data.Path.Text == "" || raw.Data.LineNumber < 1 {
-		return Match{}, false
+		return Match{}, nil, false
 	}
 	m := Match{
 		Path: raw.Data.Path.Text,
@@ -76,7 +85,36 @@ func ParseMatchLine(line []byte) (Match, bool) {
 	for _, s := range raw.Data.Submatches {
 		m.Submatches = append(m.Submatches, [2]int{s.Start, s.End})
 	}
-	return m, true
+	payload, ok := filterLinePayload(raw.Data.Lines.Text, raw.Data.Lines.Bytes)
+	if !ok {
+		return m, nil, true
+	}
+	return m, payload, true
+}
+
+// filterLinePayload is the raw matched line. lines.text wins when rg sent
+// UTF-8; otherwise lines.bytes is standard base64. The result ends with
+// exactly one '\n' so a final line that had no newline still counts as one
+// filter input line. A preceding '\r' is preserved.
+func filterLinePayload(text, b64 string) ([]byte, bool) {
+	var raw []byte
+	switch {
+	case text != "":
+		raw = []byte(text)
+	case b64 != "":
+		decoded, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return nil, false
+		}
+		raw = decoded
+	}
+	if len(raw) == 0 || raw[len(raw)-1] != '\n' {
+		out := make([]byte, len(raw)+1)
+		copy(out, raw)
+		out[len(raw)] = '\n'
+		return out, true
+	}
+	return raw, true
 }
 
 func normalizeRgPath(rootReal, p string) (string, bool) {

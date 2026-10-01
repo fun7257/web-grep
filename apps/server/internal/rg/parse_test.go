@@ -35,6 +35,25 @@ func TestUtf16OffsetsCJK(t *testing.T) {
 	}
 }
 
+func TestFilterLinePayloadKeepsCRAndSuppliesNL(t *testing.T) {
+	got, ok := filterLinePayload("great day\r\n", "")
+	if !ok || string(got) != "great day\r\n" {
+		t.Fatalf("crlf = %q ok=%v", got, ok)
+	}
+	got, ok = filterLinePayload("tail", "")
+	if !ok || string(got) != "tail\n" {
+		t.Fatalf("no nl = %q ok=%v", got, ok)
+	}
+	raw := []byte("before \xff\xfe after\n")
+	got, ok = filterLinePayload("", base64.StdEncoding.EncodeToString(raw))
+	if !ok || string(got) != string(raw) {
+		t.Fatalf("bytes = %q ok=%v", got, ok)
+	}
+	if _, ok := filterLinePayload("", "!!!"); ok {
+		t.Fatal("bad base64 must fail")
+	}
+}
+
 func TestParseMatchLineDecodesBytesField(t *testing.T) {
 	payload := []byte(`{"type":"match","data":{"path":{"text":"a.log"},"lines":{"bytes":"aGVsbG8gd29ybGQK"},"line_number":2,"submatches":[{"start":0,"end":5}]}}`)
 	m, ok := ParseMatchLine(payload)

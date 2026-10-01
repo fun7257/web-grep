@@ -2,6 +2,7 @@ package rg
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -96,6 +97,66 @@ exit 2
 		func(Match) error { return nil }, nil)
 	if err == nil {
 		t.Fatal("a real error mixed with unreadable-path errors must still fail")
+	}
+}
+
+// A filter that exits before producing one verdict per fed line must fail the
+// search. Treating the short stream as "all passed" or "all dropped" hides a
+// broken filter.
+func TestFilterEarlyExitFewerResultsIsError(t *testing.T) {
+	bin := fakeRg(t, `case "$*" in
+*--json*)
+  printf '%s\n' '`+matchLine+`' '`+matchLine+`' '`+matchLine+`'
+  ;;
+*)
+  echo '1-skip'
+  exit 0
+  ;;
+esac
+`)
+	var n int
+	err := Engine{Bin: bin}.Search(context.Background(), Input{
+		RootReal:    t.TempDir(),
+		RelativeDir: ".",
+		Query:       "hello",
+		FilterTerms: []FilterTerm{{Query: "hello"}},
+	}, func(Match) error { n++; return nil }, nil)
+	if err == nil || errors.Is(err, context.Canceled) {
+		t.Fatalf("filter exit after %d verdicts must be an error, emitted %d, err=%v", 1, n, err)
+	}
+}
+
+// Head exit 2 that is only an unreadable path stays a warning when filters
+// are attached. The filter judges the line text, not the JSON record.
+func TestFilterKeepsPartialUnreadableSuccess(t *testing.T) {
+	bin := fakeRg(t, `case "$*" in
+*--json*)
+  printf '%s\n' '`+matchLine+`'
+  echo 'rg: priv/locked.txt: Permission denied (os error 13)' >&2
+  exit 2
+  ;;
+*)
+  n=0
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n+1))
+    printf '%s:%s\n' "$n" "$line"
+  done
+  exit 0
+  ;;
+esac
+`)
+	var n int
+	err := Engine{Bin: bin}.Search(context.Background(), Input{
+		RootReal:    t.TempDir(),
+		RelativeDir: ".",
+		Query:       "hello",
+		FilterTerms: []FilterTerm{{Query: "hello"}},
+	}, func(Match) error { n++; return nil }, nil)
+	if err != nil {
+		t.Fatalf("unreadable path plus a live filter must not fail: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("emitted %d, want 1", n)
 	}
 }
 
