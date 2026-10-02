@@ -17,14 +17,18 @@ import { LocaleProvider } from "../hooks/useLocale.ts";
 
 const NEEDLE = "NEEDLE";
 
-function hit(line: number, text: string): SseHit {
+function hitOn(path: string, line: number, text: string): SseHit {
   const at = text.indexOf(NEEDLE);
   return {
-    path: "logs/app.log",
+    path,
     line,
     text,
     matches: at < 0 ? [] : [{ start: at, end: at + NEEDLE.length }],
   };
+}
+
+function hit(line: number, text: string): SseHit {
+  return hitOn("logs/app.log", line, text);
 }
 
 function longLine(line: number): SseHit {
@@ -424,6 +428,40 @@ describe("result row expand", () => {
     expect(openIndex()).toBeNull();
     spy.mockRestore();
   });
+
+  it("does not change expand state when a pointer-rest callback runs during scroll", () => {
+    const hoverCallbacks: Array<() => void> = [];
+    const realSetTimeout = window.setTimeout.bind(window);
+    const spy = vi.spyOn(window, "setTimeout").mockImplementation(((
+      fn: TimerHandler,
+      ms?: number,
+      ...args: unknown[]
+    ) => {
+      if (typeof fn === "function" && ms === HOVER_REST_MS) {
+        hoverCallbacks.push(() => {
+          fn(...args);
+        });
+      }
+      return realSetTimeout(fn as () => void, ms, ...(args as []));
+    }) as typeof window.setTimeout);
+
+    render(<Harness hits={[longLine(1), longLine(2), longLine(3)]} />);
+    moveTo(0);
+    settle(150);
+    expect(openIndexes()).toEqual([0]);
+    hoverCallbacks.length = 0;
+    moveTo(2);
+    const restCallbacks = [...hoverCallbacks];
+    expect(restCallbacks.length).toBeGreaterThan(0);
+    fireEvent.scroll(scrollEl());
+    act(() => {
+      for (const callback of restCallbacks) {
+        callback();
+      }
+    });
+    expect(openIndexes()).toEqual([0]);
+    spy.mockRestore();
+  });
 });
 
 const savedRect = Object.getOwnPropertyDescriptor(
@@ -596,7 +634,173 @@ describe("scroll compensation and retained rows", () => {
     fireEvent.click(fold);
     expect(openIndexes()).toEqual([1]);
   });
+
+  function quietScroll(value: number): void {
+    scrollEl().scrollTop = value;
+  }
+
+  function clickSort(path?: string): void {
+    const button = [...document.querySelectorAll(".result-sort")].find((el) => {
+      if (path === undefined) {
+        return true;
+      }
+      return (
+        el.closest(".result-group-header")?.querySelector(
+          `[data-file-path="${path}"]`,
+        ) !== null
+      );
+    });
+    if (!(button instanceof HTMLElement)) {
+      throw new Error(`missing sort ${path ?? ""}`);
+    }
+    fireEvent.click(button);
+  }
+
+  function clickToggle(path: string): void {
+    const button = document.querySelector(
+      `.result-group-toggle[data-file-path="${path}"]`,
+    );
+    if (!(button instanceof HTMLElement)) {
+      throw new Error(`missing toggle ${path}`);
+    }
+    fireEvent.click(button);
+  }
+
+  function anchorTop(index: number): number {
+    return hitButton(index).getBoundingClientRect().top;
+  }
+
+  it("pins on sort when scrollTop can absorb the shift, and does not when it cannot", () => {
+    const hits = [longLine(1), longLine(2), longLine(3)];
+    render(<Harness hits={hits} />);
+    openPair();
+    moveTo(1);
+    settle(150);
+    expect(openIndexes()).toEqual([0, 1]);
+    const shrink = hitButton(0).getBoundingClientRect().height - 50;
+    expect(shrink).toBeGreaterThan(1);
+
+    quietScroll(0);
+    const stuckTop = anchorTop(1);
+    clickSort();
+    expect(openIndexes()).toEqual([1]);
+    expect(scrollEl().scrollTop).toBe(0);
+    expect(anchorTop(1)).toBeLessThan(stuckTop - 1);
+
+    cleanup();
+    render(<Harness hits={hits} />);
+    openPair();
+    moveTo(1);
+    settle(150);
+    expect(openIndexes()).toEqual([0, 1]);
+    const room = shrink + 80;
+    quietScroll(room);
+    const beforeTop = anchorTop(1);
+    const beforeStart = rowStart(1);
+    const beforeScroll = scrollEl().scrollTop;
+    clickSort();
+    expect(openIndexes()).toEqual([1]);
+    const startShift = rowStart(1) - beforeStart;
+    expect(Math.abs(anchorTop(1) - beforeTop)).toBeLessThanOrEqual(1);
+    expect(Math.abs(scrollEl().scrollTop - beforeScroll - startShift)).toBeLessThanOrEqual(1);
+    expect(Math.abs(startShift)).toBeGreaterThan(1);
+  });
+
+  it("pins on fold of another group when scrollTop can absorb the shift, and does not when it cannot", () => {
+    const above = "logs/above.log";
+    const focus = "logs/focus.log";
+    const hits = [
+      hitOn(above, 1, "short NEEDLE"),
+      hitOn(above, 2, "short NEEDLE"),
+      longLineOn(focus, 1),
+      longLineOn(focus, 2),
+    ];
+    render(<Harness hits={hits} />);
+    moveTo(2);
+    settle(150);
+    moveTo(3);
+    settle(150);
+    expect(openIndexes()).toEqual([2, 3]);
+    const shrink = hitButton(2).getBoundingClientRect().height - 50;
+    expect(shrink).toBeGreaterThan(1);
+
+    const stuckTop = anchorTop(3);
+    clickToggle(above);
+    expect(openIndexes()).toEqual([3]);
+    expect(scrollEl().scrollTop).toBe(0);
+    expect(anchorTop(3)).toBeLessThan(stuckTop - 1);
+
+    cleanup();
+    render(<Harness hits={hits} />);
+    moveTo(2);
+    settle(150);
+    moveTo(3);
+    settle(150);
+    expect(openIndexes()).toEqual([2, 3]);
+    quietScroll(shrink + 200);
+    const beforeTop = anchorTop(3);
+    const beforeStart = rowStart(3);
+    const beforeScroll = scrollEl().scrollTop;
+    clickToggle(above);
+    expect(openIndexes()).toEqual([3]);
+    const startShift = rowStart(3) - beforeStart;
+    expect(Math.abs(anchorTop(3) - beforeTop)).toBeLessThanOrEqual(1);
+    expect(Math.abs(scrollEl().scrollTop - beforeScroll - startShift)).toBeLessThanOrEqual(1);
+    expect(Math.abs(startShift)).toBeGreaterThan(1);
+  });
+
+  it("does not pin a folded-away anchor even when scrollTop has room", () => {
+    render(<Harness hits={[longLine(1), longLine(2)]} />);
+    openPair();
+    moveTo(1);
+    settle(150);
+    expect(openIndexes()).toEqual([0, 1]);
+    quietScroll(400);
+    const fold = document.querySelector(".result-fold-all");
+    if (!(fold instanceof HTMLElement)) {
+      throw new Error("missing fold button");
+    }
+    fireEvent.click(fold);
+    expect(document.querySelector("[data-hit-index='1']")).toBeNull();
+    expect(scrollEl().scrollTop).toBe(400);
+  });
+
+  it("pins on pointer leave when scrollTop can absorb the shift, and does not when it cannot", () => {
+    const hits = [longLine(1), longLine(2), longLine(3)];
+    render(<Harness hits={hits} />);
+    openPair();
+    moveTo(1);
+    settle(150);
+    expect(openIndexes()).toEqual([0, 1]);
+    const shrink = hitButton(0).getBoundingClientRect().height - 50;
+    expect(shrink).toBeGreaterThan(1);
+    const stuckTop = anchorTop(1);
+    fireEvent.pointerLeave(listShell());
+    expect(openIndexes()).toEqual([]);
+    expect(scrollEl().scrollTop).toBe(0);
+    expect(anchorTop(1)).toBeLessThan(stuckTop - 1);
+
+    cleanup();
+    render(<Harness hits={hits} />);
+    openPair();
+    moveTo(1);
+    settle(150);
+    quietScroll(shrink + 80);
+    const beforeTop = anchorTop(1);
+    const beforeStart = rowStart(1);
+    const beforeScroll = scrollEl().scrollTop;
+    fireEvent.pointerLeave(listShell());
+    expect(openIndexes()).toEqual([]);
+    const startShift = rowStart(1) - beforeStart;
+    expect(Math.abs(anchorTop(1) - beforeTop)).toBeLessThanOrEqual(1);
+    expect(Math.abs(scrollEl().scrollTop - beforeScroll - startShift)).toBeLessThanOrEqual(1);
+    expect(Math.abs(startShift)).toBeGreaterThan(1);
+  });
 });
+
+function longLineOn(path: string, line: number): SseHit {
+  return hitOn(path, line, `${NEEDLE} ${"x".repeat(220)}`);
+}
 
 function selectedIndex(): number {
   const el = document.querySelector("[data-testid='selected-index']");
@@ -643,6 +847,52 @@ describe("j/k list movement", () => {
       }),
     );
   }
+
+  it("matches baseline functional j/k after thirty synchronous keydowns", () => {
+    const hits = Array.from({ length: 80 }, (_, index) => longLine(index + 1));
+    render(<Harness hits={hits} />);
+    act(() => {
+      for (let i = 0; i < 30; i += 1) {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "j",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+    });
+    // Row 31 is index 30. A ref read once per task would stop at index 1.
+    expect(selectedIndex()).toBe(30);
+
+    act(() => {
+      for (let i = 0; i < 80; i += 1) {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "j",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+    });
+    expect(selectedIndex()).toBe(79);
+
+    cleanup();
+    render(<Harness hits={hits} />);
+    act(() => {
+      for (let i = 0; i < 40; i += 1) {
+        window.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "k",
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
+      }
+    });
+    expect(selectedIndex()).toBe(0);
+  });
 
   it("keeps the functional j/k updater", () => {
     const setSelectedIndex = vi.fn();

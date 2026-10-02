@@ -147,7 +147,8 @@ export const ResultList = memo(function ResultList({
     },
   });
 
-  const { openIndexes, reportTruncation } = useResultExpand({
+  const { openIndexes, reportTruncation, settleStructurePin, prepareStructurePin } =
+    useResultExpand({
     listRef,
     virtualizer,
     hits,
@@ -275,10 +276,15 @@ export const ResultList = memo(function ResultList({
     }
   }, [selectedIndex, virtualizer]);
 
+  useEffect(() => {
+    settleStructurePin();
+  }, [settleStructurePin, structureKey]);
+
   const allCollapsed =
     groups.length > 0 && groups.every((group) => collapsed.has(group.path));
 
   const toggleGroup = (path: string): void => {
+    prepareStructurePin();
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
@@ -291,6 +297,7 @@ export const ResultList = memo(function ResultList({
   };
 
   const toggleAll = (): void => {
+    prepareStructurePin();
     if (allCollapsed) {
       setCollapsed(new Set());
       return;
@@ -299,6 +306,7 @@ export const ResultList = memo(function ResultList({
   };
 
   const sortGroup = (path: string): void => {
+    prepareStructurePin();
     const next = dirOf(path) === "asc" ? "desc" : "asc";
     const group = groups.find((item) => item.path === path);
     const ordered = (group?.hits ?? [])

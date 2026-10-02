@@ -9,10 +9,14 @@ import {
   useState,
 } from "react";
 import {
+  absorbAnchorShift,
   decideRetainedRows,
+  hitExpandKey,
+  pickReleaseAnchor,
   PIN_SLOP_PX,
   pointerRestBlocked,
   type OpenRowLayout,
+  type VisibleHitBox,
 } from "../resultExpandPlan.ts";
 
 /** Pointer must sit still this long before a row opens or closes. */
@@ -119,6 +123,77 @@ function pendingAnchorTop(
   return live + (start - written);
 }
 
+type Pin = { index: number; key: string; top: number };
+
+/**
+ * Hit the next fold/sort/leave should keep still, read before the DOM commit.
+ * Height 0 means jsdom (no layout): skip the pin rather than invent a delta.
+ * The stable key is `hit:${originalIndex}` (`data-hit-index`). Sort and fold
+ * do not renumber hits; a key missing after the commit is not pinned.
+ */
+function releaseAnchorIndex(
+  root: HTMLElement | null,
+  lastPointerIndex: number | null,
+): number | null {
+  if (root === null) {
+    return null;
+  }
+  const view = root.getBoundingClientRect();
+  if (view.height <= 0) {
+    return null;
+  }
+  const visible: VisibleHitBox[] = [];
+  for (const node of root.querySelectorAll<HTMLElement>("[data-hit-index]")) {
+    const index = Number(node.dataset.hitIndex);
+    if (!Number.isInteger(index)) {
+      continue;
+    }
+    const rect = node.getBoundingClientRect();
+    if (rect.height <= 0) {
+      continue;
+    }
+    visible.push({
+      index,
+      key: hitExpandKey(index),
+      top: rect.top,
+      bottom: rect.bottom,
+    });
+  }
+  const last =
+    lastPointerIndex === null
+      ? null
+      : { index: lastPointerIndex, key: hitExpandKey(lastPointerIndex) };
+  return pickReleaseAnchor(last, visible, view.top, view.bottom)?.index ?? null;
+}
+
+function assignPin(
+  pinRef: { current: Pin | null },
+  settledRef: { current: boolean },
+  root: HTMLElement | null,
+  index: number | null,
+): void {
+  if (root === null || index === null) {
+    pinRef.current = null;
+    settledRef.current = true;
+    return;
+  }
+  const el = root.querySelector<HTMLElement>(`[data-hit-index="${index}"]`);
+  if (el === null) {
+    pinRef.current = null;
+    settledRef.current = true;
+    return;
+  }
+  const rect = el.getBoundingClientRect();
+  // jsdom has no layout box. Skip compensation rather than invent a delta.
+  if (rect.height <= 0) {
+    pinRef.current = null;
+    settledRef.current = true;
+    return;
+  }
+  pinRef.current = { index, key: hitExpandKey(index), top: rect.top };
+  settledRef.current = false;
+}
+
 function sameModel(a: ExpandModel, b: ExpandModel): boolean {
   if (a.active?.index !== b.active?.index || a.active?.source !== b.active?.source) {
     return false;
@@ -155,8 +230,9 @@ function clampModel(model: ExpandModel, hitCount: number): ExpandModel {
  * One hover timer for the whole list (event delegation). Opens a truncated
  * row after the pointer rests. Collapsing a row above the anchor is skipped
  * when scrollTop cannot absorb the upward shift, so the anchor's top edge
- * stays put. Keyboard j/k is observed on the window and never computes the
- * next index itself.
+ * stays put. Fold, sort, and pointer-leave drop retained rows immediately;
+ * they pin only the shift scrollTop can absorb. Keyboard j/k is observed on
+ * the window and never computes the next index itself.
  */
 export function useResultExpand(opts: {
   listRef: RefObject<HTMLDivElement | null>;
@@ -171,6 +247,13 @@ export function useResultExpand(opts: {
 }): {
   openIndexes: ReadonlySet<number>;
   reportTruncation: (index: number, truncated: boolean) => void;
+  /** Re-pin after sort's selection scroll. No-op unless a fold/sort pin is pending. */
+  settleStructurePin: () => void;
+  /**
+   * Call synchronously from a fold or sort handler, before the state update.
+   * The anchor top has to be read while the previous layout is still on screen.
+   */
+  prepareStructurePin: () => void;
 } {
   const { listRef, virtualizer, hitVirtualIndex, hits, selectedIndex, structureKey } =
     opts;
@@ -189,8 +272,12 @@ export function useResultExpand(opts: {
   const restTimer = useRef<number | null>(null);
   const scrollTimer = useRef<number | null>(null);
   const ignoreScroll = useRef(0);
-  const pinRef = useRef<{ index: number; top: number } | null>(null);
+  const pinRef = useRef<Pin | null>(null);
   const pinSettled = useRef(true);
+  /** Last hit the pointer was on. Not cleared when the pointer leaves a row. */
+  const lastPointerIndex = useRef<number | null>(null);
+  /** Hold the pin across the selection scroll that sort fires after paint. */
+  const structurePin = useRef(false);
   const adjusting = useRef(false);
   const virtualizerRef = useRef(virtualizer);
   const lookupRef = useRef(hitVirtualIndex);
@@ -202,6 +289,7 @@ export function useResultExpand(opts: {
   const [trackedHead, setTrackedHead] = useState<unknown>(seriesHead);
   const [generation, setGeneration] = useState(0);
   const [trackedStructure, setTrackedStructure] = useState(structureKey);
+  const [layoutEpoch, setLayoutEpoch] = useState(0);
 
   let model = modelState;
   if (trackedHead !== seriesHead) {
@@ -211,6 +299,11 @@ export function useResultExpand(opts: {
     setModelState(model);
   } else if (trackedStructure !== structureKey) {
     setTrackedStructure(structureKey);
+    // Fold/sort already captured the anchor in prepareStructurePin, before
+    // this render. Bump the layout epoch so that pin is applied after the
+    // new row set commits. scrollTop that cannot absorb the shift is left
+    // alone: no spacer, no delayed collapse (see absorbAnchorShift).
+    setLayoutEpoch(layoutEpoch + 1);
     if (model.retained.length > 0) {
       model = { active: model.active, retained: [] };
       setModelState(model);
@@ -230,27 +323,7 @@ export function useResultExpand(opts: {
 
   const capturePin = useCallback(
     (index: number | null) => {
-      const root = listRef.current;
-      if (root === null || index === null) {
-        pinRef.current = null;
-        pinSettled.current = true;
-        return;
-      }
-      const el = root.querySelector<HTMLElement>(`[data-hit-index="${index}"]`);
-      if (el === null) {
-        pinRef.current = null;
-        pinSettled.current = true;
-        return;
-      }
-      const rect = el.getBoundingClientRect();
-      // jsdom has no layout box. Skip compensation rather than invent a delta.
-      if (rect.height <= 0) {
-        pinRef.current = null;
-        pinSettled.current = true;
-        return;
-      }
-      pinRef.current = { index, top: rect.top };
-      pinSettled.current = false;
+      assignPin(pinRef, pinSettled, listRef.current, index);
     },
     [listRef],
   );
@@ -423,6 +496,8 @@ export function useResultExpand(opts: {
     pinRef.current = null;
     pinSettled.current = true;
     pointerRef.current.index = null;
+    lastPointerIndex.current = null;
+    structurePin.current = false;
     scrollingRef.current = false;
     closedSizeRef.current.clear();
     if (restTimer.current !== null) {
@@ -464,6 +539,70 @@ export function useResultExpand(opts: {
 
   const totalSize = virtualizer.getTotalSize();
 
+  const applyCapturedPin = useCallback((root: HTMLElement): void => {
+    const pin = pinRef.current;
+    if (pin === null || pinSettled.current) {
+      return;
+    }
+    const el = root.querySelector<HTMLElement>(
+      `[data-hit-index="${pin.index}"]`,
+    );
+    // Stable key left the row set (its group was folded). Do not pin.
+    if (el === null || hitExpandKey(pin.index) !== pin.key) {
+      pinSettled.current = true;
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    if (rect.height <= 0) {
+      pinSettled.current = true;
+      return;
+    }
+    const written = writtenTranslateY(el);
+    const virtualIndex = lookupRef.current(pin.index);
+    const start =
+      virtualIndex < 0
+        ? undefined
+        : measuredRows(virtualizerRef.current)[virtualIndex]?.start;
+    // The cache already has the next translateY. Reading the rect again
+    // after scrolling would apply that shift twice.
+    const stale =
+      start !== undefined &&
+      written !== null &&
+      Math.abs(start - written) > PIN_SLOP_PX;
+    let visual = pendingAnchorTop(el, virtualizerRef.current, virtualIndex);
+    for (let pass = 0; pass < 4; pass += 1) {
+      const delta = visual - pin.top;
+      if (Math.abs(delta) <= PIN_SLOP_PX) {
+        pinSettled.current = true;
+        return;
+      }
+      const before = root.scrollTop;
+      const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight);
+      // Shortfall is not padded and does not put the collapse off. See
+      // absorbAnchorShift for the fold/sort/leave ruling.
+      const applied = absorbAnchorShift(before, delta, maxScroll);
+      if (applied === 0) {
+        pinSettled.current = true;
+        return;
+      }
+      ignoreScroll.current += 1;
+      root.scrollTop = before + applied;
+      if (root.scrollTop === before || stale) {
+        if (root.scrollTop === before) {
+          ignoreScroll.current = Math.max(0, ignoreScroll.current - 1);
+        }
+        pinSettled.current = true;
+        return;
+      }
+      visual = el.getBoundingClientRect().top;
+      if (Math.abs(visual - pin.top) >= Math.abs(delta) - 0.05) {
+        pinSettled.current = true;
+        return;
+      }
+    }
+    pinSettled.current = true;
+  }, []);
+
   useLayoutEffect(() => {
     const root = listRef.current;
     if (root === null) {
@@ -472,62 +611,50 @@ export function useResultExpand(opts: {
     adjusting.current = true;
     try {
       measureVisible(root);
-      const pin = pinRef.current;
-      if (pin === null || pinSettled.current) {
-        return;
-      }
-      const el = root.querySelector<HTMLElement>(
-        `[data-hit-index="${pin.index}"]`,
-      );
-      if (el === null) {
-        pinSettled.current = true;
-        return;
-      }
-      const rect = el.getBoundingClientRect();
-      if (rect.height <= 0) {
-        pinSettled.current = true;
-        return;
-      }
-      const written = writtenTranslateY(el);
-      const virtualIndex = lookupRef.current(pin.index);
-      const start =
-        virtualIndex < 0
-          ? undefined
-          : measuredRows(virtualizerRef.current)[virtualIndex]?.start;
-      // The cache already has the next translateY. Reading the rect again
-      // after scrolling would apply that shift twice.
-      const stale =
-        start !== undefined &&
-        written !== null &&
-        Math.abs(start - written) > PIN_SLOP_PX;
-      let visual = pendingAnchorTop(el, virtualizerRef.current, virtualIndex);
-      for (let pass = 0; pass < 4; pass += 1) {
-        const delta = visual - pin.top;
-        if (Math.abs(delta) <= PIN_SLOP_PX) {
-          pinSettled.current = true;
-          return;
-        }
-        const before = root.scrollTop;
-        ignoreScroll.current += 1;
-        root.scrollTop = before + delta;
-        if (root.scrollTop === before || stale) {
-          if (root.scrollTop === before) {
-            ignoreScroll.current = Math.max(0, ignoreScroll.current - 1);
-          }
-          pinSettled.current = true;
-          return;
-        }
-        visual = el.getBoundingClientRect().top;
-        if (Math.abs(visual - pin.top) >= Math.abs(delta) - 0.05) {
-          pinSettled.current = true;
-          return;
-        }
-      }
-      pinSettled.current = true;
+      applyCapturedPin(root);
     } finally {
       adjusting.current = false;
     }
-  }, [listRef, measureTick, measureVisible, model, totalSize]);
+  }, [
+    applyCapturedPin,
+    layoutEpoch,
+    listRef,
+    measureTick,
+    measureVisible,
+    model,
+    totalSize,
+  ]);
+
+  const prepareStructurePin = useCallback(() => {
+    assignPin(
+      pinRef,
+      pinSettled,
+      listRef.current,
+      releaseAnchorIndex(listRef.current, lastPointerIndex.current),
+    );
+    structurePin.current = !pinSettled.current;
+  }, [listRef]);
+
+  const settleStructurePin = useCallback(() => {
+    if (!structurePin.current) {
+      return;
+    }
+    const root = listRef.current;
+    adjusting.current = true;
+    structurePin.current = false;
+    try {
+      if (root === null || pinRef.current === null) {
+        return;
+      }
+      // Sort selects the new first line and scrollToIndex runs after the
+      // layout pin. Re-apply against the same captured top.
+      pinSettled.current = false;
+      measureVisible(root);
+      applyCapturedPin(root);
+    } finally {
+      adjusting.current = false;
+    }
+  }, [applyCapturedPin, listRef, measureVisible]);
 
   useEffect(() => {
     const root = listRef.current;
@@ -606,6 +733,9 @@ export function useResultExpand(opts: {
       const index =
         event.target instanceof Element ? indexFromElement(event.target) : null;
       pointerRef.current.index = index;
+      if (index !== null) {
+        lastPointerIndex.current = index;
+      }
       if (pointerRestBlocked(scrollingRef.current, true)) {
         return;
       }
@@ -626,11 +756,15 @@ export function useResultExpand(opts: {
       clearRest();
       const current = modelRef.current;
       const keep = current.active?.source === "keyboard" ? current.active : null;
-      commitModel({ active: keep, retained: [] }, keep?.index ?? null);
+      // The pointer has left the list, so it is not resting on a row. Pin the
+      // last in-view pointer hit (else the first visible hit) by stable key
+      // when scrollTop can absorb the shift; otherwise collapse anyway.
+      const anchor = releaseAnchorIndex(root, lastPointerIndex.current);
+      commitModel({ active: keep, retained: [] }, anchor);
     };
 
     const onScroll = (): void => {
-      if (adjusting.current) {
+      if (adjusting.current || structurePin.current) {
         if (ignoreScroll.current > 0) {
           ignoreScroll.current -= 1;
         }
@@ -697,5 +831,5 @@ export function useResultExpand(opts: {
     return new Set(openHitIndexes(model));
   }, [model]);
 
-  return { openIndexes, reportTruncation };
+  return { openIndexes, reportTruncation, settleStructurePin, prepareStructurePin };
 }

@@ -3288,7 +3288,7 @@ html[data-theme="light"] .result-log.selected.is-open .result-line-pill {
   gap: 8px;
   margin-top: 6px;
   min-width: 0;
-  color: var(--faint);
+  color: var(--muted);
   font-family: var(--sans);
   font-size: 11px;
   font-weight: 500;
