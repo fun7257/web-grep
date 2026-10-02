@@ -212,6 +212,205 @@ export function clipLogLine(
   return clipResultSnippets(text, hits);
 }
 
+/** Expanded row shows at most this many UTF-16 code units. */
+export const EXPAND_CAP = 1600;
+/** Code units kept from the start of an over-cap line. */
+export const EXPAND_HEAD = 320;
+/**
+ * Code units kept before the first hit inside the match window.
+ * Matches the row-open design (head + this lead, window budget = cap − head).
+ */
+export const EXPAND_HIT_LEAD = 220;
+
+export type ExpandPiece =
+  | { kind: "text"; start: number; end: number }
+  | { kind: "skip"; omitted: number };
+
+function firstHit(
+  text: string,
+  spans: Array<{ start: number; end: number }>,
+): SnippetClip | null {
+  let best: SnippetClip | null = null;
+  for (const span of spans) {
+    const clamped = clampSpan(span, text.length);
+    if (clamped === null) {
+      continue;
+    }
+    if (
+      best === null ||
+      clamped.start < best.start ||
+      (clamped.start === best.start && clamped.end < best.end)
+    ) {
+      best = clamped;
+    }
+  }
+  return best;
+}
+
+function mergeTouching(clips: SnippetClip[]): SnippetClip[] {
+  const out: SnippetClip[] = [];
+  for (const clip of clips) {
+    if (clip.end <= clip.start) {
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (last !== undefined && clip.start <= last.end) {
+      last.end = Math.max(last.end, clip.end);
+    } else {
+      out.push({ start: clip.start, end: clip.end });
+    }
+  }
+  return out;
+}
+
+function normalizeRanges(text: string, clips: SnippetClip[]): SnippetClip[] {
+  const snapped = clips
+    .map((clip) => snapClip(text, clip))
+    .filter((clip) => clip.end > clip.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end);
+  return mergeTouching(snapped);
+}
+
+function pieceBudget(clips: SnippetClip[]): number {
+  let total = 0;
+  for (const clip of clips) {
+    total += clip.end - clip.start;
+  }
+  return total;
+}
+
+/** Drop excess code units from the tail, then the head, without uncovering `hitStart`. */
+function shrinkToCap(
+  text: string,
+  clips: SnippetClip[],
+  cap: number,
+  hitStart: number | null,
+): SnippetClip[] {
+  const out = clips.map((clip) => ({ start: clip.start, end: clip.end }));
+  let guard = 0;
+  while (pieceBudget(out) > cap && out.length > 0 && guard < 8) {
+    guard += 1;
+    const over = pieceBudget(out) - cap;
+    const last = out[out.length - 1];
+    if (last === undefined) {
+      break;
+    }
+    const hitInLast =
+      hitStart !== null && hitStart >= last.start && hitStart < last.end;
+    const minEnd = hitInLast ? hitStart + 1 : last.start;
+    const snapped = snapClip(text, {
+      start: last.start,
+      end: Math.max(minEnd, last.end - over),
+    });
+    if (snapped.end < last.end) {
+      last.end = snapped.end;
+      if (last.end <= last.start) {
+        out.pop();
+      }
+      continue;
+    }
+    if (out.length < 2) {
+      break;
+    }
+    const head = out[0];
+    if (head === undefined) {
+      break;
+    }
+    const headSnap = snapClip(text, {
+      start: head.start,
+      end: Math.max(head.start, head.end - over),
+    });
+    if (headSnap.end >= head.end) {
+      break;
+    }
+    head.end = headSnap.end;
+    if (head.end <= head.start) {
+      out.shift();
+    }
+  }
+  return out.filter((clip) => clip.end > clip.start);
+}
+
+function toPieces(length: number, clips: SnippetClip[]): ExpandPiece[] {
+  const out: ExpandPiece[] = [];
+  let cursor = 0;
+  for (const clip of clips) {
+    if (clip.start > cursor) {
+      out.push({ kind: "skip", omitted: clip.start - cursor });
+    }
+    if (clip.end > clip.start) {
+      out.push({ kind: "text", start: clip.start, end: clip.end });
+    }
+    cursor = clip.end;
+  }
+  if (cursor < length) {
+    out.push({ kind: "skip", omitted: length - cursor });
+  }
+  return out;
+}
+
+/**
+ * Visible slices for an expanded result row.
+ * Lines within `cap` stay whole. Longer lines keep `head` code units from
+ * the start plus a window around the first in-range hit, totaling at most
+ * `cap`. Cuts snap off a dangling surrogate. Empty or out-of-range spans
+ * fall back to a prefix of `cap`.
+ */
+export function expandLogLine(
+  text: string,
+  spans: Array<{ start: number; end: number }> = [],
+  cap = EXPAND_CAP,
+  head = EXPAND_HEAD,
+): ExpandPiece[] {
+  const length = text.length;
+  if (length === 0) {
+    return [];
+  }
+  const limit = Math.max(0, cap);
+  if (limit === 0) {
+    return [{ kind: "skip", omitted: length }];
+  }
+  if (length <= limit) {
+    return [{ kind: "text", start: 0, end: length }];
+  }
+
+  const headLen = Math.max(0, Math.min(Math.floor(head), limit));
+  const hit = firstHit(text, spans);
+  const raw: SnippetClip[] = [];
+  if (hit === null || hit.start < headLen) {
+    raw.push({ start: 0, end: Math.min(length, limit) });
+  } else {
+    const windowBudget = limit - headLen;
+    let ws = Math.max(headLen, hit.start - EXPAND_HIT_LEAD);
+    let we = Math.min(length, ws + Math.max(0, windowBudget));
+    if (hit.start >= we) {
+      const fit = Math.max(1, windowBudget);
+      we = Math.min(length, hit.start + 1);
+      ws = Math.max(0, we - fit);
+    }
+    const headEnd = Math.min(headLen, ws);
+    if (headEnd > 0) {
+      raw.push({ start: 0, end: headEnd });
+    }
+    if (we > ws) {
+      raw.push({ start: ws, end: we });
+    }
+  }
+
+  let clips = normalizeRanges(text, raw);
+  if (
+    hit !== null &&
+    !clips.some((clip) => clip.start <= hit.start && hit.start < clip.end)
+  ) {
+    clips = normalizeRanges(text, [
+      ...clips,
+      { start: hit.start, end: Math.min(length, hit.start + 1) },
+    ]);
+  }
+  clips = shrinkToCap(text, clips, limit, hit?.start ?? null);
+  return toPieces(length, clips);
+}
+
 export function clipResultSnippet(
   text: string,
   spans: Array<{ start: number; end: number }>,

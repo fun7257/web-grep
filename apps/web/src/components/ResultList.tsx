@@ -16,9 +16,10 @@ import {
   type HlTermInput,
 } from "../highlight.ts";
 import { useLocale } from "../hooks/useLocale.ts";
+import { useResultExpand } from "../hooks/useResultExpand.ts";
 import { pickSticky, type StickyHeader } from "../resultSticky.ts";
 import { FileIcon, IconChevron, IconFoldAll, IconUnfoldAll } from "./icons.tsx";
-import { LogLineText } from "./ResultRow.tsx";
+import { ResultHitButton } from "./ResultRow.tsx";
 
 // Header is a fixed 36px row (border included). A hit is one 12.5/1.6 line
 // plus 7px padding on each side. Two-line hits are measured, not estimated.
@@ -50,6 +51,7 @@ export const ResultList = memo(function ResultList({
   terms = [],
   opts = DEFAULT_HL_OPTS,
   headActions = null,
+  listNavRef,
 }: {
   hits: SseHit[];
   selectedIndex: number;
@@ -58,6 +60,8 @@ export const ResultList = memo(function ResultList({
   terms?: HlTermInput[];
   opts?: HlOpts;
   headActions?: HTMLDivElement | null;
+  /** j/k and arrow navigation reports the index it landed on. */
+  listNavRef?: RefObject<(index: number) => void>;
 }) {
   const { t } = useLocale();
   const [sortDir, setSortDir] = useState<Record<string, "asc" | "desc">>({});
@@ -133,6 +137,15 @@ export const ResultList = memo(function ResultList({
       }
       return row.kind === "header" ? `h:${row.path}` : `hit:${row.index}`;
     },
+  });
+
+  const { open, reportTruncation } = useResultExpand({
+    listRef,
+    listNavRef,
+    virtualizer,
+    hits,
+    hitVirtualIndex: (hitIndex) =>
+      rows.findIndex((row) => row.kind === "hit" && row.index === hitIndex),
   });
 
   const virtualItems = virtualizer.getVirtualItems();
@@ -394,32 +407,16 @@ export const ResultList = memo(function ResultList({
                     />
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    role="listitem"
-                    className={
-                      row.index === selectedIndex
-                        ? "result-log selected"
-                        : "result-log"
-                    }
-                    aria-current={
-                      row.index === selectedIndex ? "true" : undefined
-                    }
-                    onClick={() => {
-                      onSelect(row.index);
-                    }}
-                  >
-                    <span className="result-loc" style={{ display: "none" }}>
-                      {`${row.hit.path}:${row.hit.line}`}
-                    </span>
-                    <span className="result-line-pill">{row.hit.line}</span>
-                    <LogLineText
-                      text={row.hit.text}
-                      matches={row.hit.matches}
-                      terms={terms}
-                      opts={opts}
-                    />
-                  </button>
+                  <ResultHitButton
+                    hit={row.hit}
+                    index={row.index}
+                    selected={row.index === selectedIndex}
+                    open={open?.index === row.index}
+                    terms={terms}
+                    opts={opts}
+                    onSelect={onSelect}
+                    onTruncation={reportTruncation}
+                  />
                 )}
               </div>
             );

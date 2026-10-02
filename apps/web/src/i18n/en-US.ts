@@ -119,6 +119,12 @@ export const enUS = {
   resultSortDesc: "Line number descending",
   resultCollapseAll: "Collapse all",
   resultExpandAll: "Expand all",
+  resultLongLine: "Long line · {n} characters",
+  resultFullLine: "Full line · {n} characters",
+  resultExpandHint: "Click to render on the right",
+  resultExpandSkip: "{n} characters omitted",
+  resultExpandCapNote:
+    "Only the start and the match are expanded so the list does not fill up",
   treePicked: "{n} selected",
   treeClear: "Clear conditions",
   treeExpand: "Expand",
