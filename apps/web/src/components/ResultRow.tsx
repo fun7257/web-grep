@@ -299,7 +299,7 @@ export const ResultHitButton = memo(function ResultHitButton({
               </span>
             ) : null}
             <span className="result-xnote-gap" />
-            <span>{t("resultExpandHint")}</span>
+            <span className="result-xnote-hint">{t("resultExpandHint")}</span>
           </span>
         ) : null}
       </span>

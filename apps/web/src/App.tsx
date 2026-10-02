@@ -1,11 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AuthDialog } from "./components/AuthDialog.tsx";
 import {
   ContextModal,
@@ -64,8 +57,6 @@ function AppShell() {
   const listRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<HTMLElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const listNavRef = useRef<(index: number) => void>(() => {});
-  const selectedIndexRef = useRef(0);
   const [treeOpen, toggleTree] = useTreeOpen();
   const [picks, setPicks] = useState<TreePick[]>([]);
   const [excludeGlobs, setExcludeGlobs] = useState("");
@@ -94,9 +85,6 @@ function AppShell() {
     search.hits.length === 0
       ? 0
       : Math.min(selectedIndex, search.hits.length - 1);
-  useLayoutEffect(() => {
-    selectedIndexRef.current = selectedIndexClamped;
-  }, [selectedIndexClamped]);
   const selectedHit = search.hits[selectedIndexClamped] ?? null;
 
   const selectHit = useCallback((index: number) => {
@@ -329,10 +317,6 @@ function AppShell() {
     queryRef.current?.focus();
   }, [dropPendingSelect, resetDraft, resetSearch]);
 
-  const onListNav = useCallback((index: number) => {
-    listNavRef.current(index);
-  }, []);
-
   const copySelectedPath = useCallback(() => {
     const path = selectedHit?.path;
     if (path === undefined) {
@@ -361,8 +345,6 @@ function AppShell() {
     previewRef,
     hitCount: search.hits.length,
     setSelectedIndex,
-    selectedIndexRef,
-    onListNav,
   });
 
   return (
@@ -537,7 +519,6 @@ function AppShell() {
             terms={hlTerms}
             opts={hlOpts}
             headActions={hitsHeadActions}
-            listNavRef={listNavRef}
           />
         )}
       </section>

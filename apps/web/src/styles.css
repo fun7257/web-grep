@@ -3287,24 +3287,39 @@ html[data-theme="light"] .result-log.selected.is-open .result-line-pill {
   align-items: center;
   gap: 8px;
   margin-top: 6px;
+  min-width: 0;
   color: var(--faint);
   font-family: var(--sans);
   font-size: 11px;
   font-weight: 500;
   line-height: 1.4;
+  white-space: nowrap;
 }
 
 .result-xnote b {
+  flex: none;
   font-weight: 600;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .result-xnote-gap {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 8px;
 }
 
 .result-xnote-cut {
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.result-xnote-hint {
+  flex: none;
+  color: var(--muted);
+  white-space: nowrap;
 }
 
 .result-group {

@@ -51,7 +51,6 @@ export const ResultList = memo(function ResultList({
   terms = [],
   opts = DEFAULT_HL_OPTS,
   headActions = null,
-  listNavRef,
 }: {
   hits: SseHit[];
   selectedIndex: number;
@@ -60,8 +59,6 @@ export const ResultList = memo(function ResultList({
   terms?: HlTermInput[];
   opts?: HlOpts;
   headActions?: HTMLDivElement | null;
-  /** j/k and arrow navigation reports the index it landed on. */
-  listNavRef?: RefObject<(index: number) => void>;
 }) {
   const { t } = useLocale();
   const [sortDir, setSortDir] = useState<Record<string, "asc" | "desc">>({});
@@ -73,6 +70,15 @@ export const ResultList = memo(function ResultList({
   const stickyPathRef = useRef<string | null>(null);
 
   const dirOf = (path: string): "asc" | "desc" => sortDir[path] ?? "asc";
+
+  const structureKey = useMemo(() => {
+    const folded = Array.from(collapsed).sort().join("\u0000");
+    const sorted = Object.keys(sortDir)
+      .sort()
+      .map((path) => `${path}\u0001${sortDir[path] ?? ""}`)
+      .join("\u0000");
+    return `${folded}\u0002${sorted}`;
+  }, [collapsed, sortDir]);
 
   const groups = useMemo((): Group[] => {
     const map = new Map<string, Group["hits"]>();
@@ -125,7 +131,9 @@ export const ResultList = memo(function ResultList({
       if (height <= 0) {
         return kind === "hit" ? LOG_ROW : FILE_ROW;
       }
-      return height;
+      // scrollTop is integer here. A fractional slot drifts by that fraction
+      // on every compensated collapse.
+      return Math.round(height);
     },
     overscan: 12,
     scrollPaddingStart: stickyH,
@@ -139,11 +147,12 @@ export const ResultList = memo(function ResultList({
     },
   });
 
-  const { open, reportTruncation } = useResultExpand({
+  const { openIndexes, reportTruncation } = useResultExpand({
     listRef,
-    listNavRef,
     virtualizer,
     hits,
+    selectedIndex,
+    structureKey,
     hitVirtualIndex: (hitIndex) =>
       rows.findIndex((row) => row.kind === "hit" && row.index === hitIndex),
   });
@@ -411,7 +420,7 @@ export const ResultList = memo(function ResultList({
                     hit={row.hit}
                     index={row.index}
                     selected={row.index === selectedIndex}
-                    open={open?.index === row.index}
+                    open={openIndexes.has(row.index)}
                     terms={terms}
                     opts={opts}
                     onSelect={onSelect}

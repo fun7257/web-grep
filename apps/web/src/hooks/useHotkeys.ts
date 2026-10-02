@@ -39,10 +39,6 @@ export function useHotkeys(opts: {
   previewRef: RefObject<HTMLElement | null>;
   hitCount: number;
   setSelectedIndex: Dispatch<SetStateAction<number>>;
-  /** Latest selected index. With `onListNav`, j/k read it instead of a stale closure. */
-  selectedIndexRef?: RefObject<number>;
-  /** Called with the index j/k/ArrowUp/ArrowDown landed on. Does not change that move. */
-  onListNav?: (index: number) => void;
 }): void {
   const {
     onSearch,
@@ -57,33 +53,9 @@ export function useHotkeys(opts: {
     previewRef,
     hitCount,
     setSelectedIndex,
-    selectedIndexRef,
-    onListNav,
   } = opts;
 
   useEffect(() => {
-    const moveList = (delta: 1 | -1): void => {
-      if (selectedIndexRef === undefined) {
-        setSelectedIndex((index) =>
-          delta > 0
-            ? hitCount === 0
-              ? 0
-              : Math.min(hitCount - 1, index + delta)
-            : Math.max(0, index + delta),
-        );
-        return;
-      }
-      const current = selectedIndexRef.current;
-      const next =
-        delta > 0
-          ? hitCount === 0
-            ? 0
-            : Math.min(hitCount - 1, current + delta)
-          : Math.max(0, current + delta);
-      setSelectedIndex(next);
-      onListNav?.(next);
-    };
-
     const onKeyDown = (event: KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
         if (modalOpen) {
@@ -126,13 +98,15 @@ export function useHotkeys(opts: {
       }
       if (event.key === "j" || event.key === "ArrowDown") {
         event.preventDefault();
-        moveList(1);
+        setSelectedIndex((index) =>
+          hitCount === 0 ? 0 : Math.min(hitCount - 1, index + 1),
+        );
         listRef.current?.focus({ preventScroll: true });
         return;
       }
       if (event.key === "k" || event.key === "ArrowUp") {
         event.preventDefault();
-        moveList(-1);
+        setSelectedIndex((index) => Math.max(0, index - 1));
         listRef.current?.focus({ preventScroll: true });
         return;
       }
@@ -173,9 +147,7 @@ export function useHotkeys(opts: {
     onToggleHelp,
     previewRef,
     queryRef,
-    onListNav,
     running,
-    selectedIndexRef,
     setSelectedIndex,
   ]);
 }
