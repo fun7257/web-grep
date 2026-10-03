@@ -16,9 +16,10 @@ import {
   type HlTermInput,
 } from "../highlight.ts";
 import { useLocale } from "../hooks/useLocale.ts";
+import { useResultExpand } from "../hooks/useResultExpand.ts";
 import { pickSticky, type StickyHeader } from "../resultSticky.ts";
 import { FileIcon, IconChevron, IconFoldAll, IconUnfoldAll } from "./icons.tsx";
-import { LogLineText } from "./ResultRow.tsx";
+import { ResultHitButton } from "./ResultRow.tsx";
 
 // Header is a fixed 36px row (border included). A hit is one 12.5/1.6 line
 // plus 7px padding on each side. Two-line hits are measured, not estimated.
@@ -69,6 +70,15 @@ export const ResultList = memo(function ResultList({
   const stickyPathRef = useRef<string | null>(null);
 
   const dirOf = (path: string): "asc" | "desc" => sortDir[path] ?? "asc";
+
+  const structureKey = useMemo(() => {
+    const folded = Array.from(collapsed).sort().join("\u0000");
+    const sorted = Object.keys(sortDir)
+      .sort()
+      .map((path) => `${path}\u0001${sortDir[path] ?? ""}`)
+      .join("\u0000");
+    return `${folded}\u0002${sorted}`;
+  }, [collapsed, sortDir]);
 
   const groups = useMemo((): Group[] => {
     const map = new Map<string, Group["hits"]>();
@@ -121,7 +131,9 @@ export const ResultList = memo(function ResultList({
       if (height <= 0) {
         return kind === "hit" ? LOG_ROW : FILE_ROW;
       }
-      return height;
+      // scrollTop is integer here. A fractional slot drifts by that fraction
+      // on every compensated collapse.
+      return Math.round(height);
     },
     overscan: 12,
     scrollPaddingStart: stickyH,
@@ -133,6 +145,17 @@ export const ResultList = memo(function ResultList({
       }
       return row.kind === "header" ? `h:${row.path}` : `hit:${row.index}`;
     },
+  });
+
+  const { openIndexes, reportTruncation, settleStructurePin, prepareStructurePin } =
+    useResultExpand({
+    listRef,
+    virtualizer,
+    hits,
+    selectedIndex,
+    structureKey,
+    hitVirtualIndex: (hitIndex) =>
+      rows.findIndex((row) => row.kind === "hit" && row.index === hitIndex),
   });
 
   const virtualItems = virtualizer.getVirtualItems();
@@ -253,10 +276,15 @@ export const ResultList = memo(function ResultList({
     }
   }, [selectedIndex, virtualizer]);
 
+  useEffect(() => {
+    settleStructurePin();
+  }, [settleStructurePin, structureKey]);
+
   const allCollapsed =
     groups.length > 0 && groups.every((group) => collapsed.has(group.path));
 
   const toggleGroup = (path: string): void => {
+    prepareStructurePin();
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
@@ -269,6 +297,7 @@ export const ResultList = memo(function ResultList({
   };
 
   const toggleAll = (): void => {
+    prepareStructurePin();
     if (allCollapsed) {
       setCollapsed(new Set());
       return;
@@ -277,6 +306,7 @@ export const ResultList = memo(function ResultList({
   };
 
   const sortGroup = (path: string): void => {
+    prepareStructurePin();
     const next = dirOf(path) === "asc" ? "desc" : "asc";
     const group = groups.find((item) => item.path === path);
     const ordered = (group?.hits ?? [])
@@ -394,32 +424,16 @@ export const ResultList = memo(function ResultList({
                     />
                   </div>
                 ) : (
-                  <button
-                    type="button"
-                    role="listitem"
-                    className={
-                      row.index === selectedIndex
-                        ? "result-log selected"
-                        : "result-log"
-                    }
-                    aria-current={
-                      row.index === selectedIndex ? "true" : undefined
-                    }
-                    onClick={() => {
-                      onSelect(row.index);
-                    }}
-                  >
-                    <span className="result-loc" style={{ display: "none" }}>
-                      {`${row.hit.path}:${row.hit.line}`}
-                    </span>
-                    <span className="result-line-pill">{row.hit.line}</span>
-                    <LogLineText
-                      text={row.hit.text}
-                      matches={row.hit.matches}
-                      terms={terms}
-                      opts={opts}
-                    />
-                  </button>
+                  <ResultHitButton
+                    hit={row.hit}
+                    index={row.index}
+                    selected={row.index === selectedIndex}
+                    open={openIndexes.has(row.index)}
+                    terms={terms}
+                    opts={opts}
+                    onSelect={onSelect}
+                    onTruncation={reportTruncation}
+                  />
                 )}
               </div>
             );

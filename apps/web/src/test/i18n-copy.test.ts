@@ -2,6 +2,30 @@ import { describe, expect, it } from "vitest";
 import { catalogs } from "../i18n/index.ts";
 
 describe("i18n catalogs", () => {
+  it("ships row-expand copy with the same placeholders in zh-CN and en-US", () => {
+    expect(catalogs["zh-CN"].resultLongLine).toBe("长行 {n} 字符");
+    expect(catalogs["zh-CN"].resultFullLine).toBe("整行 {n} 字符");
+    expect(catalogs["zh-CN"].resultExpandHint).toBe("点击在右侧渲染");
+    expect(catalogs["zh-CN"].resultExpandSkip).toBe("省略 {n} 字符");
+    expect(catalogs["zh-CN"].resultExpandCapNote).toBe(
+      "为了不占满列表，只展开行首和命中附近",
+    );
+    const keys = [
+      "resultLongLine",
+      "resultFullLine",
+      "resultExpandHint",
+      "resultExpandSkip",
+      "resultExpandCapNote",
+    ] as const;
+    for (const key of keys) {
+      const placeholders = (value: string) => value.match(/\{[a-z]+\}/g);
+      expect(placeholders(catalogs["en-US"][key])).toEqual(
+        placeholders(catalogs["zh-CN"][key]),
+      );
+      expect(catalogs["en-US"][key].length).toBeGreaterThan(0);
+    }
+  });
+
   it("has no user-visible ENGINE_UNSUPPORTED or literal-engine copy", () => {
     const dumped = JSON.stringify(catalogs);
     expect(dumped).not.toContain("ENGINE_UNSUPPORTED");

@@ -4,6 +4,11 @@ import {
   clipLogLine,
   clipResultSnippet,
   clipResultSnippets,
+  EXPAND_CAP,
+  EXPAND_HEAD,
+  EXPAND_HIT_LEAD,
+  type ExpandPiece,
+  expandLogLine,
   LOG_LINE_CHAR_BUDGET,
   RESULT_SNIPPET_BUDGET,
   RESULT_SNIPPET_LINE_CHARS,
@@ -246,6 +251,189 @@ describe("clipLogLine", () => {
     expect(view.slice(at - clip.start, at - clip.start + 3)).toBe("目标词");
     expect(view).toContain("😀");
     expect(loneSurrogate(view)).toBe(false);
+  });
+});
+
+function visibleCount(pieces: ExpandPiece[]): number {
+  let total = 0;
+  for (const piece of pieces) {
+    if (piece.kind === "text") {
+      total += piece.end - piece.start;
+    }
+  }
+  return total;
+}
+
+function covered(pieces: ExpandPiece[], index: number): boolean {
+  return pieces.some(
+    (piece) =>
+      piece.kind === "text" && piece.start <= index && index < piece.end,
+  );
+}
+
+function joined(text: string, pieces: ExpandPiece[]): string {
+  let out = "";
+  let cursor = 0;
+  for (const piece of pieces) {
+    if (piece.kind === "skip") {
+      expect(piece.omitted).toBeGreaterThan(0);
+      cursor += piece.omitted;
+      continue;
+    }
+    expect(piece.start).toBe(cursor);
+    out += text.slice(piece.start, piece.end);
+    cursor = piece.end;
+  }
+  expect(cursor).toBe(text.length);
+  return out;
+}
+
+describe("expandLogLine", () => {
+  it("shows a line within the cap whole", () => {
+    const text = `hello ${"x".repeat(20)}`;
+    expect(expandLogLine(text, [{ start: 6, end: 8 }])).toEqual([
+      { kind: "text", start: 0, end: text.length },
+    ]);
+    const exact = "n".repeat(EXPAND_CAP);
+    expect(expandLogLine(exact, [])).toEqual([
+      { kind: "text", start: 0, end: EXPAND_CAP },
+    ]);
+    expect(expandLogLine("", [{ start: 0, end: 1 }])).toEqual([]);
+  });
+
+  it("keeps a prefix and the tail skip when there is no hit", () => {
+    const text = "a".repeat(EXPAND_CAP + 40);
+    const pieces = expandLogLine(text, []);
+    expect(pieces).toEqual([
+      { kind: "text", start: 0, end: EXPAND_CAP },
+      { kind: "skip", omitted: 40 },
+    ]);
+    expect(visibleCount(pieces)).toBeLessThanOrEqual(EXPAND_CAP);
+  });
+
+  it("shows the whole prefix window when the first hit is inside the head", () => {
+    const at = 80;
+    const text = `${"甲".repeat(at)}目标${"乙".repeat(EXPAND_CAP)}`;
+    const pieces = expandLogLine(text, [{ start: at, end: at + 2 }]);
+    expect(covered(pieces, at)).toBe(true);
+    expect(pieces[0]).toEqual({ kind: "text", start: 0, end: EXPAND_CAP });
+    expect(pieces.filter((piece) => piece.kind === "skip")).toEqual([
+      { kind: "skip", omitted: text.length - EXPAND_CAP },
+    ]);
+    expect(joined(text, pieces).slice(at, at + 2)).toBe("目标");
+    expect(visibleCount(pieces)).toBeLessThanOrEqual(EXPAND_CAP);
+  });
+
+  it("keeps a far hit in the match window and counts both gaps", () => {
+    const at = 2000;
+    const text = `${"x".repeat(at)}NEEDLE${"y".repeat(2000)}`;
+    const pieces = expandLogLine(text, [{ start: at, end: at + 6 }]);
+    const ws = Math.max(EXPAND_HEAD, at - EXPAND_HIT_LEAD);
+    const we = Math.min(text.length, ws + (EXPAND_CAP - EXPAND_HEAD));
+    expect(pieces).toEqual([
+      { kind: "text", start: 0, end: EXPAND_HEAD },
+      { kind: "skip", omitted: ws - EXPAND_HEAD },
+      { kind: "text", start: ws, end: we },
+      { kind: "skip", omitted: text.length - we },
+    ]);
+    expect(covered(pieces, at)).toBe(true);
+    expect(joined(text, pieces)).toContain("NEEDLE");
+    expect(visibleCount(pieces)).toBe(EXPAND_CAP);
+  });
+
+  it("keeps a hit at the end of the line inside the window", () => {
+    const tail = "NEEDLE";
+    const text = `${"q".repeat(4900)}${tail}`;
+    const at = text.length - tail.length;
+    const pieces = expandLogLine(text, [{ start: at, end: text.length }]);
+    const ws = Math.max(EXPAND_HEAD, at - EXPAND_HIT_LEAD);
+    expect(pieces).toEqual([
+      { kind: "text", start: 0, end: EXPAND_HEAD },
+      { kind: "skip", omitted: ws - EXPAND_HEAD },
+      { kind: "text", start: ws, end: text.length },
+    ]);
+    expect(text.slice(ws)).toContain("NEEDLE");
+    expect(visibleCount(pieces)).toBeLessThanOrEqual(EXPAND_CAP);
+    expect(joined(text, pieces).endsWith("NEEDLE")).toBe(true);
+  });
+
+  it("windows the first hit when later hits are farther along", () => {
+    const first = 1800;
+    const second = 4200;
+    const text = `${"a".repeat(first)}ONE${"b".repeat(second - first - 3)}TWO${"c".repeat(400)}`;
+    const pieces = expandLogLine(text, [
+      { start: second, end: second + 3 },
+      { start: first, end: first + 3 },
+    ]);
+    expect(covered(pieces, first)).toBe(true);
+    expect(joined(text, pieces)).toContain("ONE");
+    const ws = Math.max(EXPAND_HEAD, first - EXPAND_HIT_LEAD);
+    expect(
+      pieces.some((piece) => piece.kind === "text" && piece.start === ws),
+    ).toBe(true);
+    expect(visibleCount(pieces)).toBeLessThanOrEqual(EXPAND_CAP);
+  });
+
+  it("does not split a surrogate on the head or cap boundary", () => {
+    const emoji = "😀";
+    const headSplit = `${"a".repeat(EXPAND_HEAD - 1)}${emoji}${"b".repeat(400)}NEEDLE${"c".repeat(EXPAND_CAP)}`;
+    const at = headSplit.indexOf("NEEDLE");
+    const headPieces = expandLogLine(headSplit, [{ start: at, end: at + 6 }]);
+    const headView = joined(headSplit, headPieces);
+    expect(loneSurrogate(headView)).toBe(false);
+    expect(headView).toContain("NEEDLE");
+    expect(covered(headPieces, at)).toBe(true);
+
+    const capSplit = `${"a".repeat(EXPAND_CAP - 1)}${emoji}${"b".repeat(80)}`;
+    const capPieces = expandLogLine(capSplit, []);
+    const capView = joined(capSplit, capPieces);
+    expect(loneSurrogate(capView)).toBe(false);
+    expect(capView.includes("😀") || !capView.includes("\uD83D")).toBe(true);
+    expect(visibleCount(capPieces)).toBeLessThanOrEqual(EXPAND_CAP);
+  });
+
+  it("pulls a window start back onto a surrogate pair", () => {
+    const emoji = "😀";
+    const pad = EXPAND_HEAD + EXPAND_HIT_LEAD;
+    const text = `${"a".repeat(pad - 1)}${emoji}${"b".repeat(40)}NEEDLE${"c".repeat(EXPAND_CAP)}`;
+    const at = text.indexOf("NEEDLE");
+    expect(at - EXPAND_HIT_LEAD).toBeGreaterThan(EXPAND_HEAD);
+    const pieces = expandLogLine(text, [{ start: at, end: at + 6 }]);
+    const view = joined(text, pieces);
+    expect(loneSurrogate(view)).toBe(false);
+    expect(view).toContain("😀");
+    expect(view).toContain("NEEDLE");
+    expect(covered(pieces, at)).toBe(true);
+    expect(visibleCount(pieces)).toBeLessThanOrEqual(EXPAND_CAP);
+  });
+
+  it("ignores empty spans and spans that fall outside the line", () => {
+    const text = `${"h".repeat(100)}NEEDLE${"t".repeat(EXPAND_CAP)}`;
+    const pieces = expandLogLine(text, [
+      { start: -20, end: -1 },
+      { start: 4, end: 2 },
+      { start: text.length + 10, end: text.length + 30 },
+      { start: 8, end: 8 },
+      { start: text.length - 3, end: text.length + 50 },
+    ]);
+    expect(covered(pieces, text.length - 3)).toBe(true);
+    expect(joined(text, pieces).endsWith(text.slice(text.length - 3))).toBe(
+      true,
+    );
+    const noHit = expandLogLine(text, [
+      { start: -5, end: 0 },
+      { start: text.length, end: text.length + 4 },
+    ]);
+    expect(noHit).toEqual(expandLogLine(text, []));
+  });
+
+  it("respects a caller cap and head", () => {
+    const text = `${"p".repeat(50)}HIT${"q".repeat(200)}`;
+    const pieces = expandLogLine(text, [{ start: 50, end: 53 }], 40, 10);
+    expect(visibleCount(pieces)).toBeLessThanOrEqual(40);
+    expect(covered(pieces, 50)).toBe(true);
+    expect(joined(text, pieces)).toContain("H");
+    expect(joined(text, pieces).startsWith("p")).toBe(true);
   });
 });
 
