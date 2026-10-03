@@ -2365,6 +2365,19 @@ html[data-theme="dark"] .icon,
   overflow: hidden;
 }
 
+.result-row-motion {
+  position: relative;
+  min-width: 0;
+}
+
+.result-list-scroll .result-virtual-row.anim,
+.result-list-scroll .result-virtual-row.anim .result-row-motion {
+  /* Above siblings that slide under the still-visible collapse. Sticky
+     header stays at z-index 6. */
+  z-index: 1;
+  overflow: visible;
+}
+
 .result-loc {
   flex: none;
   white-space: nowrap;
@@ -3280,6 +3293,15 @@ html[data-theme="light"] .result-log.selected.is-open .result-line-pill {
   font-size: 10.5px;
   font-weight: 600;
   line-height: 18px;
+}
+
+.result-lenchip.is-motion {
+  position: absolute;
+  z-index: 1;
+  left: 52px;
+  bottom: 7px;
+  margin-top: 0;
+  pointer-events: none;
 }
 
 .result-xnote {
