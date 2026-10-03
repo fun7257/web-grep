@@ -726,4 +726,97 @@ describe("startSwitchMotion", () => {
       true,
     );
   });
+
+  it("clips from the new target border while the element still wears the old one", () => {
+    // Review case: animate runs before layout paints the new border.
+    // Expand side is still 76px (visible 90). Collapse side is still 555.4
+    // (visible 543.7). The inset has to use the border the row is going to,
+    // which may be negative when the visible tail overflows that border.
+    const root = document.createElement("div");
+    const specs = [
+      {
+        key: "hit:0",
+        hit: 0,
+        doc: 0,
+        top: 0,
+        height: 555.4,
+        clip: "inset(0px 0px 11.7px 0px)",
+      },
+      {
+        key: "hit:1",
+        hit: 1,
+        doc: 555.4,
+        top: 200,
+        height: 76,
+        clip: "inset(0px 0px -14px 0px)",
+      },
+    ];
+    for (const spec of specs) {
+      const row = document.createElement("div");
+      row.className = "result-virtual-row";
+      row.dataset.rowKey = spec.key;
+      row.dataset.index = String(spec.hit);
+      row.style.transform = `translateY(${spec.doc}px)`;
+      const motion = document.createElement("div");
+      motion.className = "result-row-motion";
+      const button = document.createElement("button");
+      button.className = "result-log";
+      button.dataset.hitIndex = String(spec.hit);
+      button.style.clipPath = spec.clip;
+      button.getBoundingClientRect = () =>
+        new DOMRect(0, spec.top, 100, spec.height);
+      motion.append(button);
+      row.append(motion);
+      root.append(row);
+    }
+    document.body.append(root);
+    const capture = readMotionRows(root);
+    const closing = capture.find((row) => row.hitIndex === 0);
+    const opening = capture.find((row) => row.hitIndex === 1);
+    expect(closing?.borderHeight).toBeCloseTo(555.4, 2);
+    expect(closing?.visualHeight).toBeCloseTo(543.7, 2);
+    expect(opening?.borderHeight).toBeCloseTo(76, 2);
+    expect(opening?.visualHeight).toBeCloseTo(90, 2);
+
+    const atAnimate = new Map<number, number>();
+    const insets = new Map<number, number | null>();
+    startSwitchMotion({
+      root,
+      registry: new MotionRegistry(),
+      capture,
+      opening: 1,
+      closing: [0],
+      anchorStart: null,
+      scrollDelta: 0,
+      liveRows: capture,
+      pendingStart: () => undefined,
+      onCollapseSettled: () => undefined,
+      targetBorder: (hitIndex, openingRow) =>
+        openingRow ? 555.4 : hitIndex === 0 ? 76 : undefined,
+      animate: (el, frames) => {
+        const list = Array.isArray(frames) ? frames : [];
+        const clip = list[0]?.clipPath;
+        if (typeof clip === "string" && el instanceof HTMLElement) {
+          const hit = Number(el.dataset.hitIndex);
+          atAnimate.set(hit, el.getBoundingClientRect().height);
+          insets.set(hit, parseClipBottom(clip));
+        }
+        return {
+          cancel() {},
+          onfinish: null,
+          oncancel: null,
+          playState: "running",
+        };
+      },
+    });
+
+    expect(atAnimate.get(0)).toBeCloseTo(555.4, 2);
+    expect(atAnimate.get(1)).toBeCloseTo(76, 2);
+    expect(insets.get(1)).toBeCloseTo(555.4 - 90, 2);
+    expect(insets.get(0)).toBeCloseTo(76 - 543.7, 2);
+    expect(Math.abs((insets.get(1) ?? 0) - (76 - 90))).toBeGreaterThan(100);
+    expect(Math.abs((insets.get(0) ?? 0) - (555.4 - 543.7))).toBeGreaterThan(
+      100,
+    );
+  });
 });

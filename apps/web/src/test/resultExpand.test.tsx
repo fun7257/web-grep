@@ -13,7 +13,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResultList } from "../components/ResultList.tsx";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { LocaleProvider } from "../hooks/useLocale.ts";
-import { HOVER_REST_MS } from "../hooks/useResultExpand.ts";
+import {
+  HOVER_REST_MS,
+  isOwnScrollTop,
+  rememberOwnScroll,
+  SELF_SCROLL_MS,
+} from "../hooks/useResultExpand.ts";
 
 const NEEDLE = "NEEDLE";
 
@@ -1284,5 +1289,67 @@ describe("result row motion", () => {
     });
     expect(residue()).toEqual([]);
     expect(openIndexes().length).toBeLessThanOrEqual(1);
+  });
+
+  it("does not treat a scroll event from our own scrollTop as user scrolling", () => {
+    const motion = installMotionClock();
+    render(
+      <Harness hits={[longLine(1), longLine(2), longLine(3), longLine(4)]} />,
+    );
+    moveTo(0);
+    motion.advance(50);
+    expect(openIndexes()).toEqual([0]);
+    const end = rowStart(0) + hitButton(0).getBoundingClientRect().height;
+    scrollEl().scrollTop = end - 10;
+    fireEvent.scroll(scrollEl());
+    motion.advance(160);
+
+    const beforeSwitch = scrollEl().scrollTop;
+    moveTo(1);
+    motion.advance(50);
+    const written = scrollEl().scrollTop;
+    expect(written).not.toBe(beforeSwitch);
+    // The follow-up scroll arrives after the pin is gone. Two events: the
+    // first can still be the one ignoreScroll counted; the second is the
+    // virtualizer adjustment the pin no longer covers.
+    motion.advance(0);
+    delete scrollEl().dataset.motionPin;
+    fireEvent.scroll(scrollEl());
+    fireEvent.scroll(scrollEl());
+
+    const beforeRetarget = motion.calls.length;
+    motion.advance(70);
+    moveTo(2);
+    motion.advance(50);
+    const retargetClips = motion.calls
+      .slice(beforeRetarget)
+      .filter((call) => String(call.frames[0]?.clipPath ?? "").includes("inset"));
+    expect(retargetClips.length).toBeGreaterThan(0);
+
+    // Let the self-scroll note expire. A real wheel then moves scrollTop off
+    // every value we wrote. One leftover ignoreScroll from the write above
+    // can swallow a single event; the second event is the user.
+    motion.advance(SELF_SCROLL_MS + 40);
+    const userTop = scrollEl().scrollTop + 400;
+    scrollEl().scrollTop = userTop;
+    expect(scrollEl().scrollTop).toBe(userTop);
+    delete scrollEl().dataset.motionPin;
+    fireEvent.scroll(scrollEl());
+    fireEvent.scroll(scrollEl());
+    const beforeUser = motion.calls.length;
+    press("j");
+    expect(selectedIndex()).toBe(1);
+    expect(motion.calls).toHaveLength(beforeUser);
+  });
+});
+
+describe("own scroll notes", () => {
+  it("matches a scrollTop we wrote and ignores a different one after expiry", () => {
+    const slot = { until: 0, tops: [] as number[] };
+    rememberOwnScroll(slot, 17621, 1000);
+    expect(isOwnScrollTop(slot, 17621, 1000)).toBe(true);
+    expect(isOwnScrollTop(slot, 17621.4, 1000 + SELF_SCROLL_MS - 1)).toBe(true);
+    expect(isOwnScrollTop(slot, 17127, 1000)).toBe(false);
+    expect(isOwnScrollTop(slot, 17621, 1000 + SELF_SCROLL_MS + 1)).toBe(false);
   });
 });

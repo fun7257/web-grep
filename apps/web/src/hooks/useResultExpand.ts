@@ -17,6 +17,7 @@ import {
   parseTranslateY,
   readMotionRows,
   shouldAnimateMotion,
+  shouldRetargetInFlight,
   snapshotForSwitch,
   startSwitchMotion,
   warmMotionColors,
@@ -24,9 +25,11 @@ import {
 import {
   absorbAnchorShift,
   hitExpandKey,
+  scrollRestoreDelta,
   PIN_SLOP_PX,
   pickReleaseAnchor,
   pointerRestBlocked,
+  type ScrollHome,
   type VisibleHitBox,
 } from "../resultExpandPlan.ts";
 
@@ -34,6 +37,104 @@ import {
 export const HOVER_REST_MS = 50;
 /** Scroll events inside this window suppress hover changes. */
 export const SCROLL_IDLE_MS = 150;
+/**
+ * Follow-up `scroll` events from our own `scrollTop` / the virtualizer's
+ * `scrollTo`. The pin is gone within a frame, and the virtualizer's
+ * scroll-end reconcile (`isScrollingResetDelay`, 150ms) can write again
+ * after that. Notes have to outlive that reconcile. A real wheel moves
+ * `scrollTop` off these values, so it still counts.
+ */
+export const SELF_SCROLL_MS = 280;
+
+export type OwnScrollSlot = {
+  until: number;
+  tops: number[];
+};
+
+export function rememberOwnScroll(
+  slot: OwnScrollSlot,
+  top: number,
+  now: number,
+): void {
+  if (!Number.isFinite(top)) {
+    return;
+  }
+  if (now > slot.until) {
+    slot.tops = [];
+    slot.until = now + SELF_SCROLL_MS;
+  }
+  slot.tops.push(top);
+}
+
+/** Open the self-scroll window without recording a top yet. */
+export function armOwnScroll(slot: OwnScrollSlot, now: number): void {
+  if (now > slot.until) {
+    slot.tops = [];
+  }
+  const next = now + SELF_SCROLL_MS;
+  if (next > slot.until) {
+    slot.until = next;
+  }
+}
+
+/** True when `top` is one we wrote and the note has not expired. */
+export function isOwnScrollTop(
+  slot: OwnScrollSlot,
+  top: number,
+  now: number,
+): boolean {
+  if (now > slot.until || !Number.isFinite(top)) {
+    return false;
+  }
+  return slot.tops.some((item) => Math.abs(item - top) <= 1);
+}
+
+/**
+ * An expanded border is taller than the closed measure. A row that is
+ * mid-collapse already sits on the closed border, so this does not overwrite
+ * the open height we will need when it opens again.
+ */
+function rememberOpenBorders(
+  rows: readonly MotionRow[],
+  openSizes: Map<number, number>,
+  closedSizes: Map<number, number>,
+): void {
+  for (const row of rows) {
+    if (row.hitIndex === null || !(row.borderHeight > 0)) {
+      continue;
+    }
+    const closed = closedSizes.get(row.hitIndex);
+    if (closed === undefined || !(closed > 0)) {
+      continue;
+    }
+    if (row.borderHeight > closed + 8) {
+      openSizes.set(row.hitIndex, row.borderHeight);
+    }
+  }
+}
+
+function boundScrollTo(
+  node: HTMLElement,
+): ((...args: unknown[]) => void) | null {
+  const value: unknown = Reflect.get(node, "scrollTo");
+  if (typeof value !== "function") {
+    return null;
+  }
+  return (value as (...args: unknown[]) => void).bind(node);
+}
+
+function scrollArgTop(args: readonly unknown[]): number | null {
+  const first = args[0];
+  if (typeof first === "number") {
+    const second = args[1];
+    return typeof second === "number" && Number.isFinite(second) ? second : null;
+  }
+  if (typeof first === "object" && first !== null && "top" in first) {
+    const top = (first as { top?: unknown }).top;
+    return typeof top === "number" && Number.isFinite(top) ? top : null;
+  }
+  return null;
+}
 
 export type RowOpen = { index: number; source: "pointer" | "keyboard" };
 
@@ -57,6 +158,22 @@ type VirtualizerHost = ListVirtualizer & {
   isScrolling: boolean;
   scrollOffset: number | null;
 };
+
+/** Drop a scroll-into-view reconcile so it cannot overwrite a restored offset. */
+function stopListReconcile(virtualizer: ListVirtualizer): void {
+  const host = virtualizer as unknown as {
+    rafId?: number | null;
+    scrollState?: unknown;
+    targetWindow?: Window | null;
+  };
+  const raf = host.rafId;
+  const view = host.targetWindow;
+  if (typeof raf === "number" && view !== undefined && view !== null) {
+    view.cancelAnimationFrame(raf);
+  }
+  host.rafId = null;
+  host.scrollState = null;
+}
 
 function absorbNotify(virtualizer: ListVirtualizer): void {
   const host = virtualizer as unknown as { maybeNotify?: () => void };
@@ -465,6 +582,8 @@ type PendingPlay = {
   /** Scroll correction decided with the model update, before paint. */
   applied: number;
   played: boolean;
+  /** Scroll offset to put back after measureVisible, or null when unset. */
+  restoreTop: number | null;
 };
 
 /**
@@ -528,6 +647,7 @@ export function useResultExpand(opts: {
   const restTimer = useRef<number | null>(null);
   const scrollTimer = useRef<number | null>(null);
   const ignoreScroll = useRef(0);
+  const ownScroll = useRef<OwnScrollSlot>({ until: 0, tops: [] });
   const pinRef = useRef<Pin | null>(null);
   const pinSettled = useRef(true);
   /** Last hit the pointer was on. Not cleared when the pointer leaves a row. */
@@ -548,6 +668,10 @@ export function useResultExpand(opts: {
   const reducedRef = useRef(false);
   const lastSwitchAt = useRef<number | null>(null);
   const pendingPlay = useRef<PendingPlay | null>(null);
+  /** Scroll offset where the open row last sat still, before an in-flight switch. */
+  const motionHome = useRef<ScrollHome | null>(null);
+  /** performance.now() of the last real wheel. Scroll anchoring is not a wheel. */
+  const wheelAt = useRef(0);
   /**
    * Hold-release renders still measure, but they must not start motion again.
    * Row refs measure during commit, before this layout effect, so the
@@ -653,6 +777,14 @@ export function useResultExpand(opts: {
       if (fromKey) {
         keyRepeat.current = false;
       }
+      const docStartOf = (hitIndex: number): number | null => {
+        const virtualIndex = lookupRef.current(hitIndex);
+        if (virtualIndex < 0) {
+          return null;
+        }
+        const start = measuredRows(virtualizerRef.current)[virtualIndex]?.start;
+        return start !== undefined && Number.isFinite(start) ? start : null;
+      };
       const now = performance.now();
       const since =
         lastSwitchAt.current === null ? null : now - lastSwitchAt.current;
@@ -671,6 +803,13 @@ export function useResultExpand(opts: {
       const opening =
         nextOpen !== null && !prevOpen.includes(nextOpen) ? nextOpen : null;
       const root = listRef.current;
+      let inFlight = false;
+      // Set again only when this switch restores a previous offset. A lock
+      // left from the last return would skip every later scrollToIndex.
+      let restoredScroll: number | null = null;
+      if (root !== null) {
+        delete root.dataset.motionLockScroll;
+      }
       const motionClosing = [...closing];
       for (const hold of holdsRef.current) {
         if (hold.index !== opening && !motionClosing.includes(hold.index)) {
@@ -708,17 +847,78 @@ export function useResultExpand(opts: {
         }
         return affectedKeys(rows, marks, unknown);
       };
+      let scrollBefore = 0;
+      let settledIndex: number | undefined;
+      let userWheeling = false;
+      let homeBefore: ScrollHome | null = null;
+      let restoreBase: number | null = null;
       if (root !== null && (motionClosing.length > 0 || opening !== null)) {
-        if (play) {
-          // Read scroll metrics before cancel. A later read would be its own layout.
-          const scrollBefore = root.scrollTop;
-          const clientHeight = root.clientHeight;
-          const scrollHeight = root.scrollHeight;
-          const captured = snapshotForSwitch(
-            root,
-            registry.current,
-            selectKeys,
-          );
+        // Read scroll metrics before cancel. A later read would be its own layout.
+        scrollBefore = root.scrollTop;
+        const clientHeight = root.clientHeight;
+        const scrollHeight = root.scrollHeight;
+        const captured = snapshotForSwitch(
+          root,
+          registry.current,
+          selectKeys,
+        );
+        rememberOpenBorders(
+          captured,
+          openSizeRef.current,
+          closedSizeRef.current,
+        );
+        const keys = selectKeys(captured);
+        inFlight = captured.some(
+          (row) =>
+            keys.has(row.key) &&
+            Math.abs(row.visualHeight - row.borderHeight) > 1.5,
+        );
+        settledIndex = prevOpen[0];
+        // Decide before replacing home. A long gap finishes the clip, so
+        // this looks settled, but the row we left still owns that offset.
+        // Anchoring and our own follow-up scrolls set scrollingRef, but they
+        // are not a wheel. Yanking back is only wrong when the user wheeled.
+        // The start passed here is only the guard. The real delta is applied
+        // after resize, once late measurements have moved the document start.
+        userWheeling =
+          now - wheelAt.current < SCROLL_IDLE_MS && wheelAt.current !== 0;
+        homeBefore = motionHome.current;
+        restoreBase = scrollRestoreDelta(
+          homeBefore,
+          anchor,
+          scrollBefore,
+          settledIndex ?? null,
+          homeBefore?.start ?? null,
+          userWheeling,
+        );
+        if (
+          restoreBase === null &&
+          !inFlight &&
+          settledIndex !== undefined
+        ) {
+          const start = docStartOf(settledIndex);
+          if (start !== null) {
+            motionHome.current = {
+              index: settledIndex,
+              scrollTop: scrollBefore,
+              away: anchor,
+              start,
+            };
+          }
+        }
+        const retarget = shouldRetargetInFlight({
+          play,
+          scrolling: scrollingRef.current,
+          reducedMotion: reducedRef.current,
+          keyRepeat: repeat,
+          sinceLastMs: since,
+          waapi: hasWaapi(),
+          inFlight,
+        });
+        if (retarget) {
+          // Before the layout effect. scrollToIndex can run, and its
+          // scroll-end reconcile is ~150ms later — both must be noted.
+          armOwnScroll(ownScroll.current, now);
           const anchorRow =
             anchor === null
               ? undefined
@@ -733,6 +933,7 @@ export function useResultExpand(opts: {
             scrollHeight,
             applied: 0,
             played: false,
+            restoreTop: null,
           };
           const kept = holdsRef.current.filter(
             (hold) => hold.index !== opening,
@@ -750,12 +951,6 @@ export function useResultExpand(opts: {
           }
           setHoldsTracked([...kept, ...added]);
         } else {
-          const captured = snapshotForSwitch(
-            root,
-            registry.current,
-            selectKeys,
-          );
-          const keys = selectKeys(captured);
           for (const row of captured) {
             if (keys.has(row.key)) {
               clearMotionPaint(row);
@@ -788,6 +983,16 @@ export function useResultExpand(opts: {
       if (opening !== null) {
         applySize(opening, openSizeRef.current.get(opening));
       }
+      if (restoreBase !== null && homeBefore !== null) {
+        restoredScroll = scrollRestoreDelta(
+          homeBefore,
+          anchor,
+          scrollBefore,
+          settledIndex ?? null,
+          docStartOf(homeBefore.index),
+          userWheeling,
+        );
+      }
       const pendingNow = pendingPlay.current;
       if (
         pendingNow !== null &&
@@ -814,7 +1019,7 @@ export function useResultExpand(opts: {
           capturePin(anchor);
         }
         // Same turn as setModel / setHolds, so the pin is not its own commit.
-        const applied = predictPinShift(
+        const pinApplied = predictPinShift(
           root,
           list,
           pinRef.current,
@@ -827,6 +1032,17 @@ export function useResultExpand(opts: {
             scrollHeight: pendingNow.scrollHeight,
           },
         );
+        // Coming back to the row that was settled: its layout matches that
+        // moment, so the old scroll offset puts its top back. scrollToIndex
+        // would otherwise pin it to the viewport edge. This includes a
+        // return after the previous clip has already finished.
+        const restored = restoredScroll;
+        const applied = restored ?? pinApplied;
+        if (restored !== null) {
+          root.dataset.motionLockScroll = "1";
+          stopListReconcile(list);
+          pendingNow.restoreTop = pendingNow.scrollBefore + restored;
+        }
         pendingNow.applied = applied;
         if (applied !== 0) {
           commitScrollRef.current(pendingNow.scrollBefore + applied);
@@ -938,8 +1154,10 @@ export function useResultExpand(opts: {
     scrollGuard.current += 1;
     pendingPlay.current = null;
     lastSwitchAt.current = null;
+    motionHome.current = null;
     const root = listRef.current;
     if (root !== null) {
+      delete root.dataset.motionLockScroll;
       cancelPaint(root, registry.current);
     }
     if (restTimer.current !== null) {
@@ -1035,6 +1253,7 @@ export function useResultExpand(opts: {
         return;
       }
       ignoreScroll.current += 1;
+      rememberOwnScroll(ownScroll.current, before + applied, performance.now());
       root.scrollTop = before + applied;
       if (root.scrollTop === before || stale) {
         if (root.scrollTop === before) {
@@ -1101,12 +1320,18 @@ export function useResultExpand(opts: {
         // measure then sees one layout, and later effects must not read again.
         root.dataset.motionPin = "1";
         let scrollDelta = 0;
+        // Cover the virtualizer's follow-up scrollTo after this pin clears.
+        armOwnScroll(ownScroll.current, performance.now());
         if (applied !== 0) {
           const next = pending.scrollBefore + applied;
           if (next !== pending.scrollBefore) {
             ignoreScroll.current += 1;
+            rememberOwnScroll(ownScroll.current, next, performance.now());
             commitScrollTopDom(root, virtualizerRef.current, next);
             const actual = root.scrollTop;
+            if (Math.abs(actual - next) > 1) {
+              rememberOwnScroll(ownScroll.current, actual, performance.now());
+            }
             if (actual === pending.scrollBefore) {
               ignoreScroll.current = Math.max(0, ignoreScroll.current - 1);
             } else {
@@ -1123,7 +1348,25 @@ export function useResultExpand(opts: {
           });
         }
         measureVisible(root);
+        // Measurement can scroll-adjust and undo a restore. Put it back
+        // after that read, before the clip samples positions.
+        if (pending.restoreTop !== null) {
+          const back = pending.restoreTop;
+          pending.restoreTop = null;
+          if (Math.abs(root.scrollTop - back) > 1) {
+            ignoreScroll.current += 1;
+            rememberOwnScroll(ownScroll.current, back, performance.now());
+            commitScrollTopDom(root, virtualizerRef.current, back);
+            armedScroll = true;
+            scrollDelta = root.scrollTop - pending.scrollBefore;
+          }
+        }
         const live = readMotionRows(root);
+        rememberOpenBorders(
+          live,
+          openSizeRef.current,
+          closedSizeRef.current,
+        );
         pinSettled.current = true;
         const releaseGenAtStart = releaseGen.current;
         const releaseHolds = (): void => {
@@ -1167,6 +1410,12 @@ export function useResultExpand(opts: {
               return;
             }
             releaseHolds();
+          },
+          targetBorder: (hitIndex, opening) => {
+            const size = opening
+              ? openSizeRef.current.get(hitIndex)
+              : closedSizeRef.current.get(hitIndex);
+            return size !== undefined && size > 0 ? size : undefined;
           },
         });
         duringStart = false;
@@ -1404,7 +1653,32 @@ export function useResultExpand(opts: {
       commitModel({ active: keep }, anchor);
     };
 
+    const originalScrollTo = boundScrollTo(root);
+    if (originalScrollTo !== null) {
+      root.scrollTo = ((...args: unknown[]) => {
+        const requested = scrollArgTop(args);
+        // Note before the call. The scroll event can fire inside scrollTo,
+        // and only while a switch has armed the window — not on every
+        // virtualizer scroll, or a user wheel would be swallowed.
+        if (requested !== null && performance.now() < ownScroll.current.until) {
+          ownScroll.current.tops.push(requested);
+        }
+        originalScrollTo(...args);
+      }) as typeof root.scrollTo;
+    }
+
+    const onWheel = (): void => {
+      wheelAt.current = performance.now();
+    };
+
     const onScroll = (): void => {
+      // Our own write, matched by value. motionPin may already be gone.
+      if (isOwnScrollTop(ownScroll.current, root.scrollTop, performance.now())) {
+        if (ignoreScroll.current > 0) {
+          ignoreScroll.current -= 1;
+        }
+        return;
+      }
       // Programmatic pin. Reading geometry here, or warming heights, is a layout.
       if (root.dataset.motionPin === "1") {
         if (ignoreScroll.current > 0) {
@@ -1467,12 +1741,17 @@ export function useResultExpand(opts: {
     shell.addEventListener("pointermove", onPointerMove);
     shell.addEventListener("pointerleave", onPointerLeave);
     root.addEventListener("scroll", onScroll, { passive: true });
+    root.addEventListener("wheel", onWheel, { passive: true });
     return () => {
+      if (originalScrollTo !== null) {
+        root.scrollTo = originalScrollTo;
+      }
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("click", onClick, true);
       shell.removeEventListener("pointermove", onPointerMove);
       shell.removeEventListener("pointerleave", onPointerLeave);
       root.removeEventListener("scroll", onScroll);
+      root.removeEventListener("wheel", onWheel);
       clearRest();
       if (scrollTimer.current !== null) {
         window.clearTimeout(scrollTimer.current);

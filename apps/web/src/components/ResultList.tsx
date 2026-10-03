@@ -332,6 +332,11 @@ export const ResultList = memo(function ResultList({
   }, [sticky?.path, sticky?.pushing]);
 
   useEffect(() => {
+    // A mid-flight return already restored scrollTop. scrollToIndex would
+    // snap the anchor to the viewport edge and leave it there.
+    if (listRef.current?.dataset.motionLockScroll === "1") {
+      return;
+    }
     const idx = rows.findIndex(
       (row) => row.kind === "hit" && row.index === selectedIndex,
     );

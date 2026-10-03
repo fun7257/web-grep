@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   absorbAnchorShift,
+  scrollRestoreDelta,
   hitExpandKey,
   pickReleaseAnchor,
   pointerRestBlocked,
@@ -54,6 +55,31 @@ describe("pickReleaseAnchor", () => {
     expect(
       pickReleaseAnchor({ index: 2, key: hitExpandKey(2) }, moved, 0, 200),
     ).toEqual({ index: 5, key: hitExpandKey(2) });
+  });
+});
+
+describe("scrollRestoreDelta", () => {
+  const home = { index: 4, scrollTop: 17606, away: 9, start: 18000 };
+
+  it("returns the settled offset when a switch comes back from the row it left for", () => {
+    expect(scrollRestoreDelta(home, 4, 17127, 9, 18000, false)).toBe(479);
+    expect(scrollRestoreDelta(home, 4, 17606, 9, 18000, false)).toBe(0);
+  });
+
+  it("keeps growth above the row that the virtualizer already added to scrollTop", () => {
+    const mid = { index: 449, scrollTop: 16037, away: 450, start: 16100 };
+    // 12 estimated rows above became real heights (+504) and scroll followed.
+    expect(scrollRestoreDelta(mid, 449, 16535, 450, 16604, false)).toBe(6);
+  });
+
+  it("leaves the pin in charge for a new gesture, another row, or a wheel", () => {
+    expect(scrollRestoreDelta(home, 5, 17127, 9, 18000, false)).toBeNull();
+    expect(scrollRestoreDelta(home, 4, 17127, 4, 18000, false)).toBeNull();
+    expect(scrollRestoreDelta(home, 4, 17127, 8, 18000, false)).toBeNull();
+    expect(scrollRestoreDelta(home, 4, 17127, null, 18000, false)).toBeNull();
+    expect(scrollRestoreDelta(home, 4, 17127, 9, null, false)).toBeNull();
+    expect(scrollRestoreDelta(home, 4, 17127, 9, 18000, true)).toBeNull();
+    expect(scrollRestoreDelta(null, 4, 17127, 9, 18000, false)).toBeNull();
   });
 });
 

@@ -63,6 +63,59 @@ export function pickReleaseAnchor(
   return { index: first.index, key: first.key };
 }
 
+/** Scroll offset and document start of the row that was settled before a switch. */
+export type ScrollHome = {
+  index: number;
+  scrollTop: number;
+  /** Row switched to when this offset was saved. */
+  away: number | null;
+  /** Document start of `index` at save time, before that switch resized rows. */
+  start: number;
+};
+
+/**
+ * How much to add to `scrollBefore` so `home.index` returns to the screen
+ * position it had when `home` was saved.
+ *
+ * `home.away` is the row we switched to when that offset was saved. Coming
+ * back means leaving that row for `home.index` — a later, unrelated visit
+ * does not qualify, or a stale index would yank scroll. The clip may already
+ * have finished. A real wheel leaves the pin in charge.
+ *
+ * `currentStart` is the row's document start now. A measurement that lands
+ * while the clip runs (estimated rows above the fold becoming real heights)
+ * moves that start, and the virtualizer already adds the same amount to
+ * `scrollTop`. Restoring the raw saved offset would undo that compensation
+ * and slide the row by the whole growth. The target keeps the growth:
+ * `home.scrollTop + (currentStart - home.start)`.
+ */
+export function scrollRestoreDelta(
+  home: ScrollHome | null,
+  anchor: number | null,
+  scrollBefore: number,
+  leavingIndex: number | null,
+  currentStart: number | null,
+  userScrolling: boolean,
+): number | null {
+  if (
+    userScrolling ||
+    home === null ||
+    anchor === null ||
+    leavingIndex === null ||
+    currentStart === null ||
+    home.away === null ||
+    leavingIndex !== home.away ||
+    anchor !== home.index ||
+    !Number.isFinite(home.scrollTop) ||
+    !Number.isFinite(home.start) ||
+    !Number.isFinite(scrollBefore) ||
+    !Number.isFinite(currentStart)
+  ) {
+    return null;
+  }
+  return home.scrollTop + (currentStart - home.start) - scrollBefore;
+}
+
 /**
  * How much to add to `scrollTop` so an anchor that moved by `shift`
  * (`newTop - oldTop`) returns to its previous viewport top.

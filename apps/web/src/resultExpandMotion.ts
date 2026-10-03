@@ -41,6 +41,71 @@ export function shouldAnimateMotion(input: {
 }
 
 /**
+ * Scrolling still blocks a fresh expand. If a clip is already running, the
+ * switch has to retarget it from the current visible height. Clearing the
+ * clip drops the row onto the final border in one frame.
+ * Key repeat, reduced motion, and a gap under {@link SWITCH_GAP_MS} still snap.
+ */
+export function shouldRetargetInFlight(input: {
+  play: boolean;
+  scrolling: boolean;
+  reducedMotion: boolean;
+  keyRepeat: boolean;
+  sinceLastMs: number | null;
+  waapi: boolean;
+  inFlight: boolean;
+}): boolean {
+  if (input.play) {
+    return true;
+  }
+  if (
+    !input.inFlight ||
+    !input.waapi ||
+    input.reducedMotion ||
+    input.keyRepeat ||
+    !input.scrolling
+  ) {
+    return false;
+  }
+  if (input.sinceLastMs !== null && input.sinceLastMs < SWITCH_GAP_MS) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Border the new clip is relative to.
+ *
+ * Mid-flight, `getBoundingClientRect` still reports the previous round's
+ * border when `Element.animate` runs. The inset is `border - visual`, so
+ * that stale border is only a few pixels and the next frame (border flipped)
+ * jumps by the whole delta. A remembered final border is used only while the
+ * live box has not left the previous one. After it has moved, the live box
+ * wins, including subpixels.
+ */
+export function pickLayoutHeight(
+  live: number,
+  previous: number,
+  target: number | null | undefined,
+): number {
+  if (
+    target === undefined ||
+    target === null ||
+    !Number.isFinite(target) ||
+    !(target > 0)
+  ) {
+    return live;
+  }
+  if (Math.abs(live - target) <= 1) {
+    return live;
+  }
+  if (Math.abs(live - previous) <= 1) {
+    return target;
+  }
+  return live;
+}
+
+/**
  * Bottom inset of `inset()`, in px. Negative shows overflow.
  *
  * CSS shorthand, same as margin: 1 value is all sides, 2 is top/bottom then
@@ -769,6 +834,30 @@ export function correctedTop(
   return row.top + (pendingStart - written);
 }
 
+/**
+ * Document shift of `docStart` that the inline `translateY` does not show yet.
+ * The virtualizer sometimes writes the new starts before the border box
+ * catches up, and sometimes the other way around. Only the missing part is
+ * added, so a start that already moved is not applied twice.
+ */
+function unseenDocShift(
+  docStart: number,
+  seen: number,
+  pieces: readonly { docStart: number; delta: number }[],
+): number {
+  let expected = 0;
+  for (const piece of pieces) {
+    if (piece.docStart < docStart - 0.5) {
+      expected += piece.delta;
+    }
+  }
+  if (Math.abs(expected) < 1) {
+    return 0;
+  }
+  const unseen = expected - seen;
+  return Math.abs(unseen) < 1 ? 0 : unseen;
+}
+
 export function startSwitchMotion(opts: {
   root: HTMLElement;
   registry: MotionRegistry;
@@ -787,23 +876,59 @@ export function startSwitchMotion(opts: {
   liveRows?: readonly MotionRow[];
   pendingStart: (rowEl: HTMLElement) => number | undefined;
   onCollapseSettled: (index: number) => void;
+  /**
+   * Final border for an opening or closing row. Used when the element still
+   * wears the previous round's border at the `animate` call.
+   */
+  targetBorder?: (hitIndex: number, opening: boolean) => number | undefined;
   animate?: AnimateFn;
 }): void {
   const animate = opts.animate ?? defaultAnimate;
   const scrollApplied = opts.scrollApplied ?? 0;
   const before = new Map(opts.capture.map((row) => [row.key, row]));
   const now = opts.liveRows ?? readMotionRows(opts.root);
+  const closing = new Set(opts.closing);
+  const finals = new Map<string, number>();
+  const layoutPieces: { docStart: number; delta: number }[] = [];
+  for (const row of now) {
+    const prev = before.get(row.key);
+    const isOpen = row.hitIndex !== null && row.hitIndex === opts.opening;
+    const isClose = row.hitIndex !== null && closing.has(row.hitIndex);
+    let finalBorder = row.borderHeight;
+    if (prev !== undefined && row.hitIndex !== null && (isOpen || isClose)) {
+      finalBorder = pickLayoutHeight(
+        row.borderHeight,
+        prev.borderHeight,
+        opts.targetBorder?.(row.hitIndex, isOpen),
+      );
+      const delta = finalBorder - prev.borderHeight;
+      if (Math.abs(delta) >= 0.5) {
+        layoutPieces.push({ docStart: prev.docStart, delta });
+      }
+    }
+    finals.set(row.key, finalBorder);
+  }
   // Read every row's visual top before any animate(). A write between
   // getBoundingClientRect calls forces a layout per row on a long list.
   const visualTop = new Map<string, number>();
   for (const row of now) {
-    visualTop.set(
-      row.key,
-      correctedTop(row, opts.pendingStart(row.rowEl)) - scrollApplied,
-    );
+    const prev = before.get(row.key);
+    const pending = opts.pendingStart(row.rowEl);
+    const written = parseTranslateY(row.rowEl.style.transform);
+    // correctedTop already moves the row onto the pending start. Count that
+    // as seen, or a start that is about to be written is applied twice.
+    const pendingDelta =
+      pending !== undefined && written !== null ? pending - written : 0;
+    const measured = correctedTop(row, pending) - scrollApplied;
+    const seen =
+      prev !== undefined ? row.docStart - prev.docStart + pendingDelta : 0;
+    const unseen =
+      prev !== undefined
+        ? unseenDocShift(prev.docStart, seen, layoutPieces)
+        : 0;
+    visualTop.set(row.key, measured + unseen);
   }
   const causes: HeightCause[] = [];
-  const closing = new Set(opts.closing);
   for (const row of now) {
     if (row.hitIndex === null) {
       continue;
@@ -817,10 +942,11 @@ export function startSwitchMotion(opts: {
     if (!isOpen && !isClose) {
       continue;
     }
+    const layoutHeight = finals.get(row.key) ?? row.borderHeight;
     causes.push({
       start: prev.docStart,
-      layoutDelta: row.borderHeight - prev.borderHeight,
-      visualDelta: row.borderHeight - prev.visualHeight,
+      layoutDelta: layoutHeight - prev.borderHeight,
+      visualDelta: layoutHeight - prev.visualHeight,
       opening: isOpen,
     });
   }
@@ -901,7 +1027,8 @@ export function startSwitchMotion(opts: {
     if (!isOpen && !isClose) {
       continue;
     }
-    const range = clipRange(row.borderHeight, prev.visualHeight);
+    const layoutHeight = finals.get(row.key) ?? row.borderHeight;
+    const range = clipRange(layoutHeight, prev.visualHeight);
     if (range !== null) {
       const clipDuration = isOpen ? EXPAND_MS : COLLAPSE_MS;
       const clipEasing = isOpen ? EXPAND_EASE : COLLAPSE_EASE;
@@ -918,7 +1045,7 @@ export function startSwitchMotion(opts: {
         row.clipEl,
         clipAnim,
         prev.visualHeight,
-        row.borderHeight,
+        layoutHeight,
         clipDuration,
         clipEasing,
       );
