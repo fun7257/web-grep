@@ -8,6 +8,7 @@ import {
   COLLAPSE_EASE,
   COLLAPSE_MS,
   clipRange,
+  clipVisualHeight,
   collapseHeadDiffers,
   EXPAND_EASE,
   EXPAND_MS,
@@ -15,7 +16,10 @@ import {
   MotionRegistry,
   parseClipBottom,
   planTranslatePieces,
+  rememberClip,
+  sampleEasing,
   predictScrollDelta,
+  readMotionRows,
   shouldAnimateMotion,
   snapshotForSwitch,
   startSwitchMotion,
@@ -59,7 +63,20 @@ describe("clip range", () => {
   it("reads the visible height from the bottom inset", () => {
     expect(parseClipBottom("inset(0px 0px 40px 0px)")).toBe(40);
     expect(parseClipBottom("inset(0px 0px -12.5px 0px)")).toBe(-12.5);
+    expect(parseClipBottom("inset(0px)")).toBe(0);
+    expect(parseClipBottom("inset(-8px)")).toBe(-8);
+    expect(parseClipBottom("inset(12px 4px)")).toBe(12);
+    expect(parseClipBottom("inset(0px 0px -418.047px)")).toBe(-418.047);
+    expect(parseClipBottom("inset(1px 2px 3.5px 4px)")).toBe(3.5);
+    expect(parseClipBottom("inset(0px 0px -12px 0px round 4px)")).toBe(-12);
+    expect(parseClipBottom("inset(6px round 2px 4px)")).toBe(6);
+    expect(parseClipBottom("inset(0px 0px -418.047px)")).toBe(-418.047);
+    expect(visualHeight(76, parseClipBottom("inset(0px 0px -418.047px)"))).toBeCloseTo(
+      494.047,
+      3,
+    );
     expect(parseClipBottom("none")).toBeNull();
+    expect(parseClipBottom("inset(10%)")).toBeNull();
     expect(visualHeight(50, -190)).toBe(240);
     expect(visualHeight(240, 190)).toBe(50);
     expect(visualHeight(80, null)).toBe(80);
@@ -169,22 +186,265 @@ describe("translatePlan", () => {
     opening: true,
   });
 
-  it("locks a closing row and the rows above it to the collapse clock", () => {
+  it("keeps a closing row and the rows above a collapse on the collapse clock", () => {
     const causes = [collapse(0, -479), expand(500, 479)];
-    expect(translatePlan(-479, true, 0, 500, causes, -479)).toEqual([
+    expect(translatePlan(-479, 0, 500, causes, -479, "close")).toEqual([
       { fromY: -479, duration: COLLAPSE_MS, easing: COLLAPSE_EASE },
     ]);
-    expect(translatePlan(-479, true, 36, 500, causes, -479)).toEqual([
+    expect(translatePlan(-479, 36, 500, causes, -479, "none")).toEqual([
       { fromY: -479, duration: COLLAPSE_MS, easing: COLLAPSE_EASE },
     ]);
-    expect(translatePlan(0.2, true, 0, 500, causes, 0)).toEqual([]);
+    expect(translatePlan(0.2, 0, 500, causes, 0, "none")).toEqual([]);
+  });
+
+  it("moves a closing row under an expand on the expand clock", () => {
+    const causes = [expand(30, 460), collapse(70, -460)];
+    expect(translatePlan(-460, 70, 30, causes, 0, "close")).toEqual([
+      { fromY: -460, duration: EXPAND_MS, easing: EXPAND_EASE },
+    ]);
+    expect(translatePlan(0, 30, 30, causes, 0, "open")).toEqual([]);
   });
 
   it("still splits a row below an expand onto the expand clock", () => {
     const causes = [collapse(0, -150), expand(200, 150)];
-    expect(translatePlan(-150, false, 500, 200, causes, -150)).toEqual([
+    expect(translatePlan(-150, 500, 200, causes, -150, "none")).toEqual([
       { fromY: -150, duration: EXPAND_MS, easing: EXPAND_EASE },
     ]);
+  });
+});
+
+describe("adjacent boxes stay seamed on both clocks", () => {
+  type RowSpec = {
+    index: number;
+    start: number;
+    height: number;
+    nextHeight?: number;
+  };
+
+  function translateAt(
+    pieces: { fromY: number; duration: number; easing: string }[],
+    t: number,
+  ): number {
+    let y = 0;
+    for (const piece of pieces) {
+      const linear = piece.duration > 0 ? Math.min(1, t / piece.duration) : 1;
+      y += piece.fromY * (1 - sampleEasing(piece.easing, linear));
+    }
+    return y;
+  }
+
+  function visualAt(row: {
+    fromVis: number;
+    finalHeight: number;
+    own: "open" | "close" | "none";
+  }, t: number): number {
+    if (row.own === "none") {
+      return row.finalHeight;
+    }
+    const duration = row.own === "open" ? EXPAND_MS : COLLAPSE_MS;
+    const easing = row.own === "open" ? EXPAND_EASE : COLLAPSE_EASE;
+    const eased = sampleEasing(easing, Math.min(1, t / duration));
+    return row.fromVis + (row.finalHeight - row.fromVis) * eased;
+  }
+
+  function seam(
+    rows: RowSpec[],
+    opening: number | null,
+    closing: number[],
+    anchor: number,
+    scrollTop: number,
+  ): { maxOverlap: number; maxGap: number; anchorDrift: number } {
+    const closingSet = new Set(closing);
+    let cursor = 0;
+    const placed = rows.map((row) => {
+      const finalHeight =
+        row.index === opening || closingSet.has(row.index)
+          ? (row.nextHeight ?? row.height)
+          : row.height;
+      const placedRow = { ...row, finalStart: cursor, finalHeight };
+      cursor += finalHeight;
+      return placedRow;
+    });
+    const causes: HeightCause[] = [];
+    for (const row of rows) {
+      if (row.index === opening) {
+        causes.push({
+          start: row.start,
+          layoutDelta: (row.nextHeight ?? row.height) - row.height,
+          visualDelta: (row.nextHeight ?? row.height) - row.height,
+          opening: true,
+        });
+      } else if (closingSet.has(row.index)) {
+        causes.push({
+          start: row.start,
+          layoutDelta: (row.nextHeight ?? row.height) - row.height,
+          visualDelta: (row.nextHeight ?? row.height) - row.height,
+          opening: false,
+        });
+      }
+    }
+    const anchorRow = rows.find((row) => row.index === anchor);
+    const anchorStart = anchorRow?.start ?? 0;
+    const scroll = predictScrollDelta(
+      scrollTop,
+      8000,
+      anchorStart,
+      causes.map((cause) => ({
+        hitIndex: 0,
+        docStart: cause.start,
+        layoutDelta: cause.layoutDelta,
+      })),
+    );
+    const animated = placed.map((row) => {
+      const own: "open" | "close" | "none" =
+        row.index === opening ? "open" : closingSet.has(row.index) ? "close" : "none";
+      const visualDy = row.start - (row.finalStart - scroll);
+      return {
+        ...row,
+        own,
+        fromVis: row.height,
+        newTop: row.finalStart - scroll,
+        pieces: translatePlan(visualDy, row.start, anchorStart, causes, scroll, own),
+      };
+    });
+    let maxOverlap = 0;
+    let maxGap = 0;
+    const anchorAnim = animated.find((row) => row.index === anchor);
+    const anchor0 = anchorAnim === undefined ? 0 : anchorAnim.newTop + translateAt(anchorAnim.pieces, 0);
+    let anchorDrift = 0;
+    for (let t = 0; t <= 320; t += 5) {
+      if (anchorAnim !== undefined) {
+        const top = anchorAnim.newTop + translateAt(anchorAnim.pieces, t);
+        anchorDrift = Math.max(anchorDrift, Math.abs(top - anchor0));
+      }
+      for (let i = 0; i < animated.length - 1; i += 1) {
+        const upper = animated[i];
+        const lower = animated[i + 1];
+        if (upper === undefined || lower === undefined) {
+          continue;
+        }
+        const bottom = upper.newTop + translateAt(upper.pieces, t) + visualAt(upper, t);
+        const top = lower.newTop + translateAt(lower.pieces, t);
+        const gap = top - bottom;
+        maxGap = Math.max(maxGap, gap);
+        maxOverlap = Math.max(maxOverlap, -gap);
+      }
+    }
+    return { maxOverlap, maxGap, anchorDrift };
+  }
+
+  it("stays within 1px switching up, down, across rows, and at scroll 0", () => {
+    const stack: RowSpec[] = [
+      { index: 0, start: 0, height: 28 },
+      { index: 1, start: 28, height: 76, nextHeight: 520 },
+      { index: 2, start: 104, height: 76 },
+      { index: 3, start: 180, height: 76 },
+      { index: 4, start: 256, height: 540, nextHeight: 76 },
+      { index: 5, start: 796, height: 76 },
+    ];
+    const down: RowSpec[] = [
+      { index: 0, start: 0, height: 28 },
+      { index: 1, start: 28, height: 540, nextHeight: 76 },
+      { index: 2, start: 568, height: 76, nextHeight: 500 },
+      { index: 3, start: 644, height: 76 },
+    ];
+    const cases = [
+      seam(stack, 1, [4], 1, 2000),
+      seam(down, 2, [1], 2, 2000),
+      seam(down, 2, [1], 2, 0),
+      seam(
+        [
+          { index: 10, start: 0, height: 80, nextHeight: 400 },
+          { index: 11, start: 80, height: 80 },
+          { index: 12, start: 160, height: 420, nextHeight: 80 },
+        ],
+        10,
+        [12],
+        10,
+        400,
+      ),
+    ];
+    for (const item of cases) {
+      expect(item.maxOverlap).toBeLessThanOrEqual(1);
+      expect(item.maxGap).toBeLessThanOrEqual(1);
+    }
+    expect(cases[0]?.anchorDrift).toBeLessThanOrEqual(1);
+    expect(cases[1]?.anchorDrift).toBeLessThanOrEqual(1);
+  });
+
+  it("stays seamed when a collapse retargets a mid-flight expand", () => {
+    const causes: HeightCause[] = [
+      { start: 0, layoutDelta: 424, visualDelta: 424, opening: true },
+      { start: 76, layoutDelta: 76 - 500, visualDelta: 76 - 220, opening: false },
+    ];
+    const rows = [
+      { start: 0, finalTop: 0, fromVis: 76, finalHeight: 500, own: "open" as const, visualDy: 0 },
+      { start: 76, finalTop: 500, fromVis: 220, finalHeight: 76, own: "close" as const, visualDy: 76 - 500 },
+      { start: 576, finalTop: 576, fromVis: 76, finalHeight: 76, own: "none" as const, visualDy: 296 - 576 },
+    ];
+    const animated = rows.map((row) => ({
+      ...row,
+      pieces: translatePlan(row.visualDy, row.start, 0, causes, 0, row.own),
+    }));
+    let maxOverlap = 0;
+    let maxGap = 0;
+    for (let t = 0; t <= 320; t += 5) {
+      for (let i = 0; i < animated.length - 1; i += 1) {
+        const upper = animated[i];
+        const lower = animated[i + 1];
+        if (upper === undefined || lower === undefined) {
+          continue;
+        }
+        const bottom =
+          upper.finalTop + translateAt(upper.pieces, t) + visualAt(upper, t);
+        const top = lower.finalTop + translateAt(lower.pieces, t);
+        const gap = top - bottom;
+        maxGap = Math.max(maxGap, gap);
+        maxOverlap = Math.max(maxOverlap, -gap);
+      }
+    }
+    expect(maxOverlap).toBeLessThanOrEqual(1);
+    expect(maxGap).toBeLessThanOrEqual(1);
+  });
+});
+
+describe("clipVisualHeight", () => {
+  it("reconstructs the visible height from eased progress without reading style", () => {
+    const el = document.createElement("div");
+    const anim = {
+      cancel() {},
+      onfinish: null,
+      oncancel: null,
+      playState: "running",
+      effect: {
+        getComputedTiming: () => ({ progress: 0.25 }),
+      },
+    };
+    rememberClip(el, anim, 535, 76, COLLAPSE_MS, COLLAPSE_EASE);
+    expect(clipVisualHeight(el)).toBeCloseTo(535 + (76 - 535) * 0.25, 5);
+    anim.playState = "idle";
+    expect(clipVisualHeight(el)).toBeNull();
+  });
+
+  it("applies the easing when only currentTime is available", () => {
+    const el = document.createElement("div");
+    const linear = 40 / EXPAND_MS;
+    rememberClip(
+      el,
+      {
+        cancel() {},
+        onfinish: null,
+        oncancel: null,
+        playState: "running",
+        currentTime: 40,
+      },
+      76,
+      520,
+      EXPAND_MS,
+      EXPAND_EASE,
+    );
+    const expected = 76 + (520 - 76) * sampleEasing(EXPAND_EASE, linear);
+    expect(clipVisualHeight(el)).toBeCloseTo(expected, 5);
   });
 });
 
@@ -269,6 +529,76 @@ describe("MotionRegistry", () => {
     registry.stop(el);
     late?.();
     expect(settled).toBe(1);
+  });
+});
+
+describe("readMotionRows", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  it("uses a cached clip instead of the collapsed border height", () => {
+    const root = document.createElement("div");
+    const row = document.createElement("div");
+    row.className = "result-virtual-row";
+    row.dataset.rowKey = "hit:0";
+    row.style.transform = "translateY(0px)";
+    const motion = document.createElement("div");
+    motion.className = "result-row-motion";
+    const button = document.createElement("button");
+    button.className = "result-log";
+    button.dataset.hitIndex = "0";
+    button.getBoundingClientRect = () => new DOMRect(0, 10, 100, 76);
+    const spy = vi.spyOn(window, "getComputedStyle").mockImplementation(() => {
+      return { clipPath: "inset(0px 0px -418.047px)" } as CSSStyleDeclaration;
+    });
+    motion.append(button);
+    row.append(motion);
+    root.append(row);
+    document.body.append(root);
+    rememberClip(
+      button,
+      {
+        cancel() {},
+        onfinish: null,
+        oncancel: null,
+        playState: "running",
+        effect: { getComputedTiming: () => ({ progress: 0.1 }) },
+      },
+      535,
+      76,
+      COLLAPSE_MS,
+      COLLAPSE_EASE,
+    );
+    const rows = readMotionRows(root);
+    expect(rows[0]?.borderHeight).toBe(76);
+    expect(rows[0]?.visualHeight).toBeCloseTo(535 + (76 - 535) * 0.1, 4);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("parses a three-value computed inset when nothing is cached", () => {
+    const root = document.createElement("div");
+    const row = document.createElement("div");
+    row.className = "result-virtual-row";
+    row.dataset.rowKey = "hit:1";
+    row.style.transform = "translateY(0px)";
+    const motion = document.createElement("div");
+    motion.className = "result-row-motion";
+    const button = document.createElement("button");
+    button.className = "result-log";
+    button.dataset.hitIndex = "1";
+    button.getBoundingClientRect = () => new DOMRect(0, 10, 100, 76);
+    button.getAnimations = () => [{ playState: "running" } as Animation];
+    vi.spyOn(window, "getComputedStyle").mockImplementation(() => {
+      return { clipPath: "inset(0px 0px -418.047px)" } as CSSStyleDeclaration;
+    });
+    motion.append(button);
+    row.append(motion);
+    root.append(row);
+    document.body.append(root);
+    const rows = readMotionRows(root);
+    expect(rows[0]?.visualHeight).toBeCloseTo(494.047, 3);
   });
 });
 

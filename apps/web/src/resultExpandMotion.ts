@@ -40,17 +40,107 @@ export function shouldAnimateMotion(input: {
   return true;
 }
 
-/** Bottom inset of `inset(top right bottom left)`, in px. Negative shows overflow. */
+/**
+ * Bottom inset of `inset()`, in px. Negative shows overflow.
+ *
+ * CSS shorthand, same as margin: 1 value is all sides, 2 is top/bottom then
+ * left/right, 3 is top, left/right, bottom, 4 is top, right, bottom, left.
+ * Anything after `round` is a corner radius and is ignored. Chromium's
+ * computed style drops repeated edges, so a four-value animation often comes
+ * back as three values (`inset(0px 0px -418px)`).
+ */
 export function parseClipBottom(clipPath: string): number | null {
-  const match =
-    /inset\(\s*([-.\d]+)px\s+([-.\d]+)px\s+([-.\d]+)px\s+([-.\d]+)px\s*\)/.exec(
-      clipPath,
-    );
-  if (match?.[3] === undefined) {
+  const open = /inset\(/i.exec(clipPath);
+  if (open === null) {
     return null;
   }
-  const value = Number(match[3]);
-  return Number.isFinite(value) ? value : null;
+  let rest = clipPath.slice(open.index + open[0].length);
+  const roundAt = /(?:^|\s)round\b/i.exec(rest);
+  if (roundAt !== null) {
+    rest = rest.slice(0, roundAt.index);
+  }
+  const close = rest.indexOf(")");
+  if (close !== -1) {
+    rest = rest.slice(0, close);
+  }
+  const nums = [...rest.matchAll(/(-?(?:\d+\.?\d*|\.\d+))px/gi)].map((match) =>
+    Number(match[1]),
+  );
+  if (nums.length < 1 || nums.length > 4) {
+    return null;
+  }
+  if (nums.some((value) => !Number.isFinite(value))) {
+    return null;
+  }
+  const bottom = nums.length <= 2 ? nums[0] : nums[2];
+  return bottom === undefined ? null : bottom;
+}
+
+/** Easing progress at linear time `t` in 0..1. Named curves and `cubic-bezier()`. */
+export function sampleEasing(easing: string, t: number): number {
+  const clamped = Math.min(1, Math.max(0, t));
+  if (easing === "linear") {
+    return clamped;
+  }
+  if (easing === "ease-out") {
+    return sampleCubic(0, 0, 0.58, 1, clamped);
+  }
+  if (easing === "ease-in") {
+    return sampleCubic(0.42, 0, 1, 1, clamped);
+  }
+  if (easing === "ease-in-out") {
+    return sampleCubic(0.42, 0, 0.58, 1, clamped);
+  }
+  if (easing === "ease") {
+    return sampleCubic(0.25, 0.1, 0.25, 1, clamped);
+  }
+  const match =
+    /cubic-bezier\(\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*,\s*([-\d.]+)\s*\)/.exec(
+      easing,
+    );
+  if (
+    match?.[1] === undefined ||
+    match[2] === undefined ||
+    match[3] === undefined ||
+    match[4] === undefined
+  ) {
+    return clamped;
+  }
+  return sampleCubic(
+    Number(match[1]),
+    Number(match[2]),
+    Number(match[3]),
+    Number(match[4]),
+    clamped,
+  );
+}
+
+function sampleCubic(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  t: number,
+): number {
+  const cx = 3 * x1;
+  const bx = 3 * (x2 - x1) - cx;
+  const ax = 1 - cx - bx;
+  const cy = 3 * y1;
+  const by = 3 * (y2 - y1) - cy;
+  const ay = 1 - cy - by;
+  const sampleX = (u: number) => ((ax * u + bx) * u + cx) * u;
+  const sampleY = (u: number) => ((ay * u + by) * u + cy) * u;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 24; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (sampleX(mid) < t) {
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+  return sampleY((lo + hi) / 2);
 }
 
 /** Visible height. A positive bottom inset hides pixels; a negative one reveals overflow. */
@@ -93,8 +183,58 @@ export type HeightCause = {
   start: number;
   /** `newLayoutHeight - oldLayoutHeight`. Positive when the row grew. */
   layoutDelta: number;
+  /**
+   * `newLayoutHeight - oldVisualHeight`. Equals `layoutDelta` when the row
+   * was settled. Mid-flight, the clip follows this and the layout shift
+   * follows `layoutDelta`.
+   */
+  visualDelta?: number;
   opening: boolean;
 };
+
+export type EaseClock = {
+  duration: number;
+  easing: string;
+};
+
+export function clockFor(opening: boolean): EaseClock {
+  return opening
+    ? { duration: EXPAND_MS, easing: EXPAND_EASE }
+    : { duration: COLLAPSE_MS, easing: COLLAPSE_EASE };
+}
+
+/**
+ * Clock for the part of `visualDy` that no height change above this row
+ * explains (scroll moving the row itself, or a subpixel leftover).
+ * A changing row uses its own clip clock. Any other row uses the nearest
+ * cause above it, so it stays glued to that edge.
+ */
+export function residualClock(
+  own: "open" | "close" | "none",
+  causes: readonly HeightCause[],
+  rowStart: number,
+): EaseClock {
+  if (own === "open" || own === "close") {
+    return clockFor(own === "open");
+  }
+  let nearest: HeightCause | undefined;
+  let topmost: HeightCause | undefined;
+  for (const cause of causes) {
+    if (topmost === undefined || cause.start < topmost.start) {
+      topmost = cause;
+    }
+    if (cause.start < rowStart - 0.5) {
+      if (nearest === undefined || cause.start > nearest.start) {
+        nearest = cause;
+      }
+    }
+  }
+  const follow = nearest ?? topmost;
+  if (follow === undefined) {
+    return clockFor(false);
+  }
+  return clockFor(follow.opening);
+}
 
 export type TranslatePiece = {
   fromY: number;
@@ -118,6 +258,7 @@ export function planTranslatePieces(
   anchorStart: number,
   causes: readonly HeightCause[],
   scrollDelta: number,
+  residualTiming?: EaseClock,
 ): TranslatePiece[] {
   const aboveAnchor = causes.filter((cause) => cause.start < anchorStart - 0.5);
   const rawAnchor = aboveAnchor.reduce(
@@ -128,25 +269,28 @@ export function planTranslatePieces(
   const pieces: TranslatePiece[] = [];
   let explained = 0;
   for (const cause of causes) {
-    if (Math.abs(cause.layoutDelta) < 0.5) {
+    const shift = cause.visualDelta ?? cause.layoutDelta;
+    if (Math.abs(cause.layoutDelta) < 0.5 && Math.abs(shift) < 0.5) {
       continue;
     }
-    const docPart = cause.start < rowStart - 0.5 ? cause.layoutDelta : 0;
-    // Scroll is a one-shot. It only cancels layout shift for rows the cause
-    // actually pushed. A row above the cause just rides the scroll.
+    if (cause.start >= rowStart - 0.5) {
+      continue;
+    }
+    // Scroll is a one-shot of the layout shift. The animated part follows
+    // the visible edge (`shift`), so a mid-flight clip and the rows under
+    // it stay on one clock.
     const scrollPart =
-      docPart !== 0 && cause.start < anchorStart - 0.5
-        ? cause.layoutDelta * scale
-        : 0;
-    const fromY = -(docPart - scrollPart);
+      cause.start < anchorStart - 0.5 ? cause.layoutDelta * scale : 0;
+    const fromY = -(shift - scrollPart);
     if (Math.abs(fromY) < 0.5) {
       continue;
     }
     explained += fromY;
+    const clock = clockFor(cause.opening);
     pieces.push({
       fromY,
-      duration: cause.opening ? EXPAND_MS : COLLAPSE_MS,
-      easing: cause.opening ? EXPAND_EASE : COLLAPSE_EASE,
+      duration: clock.duration,
+      easing: clock.easing,
     });
   }
   const residual = visualDy - explained;
@@ -157,10 +301,14 @@ export function planTranslatePieces(
       }
       return best;
     }, undefined);
-    pieces.push({
-      fromY: residual,
+    const clock = residualTiming ?? {
       duration: longest?.duration ?? (residual > 0 ? COLLAPSE_MS : EXPAND_MS),
       easing: longest?.easing ?? (residual > 0 ? COLLAPSE_EASE : EXPAND_EASE),
+    };
+    pieces.push({
+      fromY: residual,
+      duration: clock.duration,
+      easing: clock.easing,
     });
   }
   return pieces;
@@ -217,32 +365,30 @@ export function affectedKeys(
 /**
  * Translate keyframes for one row.
  *
- * A closing row's clip runs on the collapse clock. Its translate has to use
- * that same clock or the bottom edge drifts through the row below. Rows above
- * the change use it too: scroll has already parked them at the final layout
- * position, and they must slide back with the closing row's top. Everyone
- * else keeps the per-cause split (collapse 170ms and expand 240ms together).
+ * Each height change pushes the rows under it on that change's own clock
+ * (expand 240ms, collapse 170ms). A closing row under an opening row therefore
+ * follows the 240ms edge, while its own clip still shrinks on 170ms — the
+ * next row picks up that 170ms piece. Putting the whole visual delta on the
+ * collapse clock makes the opening clip run ahead and the two boxes overlap.
+ *
+ * What those pieces do not explain (scroll sliding this row, a mid-flight
+ * leftover) uses `own`'s clip clock, or the cause this row is attached to.
  */
 export function translatePlan(
   visualDy: number,
-  aboveOrClosing: boolean,
   rowStart: number,
   anchorStart: number,
   causes: readonly HeightCause[],
   scrollDelta: number,
+  own: "open" | "close" | "none" = "none",
 ): TranslatePiece[] {
-  if (aboveOrClosing) {
-    if (Math.abs(visualDy) < 0.5) {
-      return [];
-    }
-    return [{ fromY: visualDy, duration: COLLAPSE_MS, easing: COLLAPSE_EASE }];
-  }
   return planTranslatePieces(
     visualDy,
     rowStart,
     anchorStart,
     causes,
     scrollDelta,
+    residualClock(own, causes, rowStart),
   );
 }
 
@@ -274,11 +420,18 @@ export function collapseHeadDiffers(
   );
 }
 
+export type ComputedTimingLike = {
+  progress?: number | null;
+  currentTime?: number | null;
+};
+
 export type AnimLike = {
   cancel: () => void;
   onfinish: (() => void) | null;
   oncancel: (() => void) | null;
   playState?: string;
+  currentTime?: number | null;
+  effect?: { getComputedTiming?: () => ComputedTimingLike } | null;
 };
 
 export type AnimateFn = (
@@ -412,6 +565,75 @@ export type MotionRow = {
   visualHeight: number;
 };
 
+type ClipTrack = {
+  fromHeight: number;
+  toHeight: number;
+  duration: number;
+  easing: string;
+  anim: AnimLike;
+};
+
+/** Clip parameters for the element currently animating. Avoids computed style. */
+const clipTracks = new WeakMap<HTMLElement, ClipTrack>();
+
+export function rememberClip(
+  el: HTMLElement,
+  anim: AnimLike,
+  fromHeight: number,
+  toHeight: number,
+  duration: number,
+  easing: string,
+): void {
+  clipTracks.set(el, { fromHeight, toHeight, duration, easing, anim });
+}
+
+/**
+ * Visible height from the clip we started, using the animation's eased
+ * progress. `getComputedTiming().progress` is already eased. `currentTime`
+ * is linear and still needs the curve. Returns null when this element has
+ * no live clip, so the caller can fall back to the inset string.
+ */
+export function clipVisualHeight(el: HTMLElement): number | null {
+  const track = clipTracks.get(el);
+  if (track === undefined) {
+    return null;
+  }
+  const progress = clipProgress(track);
+  if (progress === null) {
+    return null;
+  }
+  return track.fromHeight + (track.toHeight - track.fromHeight) * progress;
+}
+
+function clipProgress(track: ClipTrack): number | null {
+  const { anim } = track;
+  const state = anim.playState;
+  if (state === "finished") {
+    return 1;
+  }
+  if (state === "idle" || state === "canceled" || state === "cancelled") {
+    return null;
+  }
+  const timing = anim.effect?.getComputedTiming?.();
+  if (
+    timing !== undefined &&
+    typeof timing.progress === "number" &&
+    Number.isFinite(timing.progress)
+  ) {
+    return timing.progress;
+  }
+  const current =
+    typeof anim.currentTime === "number"
+      ? anim.currentTime
+      : typeof timing?.currentTime === "number"
+        ? timing.currentTime
+        : null;
+  if (current === null || !(track.duration > 0)) {
+    return null;
+  }
+  return sampleEasing(track.easing, current / track.duration);
+}
+
 /** Inline clip when nothing is running; computed style only while a clip is in flight. */
 function clipBottomOf(el: HTMLElement): number | null {
   const inline = el.style.clipPath;
@@ -465,7 +687,9 @@ export function readMotionRows(root: HTMLElement): MotionRow[] {
         : `idx:${rowEl.dataset.index ?? ""}`);
     const rect = visualEl.getBoundingClientRect();
     const docStart = parseTranslateY(rowEl.style.transform) ?? 0;
-    const clipBottom = clipEl === null ? null : clipBottomOf(clipEl);
+    const tracked = clipEl === null ? null : clipVisualHeight(clipEl);
+    const clipBottom =
+      tracked === null && clipEl !== null ? clipBottomOf(clipEl) : null;
     out.push({
       key,
       hitIndex,
@@ -475,7 +699,7 @@ export function readMotionRows(root: HTMLElement): MotionRow[] {
       top: rect.top,
       docStart,
       borderHeight: rect.height,
-      visualHeight: visualHeight(rect.height, clipBottom),
+      visualHeight: tracked ?? visualHeight(rect.height, clipBottom),
     });
   }
   return out;
@@ -596,6 +820,7 @@ export function startSwitchMotion(opts: {
     causes.push({
       start: prev.docStart,
       layoutDelta: row.borderHeight - prev.borderHeight,
+      visualDelta: row.borderHeight - prev.visualHeight,
       opening: isOpen,
     });
   }
@@ -637,13 +862,14 @@ export function startSwitchMotion(opts: {
       continue;
     }
     const token = opts.registry.token(row.rowEl);
+    const openingSelf = row.hitIndex !== null && row.hitIndex === opts.opening;
     const pieces = translatePlan(
       dy,
-      above || isClose,
       prev?.docStart ?? row.docStart,
       anchorStart,
       causes,
       opts.scrollDelta,
+      openingSelf ? "open" : isClose ? "close" : "none",
     );
     for (const piece of pieces) {
       opts.registry.track(
@@ -677,18 +903,29 @@ export function startSwitchMotion(opts: {
     }
     const range = clipRange(row.borderHeight, prev.visualHeight);
     if (range !== null) {
+      const clipDuration = isOpen ? EXPAND_MS : COLLAPSE_MS;
+      const clipEasing = isOpen ? EXPAND_EASE : COLLAPSE_EASE;
+      const clipAnim = animate(
+        row.clipEl,
+        [{ clipPath: range.from }, { clipPath: range.to }],
+        {
+          duration: clipDuration,
+          easing: clipEasing,
+          fill: "both",
+        },
+      );
+      rememberClip(
+        row.clipEl,
+        clipAnim,
+        prev.visualHeight,
+        row.borderHeight,
+        clipDuration,
+        clipEasing,
+      );
       opts.registry.track(
         row.rowEl,
         token,
-        animate(
-          row.clipEl,
-          [{ clipPath: range.from }, { clipPath: range.to }],
-          {
-            duration: isOpen ? EXPAND_MS : COLLAPSE_MS,
-            easing: isOpen ? EXPAND_EASE : COLLAPSE_EASE,
-            fill: "both",
-          },
-        ),
+        clipAnim,
         "clip",
         isClose
           ? () => {
