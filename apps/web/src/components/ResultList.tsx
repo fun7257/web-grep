@@ -1,4 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
+
 import type { SseHit } from "@web-grep/shared";
 import {
   memo,
@@ -64,6 +65,7 @@ export const ResultList = memo(function ResultList({
   const [sortDir, setSortDir] = useState<Record<string, "asc" | "desc">>({});
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const [scrollTop, setScrollTop] = useState(0);
+  const scrollState = useRef(0);
   const [stickyH, setStickyH] = useState(FILE_ROW);
   const [swapPath, setSwapPath] = useState<string | null>(null);
   const stickyRef = useRef<HTMLDivElement>(null);
@@ -125,7 +127,10 @@ export const ResultList = memo(function ResultList({
     estimateSize: (index) =>
       rows[index]?.kind === "header" ? FILE_ROW : LOG_ROW,
     measureElement: (element) => {
-      const inner = element.firstElementChild as HTMLElement | null;
+      const inner =
+        element.querySelector<HTMLElement>("[data-hit-index]") ??
+        element.querySelector<HTMLElement>(".result-group-header") ??
+        (element.firstElementChild as HTMLElement | null);
       const height = (inner ?? element).getBoundingClientRect().height;
       const kind = rows[Number(element.getAttribute("data-index"))]?.kind;
       if (height <= 0) {
@@ -136,6 +141,7 @@ export const ResultList = memo(function ResultList({
       return Math.round(height);
     },
     overscan: 12,
+    useFlushSync: false,
     scrollPaddingStart: stickyH,
     initialRect: { width: 800, height: 600 },
     getItemKey: (index) => {
@@ -146,9 +152,45 @@ export const ResultList = memo(function ResultList({
       return row.kind === "header" ? `h:${row.path}` : `hit:${row.index}`;
     },
   });
+  // virtual-core reads this field on the instance. An option of the same
+  // name is stored and never consulted. resizeItem then compensates from
+  // the cached offset; if a newer scrollTop has not been observed yet, that
+  // write rewinds the jump. Skip only that stale case and keep the library's
+  // usual above-the-fold correction, which is what keeps a fast scroll stable.
+  virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (
+    item,
+    _delta,
+    instance,
+  ) => {
+    const el = instance.scrollElement;
+    if (el instanceof HTMLElement) {
+      const live = instance.options.horizontal ? el.scrollLeft : el.scrollTop;
+      const cached = instance.scrollOffset ?? live;
+      if (Math.abs(live - cached) > 1) {
+        return false;
+      }
+    }
+    const cache = instance as unknown as {
+      getScrollOffset(): number;
+      scrollAdjustments: number;
+    };
+    const offset = cache.getScrollOffset() + cache.scrollAdjustments;
+    if (!instance.itemSizeCache.has(item.key)) {
+      return item.start < offset;
+    }
+    return (
+      item.start + item.size <= offset &&
+      instance.scrollDirection !== "backward"
+    );
+  };
 
-  const { openIndexes, reportTruncation, settleStructurePin, prepareStructurePin } =
-    useResultExpand({
+  const {
+    openIndexes,
+    holdHeights,
+    reportTruncation,
+    settleStructurePin,
+    prepareStructurePin,
+  } = useResultExpand({
     listRef,
     virtualizer,
     hits,
@@ -156,6 +198,14 @@ export const ResultList = memo(function ResultList({
     structureKey,
     hitVirtualIndex: (hitIndex) =>
       rows.findIndex((row) => row.kind === "hit" && row.index === hitIndex),
+    commitScrollTop: (top) => {
+      if (top === scrollState.current) {
+        return false;
+      }
+      scrollState.current = top;
+      setScrollTop(top);
+      return true;
+    },
   });
 
   const virtualItems = virtualizer.getVirtualItems();
@@ -213,7 +263,16 @@ export const ResultList = memo(function ResultList({
       root.style.setProperty("--sticky-h", `${stickyH}px`);
     };
     const onScroll = (): void => {
-      setScrollTop(root.scrollTop);
+      // Motion writes scrollTop itself and publishes the value later.
+      if (root.dataset.motionPin === "1") {
+        return;
+      }
+      const next = root.scrollTop;
+      if (next === scrollState.current) {
+        return;
+      }
+      scrollState.current = next;
+      setScrollTop(next);
     };
     apply();
     onScroll();
@@ -232,6 +291,11 @@ export const ResultList = memo(function ResultList({
       return;
     }
     const apply = (): void => {
+      // A switch writes scrollTop, then must not read geometry again.
+      const scroller = listRef.current;
+      if (scroller !== null && scroller.dataset.motionPin === "1") {
+        return;
+      }
       const height = node.getBoundingClientRect().height;
       if (height > 0 && Math.abs(height - stickyH) > 0.5) {
         setStickyH(height);
@@ -243,7 +307,7 @@ export const ResultList = memo(function ResultList({
     return () => {
       observer.disconnect();
     };
-  }, [sticky?.path, sticky?.count, stickyH]);
+  }, [listRef, sticky?.path, sticky?.count, stickyH]);
 
   useLayoutEffect(() => {
     const path = sticky?.path ?? null;
@@ -268,6 +332,11 @@ export const ResultList = memo(function ResultList({
   }, [sticky?.path, sticky?.pushing]);
 
   useEffect(() => {
+    // A mid-flight return already restored scrollTop. scrollToIndex would
+    // snap the anchor to the viewport edge and leave it there.
+    if (listRef.current?.dataset.motionLockScroll === "1") {
+      return;
+    }
     const idx = rows.findIndex(
       (row) => row.kind === "hit" && row.index === selectedIndex,
     );
@@ -387,54 +456,64 @@ export const ResultList = memo(function ResultList({
             if (row === undefined) {
               return null;
             }
+            const hold =
+              row.kind === "hit"
+                ? holdHeights.find((itemHold) => itemHold.index === row.index)
+                : undefined;
             return (
               <div
                 key={item.key}
                 data-index={item.index}
+                data-row-key={String(item.key)}
                 ref={virtualizer.measureElement}
-                className={
-                  row.kind === "header"
-                    ? "result-virtual-row is-header"
-                    : "result-virtual-row"
-                }
+                className={[
+                  "result-virtual-row",
+                  row.kind === "header" ? "is-header" : "",
+                  hold !== undefined ? "anim" : "",
+                ]
+                  .filter((name) => name !== "")
+                  .join(" ")}
                 style={{ transform: `translateY(${item.start}px)` }}
               >
-                {row.kind === "header" ? (
-                  <div
-                    className={
-                      item.start <= scrollTop
-                        ? "result-group-header is-stuck"
-                        : item.index === sticky?.enteringIndex
-                          ? "result-group-header is-entering"
-                          : "result-group-header"
-                    }
-                  >
-                    <GroupHeader
-                      path={row.path}
-                      count={row.count}
-                      expanded={!collapsed.has(row.path)}
-                      dir={dirOf(row.path)}
-                      onToggle={() => {
-                        toggleGroup(row.path);
-                      }}
-                      onSort={() => {
-                        sortGroup(row.path);
-                      }}
-                      t={t}
+                <div className="result-row-motion">
+                  {row.kind === "header" ? (
+                    <div
+                      className={
+                        item.start <= scrollTop
+                          ? "result-group-header is-stuck"
+                          : item.index === sticky?.enteringIndex
+                            ? "result-group-header is-entering"
+                            : "result-group-header"
+                      }
+                    >
+                      <GroupHeader
+                        path={row.path}
+                        count={row.count}
+                        expanded={!collapsed.has(row.path)}
+                        dir={dirOf(row.path)}
+                        onToggle={() => {
+                          toggleGroup(row.path);
+                        }}
+                        onSort={() => {
+                          sortGroup(row.path);
+                        }}
+                        t={t}
+                      />
+                    </div>
+                  ) : (
+                    <ResultHitButton
+                      hit={row.hit}
+                      index={row.index}
+                      selected={row.index === selectedIndex}
+                      open={openIndexes.has(row.index)}
+                      holdHeight={hold?.height ?? null}
+                      terms={terms}
+                      opts={opts}
+                      onSelect={onSelect}
+                      onTruncation={reportTruncation}
                     />
-                  </div>
-                ) : (
-                  <ResultHitButton
-                    hit={row.hit}
-                    index={row.index}
-                    selected={row.index === selectedIndex}
-                    open={openIndexes.has(row.index)}
-                    terms={terms}
-                    opts={opts}
-                    onSelect={onSelect}
-                    onTruncation={reportTruncation}
-                  />
-                )}
+                  )}
+                </div>
               </div>
             );
           })}

@@ -16,6 +16,7 @@ import {
   highlightSpans,
 } from "../highlight.ts";
 import { useLocale } from "../hooks/useLocale.ts";
+import { CROSSFADE_MS, collapseHeadDiffers } from "../resultExpandMotion.ts";
 import {
   clipLogLine,
   clipResultSnippets,
@@ -192,11 +193,26 @@ export function ResultHitText({
   );
 }
 
+/**
+ * Two-line clamp. Lengths outside this band are obvious at the result-list
+ * width; the layout effect still corrects the middle.
+ */
+function seedTruncation(text: string): boolean | null {
+  if (text.length >= 400) {
+    return true;
+  }
+  if (text.length <= 40) {
+    return false;
+  }
+  return null;
+}
+
 export const ResultHitButton = memo(function ResultHitButton({
   hit,
   index,
   selected,
   open,
+  holdHeight = null,
   terms = [],
   opts = DEFAULT_HL_OPTS,
   onSelect,
@@ -206,31 +222,88 @@ export const ResultHitButton = memo(function ResultHitButton({
   index: number;
   selected: boolean;
   open: boolean;
+  /** Collapsed layout box while the expanded text is still on screen. */
+  holdHeight?: number | null;
   terms?: HlTermInput[];
   opts?: HlOpts;
   onSelect: (index: number) => void;
-  onTruncation: (index: number, truncated: boolean) => void;
+  /** `remeasure` is set when this paint did not already show `truncated`. */
+  onTruncation: (
+    index: number,
+    truncated: boolean,
+    remeasure: boolean,
+  ) => void;
 }) {
   const { locale, t } = useLocale();
   const textRef = useRef<HTMLSpanElement>(null);
-  const [truncated, setTruncated] = useState<boolean | null>(null);
+  const [truncated, setTruncated] = useState<boolean | null>(() =>
+    seedTruncation(hit.text),
+  );
   const count = hit.text.length.toLocaleString(locale);
+  const holding = holdHeight != null && !open;
+  const expanded = open || holding;
+  const heldRef = useRef(false);
+
+  useLayoutEffect(() => {
+    const wasHolding = heldRef.current;
+    heldRef.current = holding;
+    if (!wasHolding || holding || open) {
+      return;
+    }
+    const { anchors } = lineAnchors(hit.text, terms, opts, hit.matches ?? []);
+    if (!collapseHeadDiffers(hit.text, anchors)) {
+      return;
+    }
+    const node = textRef.current;
+    if (node === null || typeof node.animate !== "function") {
+      return;
+    }
+    const anim = node.animate([{ opacity: 0 }, { opacity: 1 }], {
+      duration: CROSSFADE_MS,
+      easing: "ease-out",
+      fill: "both",
+    });
+    anim.oncancel = null;
+    anim.onfinish = () => {
+      anim.onfinish = null;
+      anim.cancel();
+    };
+    return () => {
+      anim.onfinish = null;
+      anim.oncancel = null;
+      anim.cancel();
+    };
+  }, [hit.matches, hit.text, holding, open, opts, terms]);
 
   useLayoutEffect(() => {
     const el = textRef.current;
     const read = (): void => {
       if (open) {
         // Remounted virtual rows lose local state. An open row is truncated.
-        setTruncated((prev) => (prev === true ? prev : true));
-        onTruncation(index, true);
+        // Dispatch only when the painted value changes. An equal update still
+        // occupies a lane, and a later switch then pays a second commit.
+        if (truncated !== true) {
+          setTruncated(true);
+        }
+        onTruncation(index, true, truncated !== true);
+        return;
+      }
+      // Lengths outside the middle band already seeded this state. Reading
+      // scrollHeight here forces a layout on every switch, before the list
+      // can write its one scroll correction.
+      const seeded = seedTruncation(hit.text);
+      if (seeded !== null && truncated === seeded) {
+        onTruncation(index, seeded, false);
         return;
       }
       if (el === null) {
         return;
       }
       const next = el.scrollHeight > el.clientHeight + 1;
-      setTruncated((prev) => (prev === next ? prev : next));
-      onTruncation(index, next);
+      if (truncated !== next) {
+        setTruncated(next);
+      }
+      onTruncation(index, next, truncated !== next);
     };
     read();
     if (open || el === null || typeof ResizeObserver !== "function") {
@@ -241,12 +314,12 @@ export const ResultHitButton = memo(function ResultHitButton({
     return () => {
       observer.disconnect();
     };
-  }, [hit.text, index, onTruncation, open]);
+  }, [hit.text, index, onTruncation, open, truncated]);
 
   const className = [
     "result-log",
     selected ? "selected" : "",
-    open ? "is-open" : "",
+    expanded ? "is-open" : "",
   ]
     .filter((name) => name !== "")
     .join(" ");
@@ -259,7 +332,12 @@ export const ResultHitButton = memo(function ResultHitButton({
       data-truncated={truncated === null ? undefined : truncated ? "1" : "0"}
       className={className}
       aria-current={selected ? "true" : undefined}
-      aria-expanded={truncated === true ? open : undefined}
+      aria-expanded={truncated === true ? expanded : undefined}
+      style={
+        holding && holdHeight != null
+          ? { height: holdHeight, maxHeight: holdHeight, minHeight: 0 }
+          : undefined
+      }
       onClick={() => {
         onSelect(index);
       }}
@@ -269,7 +347,7 @@ export const ResultHitButton = memo(function ResultHitButton({
       </span>
       <span className="result-line-pill">{hit.line}</span>
       <span className="result-log-main">
-        {open ? (
+        {expanded ? (
           <ExpandedLogLine
             text={hit.text}
             matches={hit.matches}
@@ -285,12 +363,17 @@ export const ResultHitButton = memo(function ResultHitButton({
             opts={opts}
           />
         )}
-        {truncated === true && !open ? (
+        {truncated === true && !expanded ? (
           <span className="result-lenchip">
             {t("resultLongLine", { n: count })}
           </span>
         ) : null}
-        {open ? (
+        {holding ? (
+          <span className="result-lenchip is-motion">
+            {t("resultLongLine", { n: count })}
+          </span>
+        ) : null}
+        {expanded ? (
           <span className="result-xnote">
             <b>{t("resultFullLine", { n: count })}</b>
             {hit.text.length > EXPAND_CAP ? (

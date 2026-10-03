@@ -9,43 +9,394 @@ import {
   useState,
 } from "react";
 import {
+  affectedKeys,
+  cancelPaint,
+  clearMotionPaint,
+  MotionRegistry,
+  type MotionRow,
+  parseTranslateY,
+  readMotionRows,
+  shouldAnimateMotion,
+  shouldRetargetInFlight,
+  snapshotForSwitch,
+  startSwitchMotion,
+  warmMotionColors,
+} from "../resultExpandMotion.ts";
+import {
   absorbAnchorShift,
-  decideRetainedRows,
   hitExpandKey,
-  pickReleaseAnchor,
+  scrollRestoreDelta,
   PIN_SLOP_PX,
+  pickReleaseAnchor,
   pointerRestBlocked,
-  type OpenRowLayout,
+  type ScrollHome,
   type VisibleHitBox,
 } from "../resultExpandPlan.ts";
 
 /** Pointer must sit still this long before a row opens or closes. */
-export const HOVER_REST_MS = 150;
+export const HOVER_REST_MS = 50;
 /** Scroll events inside this window suppress hover changes. */
 export const SCROLL_IDLE_MS = 150;
+/**
+ * Follow-up `scroll` events from our own `scrollTop` / the virtualizer's
+ * `scrollTo`. The pin is gone within a frame, and the virtualizer's
+ * scroll-end reconcile (`isScrollingResetDelay`, 150ms) can write again
+ * after that. Notes have to outlive that reconcile. A real wheel moves
+ * `scrollTop` off these values, so it still counts.
+ */
+export const SELF_SCROLL_MS = 280;
+
+export type OwnScrollSlot = {
+  until: number;
+  tops: number[];
+};
+
+export function rememberOwnScroll(
+  slot: OwnScrollSlot,
+  top: number,
+  now: number,
+): void {
+  if (!Number.isFinite(top)) {
+    return;
+  }
+  if (now > slot.until) {
+    slot.tops = [];
+    slot.until = now + SELF_SCROLL_MS;
+  }
+  slot.tops.push(top);
+}
+
+/** Open the self-scroll window without recording a top yet. */
+export function armOwnScroll(slot: OwnScrollSlot, now: number): void {
+  if (now > slot.until) {
+    slot.tops = [];
+  }
+  const next = now + SELF_SCROLL_MS;
+  if (next > slot.until) {
+    slot.until = next;
+  }
+}
+
+/** True when `top` is one we wrote and the note has not expired. */
+export function isOwnScrollTop(
+  slot: OwnScrollSlot,
+  top: number,
+  now: number,
+): boolean {
+  if (now > slot.until || !Number.isFinite(top)) {
+    return false;
+  }
+  return slot.tops.some((item) => Math.abs(item - top) <= 1);
+}
+
+/**
+ * An expanded border is taller than the closed measure. A row that is
+ * mid-collapse already sits on the closed border, so this does not overwrite
+ * the open height we will need when it opens again.
+ */
+function rememberOpenBorders(
+  rows: readonly MotionRow[],
+  openSizes: Map<number, number>,
+  closedSizes: Map<number, number>,
+): void {
+  for (const row of rows) {
+    if (row.hitIndex === null || !(row.borderHeight > 0)) {
+      continue;
+    }
+    const closed = closedSizes.get(row.hitIndex);
+    if (closed === undefined || !(closed > 0)) {
+      continue;
+    }
+    if (row.borderHeight > closed + 8) {
+      openSizes.set(row.hitIndex, row.borderHeight);
+    }
+  }
+}
+
+function boundScrollTo(
+  node: HTMLElement,
+): ((...args: unknown[]) => void) | null {
+  const value: unknown = Reflect.get(node, "scrollTo");
+  if (typeof value !== "function") {
+    return null;
+  }
+  return (value as (...args: unknown[]) => void).bind(node);
+}
+
+function scrollArgTop(args: readonly unknown[]): number | null {
+  const first = args[0];
+  if (typeof first === "number") {
+    const second = args[1];
+    return typeof second === "number" && Number.isFinite(second) ? second : null;
+  }
+  if (typeof first === "object" && first !== null && "top" in first) {
+    const top = (first as { top?: unknown }).top;
+    return typeof top === "number" && Number.isFinite(top) ? top : null;
+  }
+  return null;
+}
 
 export type RowOpen = { index: number; source: "pointer" | "keyboard" };
+
+export type Hold = { index: number; height: number };
 
 type ListVirtualizer = Virtualizer<HTMLDivElement, Element>;
 
 type RowMeasure = { start: number; size: number };
 
 /** Full measurement cache. The public virtual-item list is only the window. */
-function measuredRows(virtualizer: ListVirtualizer): readonly (RowMeasure | undefined)[] {
+function measuredRows(
+  virtualizer: ListVirtualizer,
+): readonly (RowMeasure | undefined)[] {
   const cache = virtualizer as unknown as {
     getMeasurements(): readonly (RowMeasure | undefined)[];
   };
   return cache.getMeasurements();
 }
 
+type VirtualizerHost = ListVirtualizer & {
+  isScrolling: boolean;
+  scrollOffset: number | null;
+};
+
+/** Drop a scroll-into-view reconcile so it cannot overwrite a restored offset. */
+function stopListReconcile(virtualizer: ListVirtualizer): void {
+  const host = virtualizer as unknown as {
+    rafId?: number | null;
+    scrollState?: unknown;
+    targetWindow?: Window | null;
+  };
+  const raf = host.rafId;
+  const view = host.targetWindow;
+  if (typeof raf === "number" && view !== undefined && view !== null) {
+    view.cancelAnimationFrame(raf);
+  }
+  host.rafId = null;
+  host.scrollState = null;
+}
+
+function absorbNotify(virtualizer: ListVirtualizer): void {
+  const host = virtualizer as unknown as { maybeNotify?: () => void };
+  host.maybeNotify?.();
+}
+
+/** Closed row heights learned from a real measure. Shared with `estimateSize`. */
+type ClosedGuess = { chip: number; plain: number };
+
+/**
+ * Expanded height of a closed chip row, read from a clone so the gesture
+ * itself does not lay out to discover it. `0` means not measured yet.
+ */
+function warmOpenHeights(
+  root: HTMLElement,
+  widths: number,
+  openSizes: Map<number, number>,
+): void {
+  if (widths <= 0) {
+    return;
+  }
+  const pending: HTMLElement[] = [];
+  for (const button of root.querySelectorAll<HTMLElement>(".result-log")) {
+    if (button.classList.contains("is-open")) {
+      continue;
+    }
+    if (button.querySelector(".result-lenchip") === null) {
+      continue;
+    }
+    const index = Number(button.dataset.hitIndex);
+    if (!Number.isInteger(index) || openSizes.has(index)) {
+      continue;
+    }
+    pending.push(button);
+  }
+  if (pending.length === 0) {
+    return;
+  }
+  const clones: Array<{ index: number; node: HTMLElement }> = [];
+  for (const button of pending) {
+    const clone = button.cloneNode(true);
+    if (!(clone instanceof HTMLElement)) {
+      continue;
+    }
+    const index = Number(button.dataset.hitIndex);
+    clone.classList.add("is-open");
+    clone.removeAttribute("style");
+    for (const chip of clone.querySelectorAll(".result-lenchip")) {
+      chip.remove();
+    }
+    const main = clone.querySelector(".result-log-main");
+    if (main instanceof HTMLElement && clone.querySelector(".result-xnote") === null) {
+      const note = document.createElement("span");
+      note.className = "result-xnote";
+      const label = document.createElement("b");
+      label.textContent = "整行";
+      const gap = document.createElement("span");
+      gap.className = "result-xnote-gap";
+      const hint = document.createElement("span");
+      hint.className = "result-xnote-hint";
+      hint.textContent = "点击在右侧渲染";
+      note.append(label, gap, hint);
+      main.append(note);
+    }
+    clone.style.position = "absolute";
+    clone.style.visibility = "hidden";
+    clone.style.pointerEvents = "none";
+    clone.style.width = `${widths}px`;
+    clone.style.height = "auto";
+    clone.style.maxHeight = "none";
+    root.append(clone);
+    clones.push({ index, node: clone });
+  }
+  for (const clone of clones) {
+    const height = Math.round(clone.node.getBoundingClientRect().height);
+    if (Number.isInteger(clone.index) && height > 0) {
+      openSizes.set(clone.index, height);
+    }
+  }
+  for (const clone of clones) {
+    clone.node.remove();
+  }
+}
+
+/**
+ * Size changes notify React. A switch is allowed two commits total, so the
+ * measurement pass swallows that notify and writes positions itself.
+ * `maybeNotify` still runs so a later scroll-idle sees unchanged deps.
+ */
+function silenceVirtualizer(virtualizer: ListVirtualizer): () => void {
+  const host = virtualizer as VirtualizerHost;
+  const previous = host.options.onChange;
+  host.options.onChange = () => {};
+  return () => {
+    host.isScrolling = false;
+    absorbNotify(virtualizer);
+    host.options.onChange = previous;
+  };
+}
+
+function writeVirtualPositions(
+  root: HTMLElement,
+  virtualizer: ListVirtualizer,
+): void {
+  const inner = root.querySelector<HTMLElement>(".result-list-inner");
+  if (inner !== null) {
+    const height = `${virtualizer.getTotalSize()}px`;
+    if (inner.style.height !== height) {
+      inner.style.height = height;
+    }
+  }
+  const measurements = measuredRows(virtualizer);
+  for (const rowEl of root.querySelectorAll<HTMLElement>(
+    ".result-virtual-row",
+  )) {
+    const index = Number(rowEl.dataset.index);
+    const start = measurements[index]?.start;
+    if (start === undefined) {
+      continue;
+    }
+    const next = `translateY(${start}px)`;
+    if (rowEl.style.transform !== next) {
+      rowEl.style.transform = next;
+    }
+  }
+}
+
+function commitScrollTopDom(
+  root: HTMLElement,
+  virtualizer: ListVirtualizer,
+  next: number,
+): void {
+  const host = virtualizer as VirtualizerHost;
+  root.dataset.motionPin = "1";
+  // The offset observer bails only while isScrolling is already true and the
+  // cached offset matches. The scroll event itself is a later task, so these
+  // stay set until `releasePinnedScroll` runs after that task.
+  host.isScrolling = true;
+  host.scrollOffset = next;
+  root.scrollTop = next;
+}
+
+/**
+ * useVirtualizer restores onChange during render, and row refs measure
+ * before any layout effect. Re-parking has to happen in that same render.
+ */
+function reparkDuringRender(
+  held: { current: boolean },
+  parked: { current: (() => void) | null },
+  virtualizer: ListVirtualizer,
+): void {
+  if (!held.current) {
+    return;
+  }
+  parked.current = silenceVirtualizer(virtualizer);
+}
+
+/** Keep the scroll publisher current without recreating commitModel. */
+function publishScroll(
+  slot: { current: (top: number) => boolean },
+  publish: (top: number) => boolean,
+): void {
+  slot.current = publish;
+}
+
+/** Drop the programmatic-scroll guard after its event has been delivered. */
+function releasePinnedScroll(
+  root: HTMLElement | null,
+  virtualizer: ListVirtualizer,
+): void {
+  const host = virtualizer as VirtualizerHost;
+  host.isScrolling = false;
+  if (root !== null) {
+    delete root.dataset.motionPin;
+  }
+  // Deps move to isScrolling=false while onChange is still the guard, so the
+  // library's 150ms scroll-end does not schedule another commit.
+  absorbNotify(virtualizer);
+}
+
+/** One scroll correction from the rows already read. Does not write. */
+function predictPinShift(
+  root: HTMLElement,
+  virtualizer: ListVirtualizer,
+  pin: Pin | null,
+  settled: boolean,
+  rows: readonly MotionRow[],
+  hitVirtualIndex: (hitIndex: number) => number,
+  metrics?: { scrollTop: number; clientHeight: number; scrollHeight: number },
+): number {
+  if (pin === null || settled || hitExpandKey(pin.index) !== pin.key) {
+    return 0;
+  }
+  const row = rows.find((item) => item.hitIndex === pin.index);
+  if (row === undefined) {
+    return 0;
+  }
+  const virtualIndex = hitVirtualIndex(pin.index);
+  const start =
+    virtualIndex < 0
+      ? undefined
+      : measuredRows(virtualizer)[virtualIndex]?.start;
+  const written = parseTranslateY(row.rowEl.style.transform);
+  const visual =
+    start !== undefined && written !== null
+      ? row.top + (start - written)
+      : row.top;
+  const scrollTop = metrics?.scrollTop ?? root.scrollTop;
+  const clientHeight = metrics?.clientHeight ?? root.clientHeight;
+  const scrollHeight = metrics?.scrollHeight ?? root.scrollHeight;
+  const maxScroll = Math.max(
+    0,
+    Math.max(scrollHeight, virtualizer.getTotalSize()) - clientHeight,
+  );
+  return absorbAnchorShift(scrollTop, visual - pin.top, maxScroll);
+}
+
 type ExpandModel = {
   /** The row the pointer or the keyboard currently wants open. */
   active: RowOpen | null;
-  /** Extra rows kept open because collapsing them would jump the anchor. */
-  retained: number[];
 };
 
-const EMPTY_MODEL: ExpandModel = { active: null, retained: [] };
+const EMPTY_MODEL: ExpandModel = { active: null };
 
 const NAV_KEYS = new Set(["j", "k", "ArrowUp", "ArrowDown"]);
 
@@ -195,44 +546,52 @@ function assignPin(
 }
 
 function sameModel(a: ExpandModel, b: ExpandModel): boolean {
-  if (a.active?.index !== b.active?.index || a.active?.source !== b.active?.source) {
-    return false;
-  }
-  if (a.retained.length !== b.retained.length) {
-    return false;
-  }
-  for (let i = 0; i < a.retained.length; i += 1) {
-    if (a.retained[i] !== b.retained[i]) {
-      return false;
-    }
-  }
-  return true;
+  return (
+    a.active?.index === b.active?.index && a.active?.source === b.active?.source
+  );
 }
 
 function openHitIndexes(model: ExpandModel): number[] {
-  const indexes = new Set(model.retained);
-  if (model.active !== null) {
-    indexes.add(model.active.index);
-  }
-  return [...indexes];
+  return model.active === null ? [] : [model.active.index];
 }
 
 function clampModel(model: ExpandModel, hitCount: number): ExpandModel {
   const active =
-    model.active !== null && model.active.index < hitCount ? model.active : null;
-  const retained = model.retained.filter(
-    (index) => index < hitCount && index !== active?.index,
-  );
-  return { active, retained };
+    model.active !== null && model.active.index < hitCount
+      ? model.active
+      : null;
+  return { active };
 }
+
+function hasWaapi(): boolean {
+  return (
+    typeof HTMLElement !== "undefined" &&
+    typeof HTMLElement.prototype.animate === "function"
+  );
+}
+
+type PendingPlay = {
+  capture: readonly MotionRow[];
+  opening: number | null;
+  closing: number[];
+  anchorStart: number | null;
+  scrollBefore: number;
+  /** Viewport size read before animations are cancelled. */
+  clientHeight: number;
+  scrollHeight: number;
+  /** Scroll correction decided with the model update, before paint. */
+  applied: number;
+  played: boolean;
+  /** Scroll offset to put back after measureVisible, or null when unset. */
+  restoreTop: number | null;
+};
 
 /**
  * One hover timer for the whole list (event delegation). Opens a truncated
- * row after the pointer rests. Collapsing a row above the anchor is skipped
- * when scrollTop cannot absorb the upward shift, so the anchor's top edge
- * stays put. Fold, sort, and pointer-leave drop retained rows immediately;
- * they pin only the shift scrollTop can absorb. Keyboard j/k is observed on
- * the window and never computes the next index itself.
+ * row after the pointer rests. The row under the pointer keeps its viewport
+ * top when scrollTop can absorb the shift; otherwise the rows below slide.
+ * An open row above the anchor always closes — nothing is kept open just
+ * because the list is already at the top.
  */
 export function useResultExpand(opts: {
   listRef: RefObject<HTMLDivElement | null>;
@@ -242,10 +601,17 @@ export function useResultExpand(opts: {
   hits: readonly unknown[];
   /** Selection. A change is a keyboard expand only if a plain j/k/arrow just fired. */
   selectedIndex: number;
-  /** Group fold / sort. Retained rows close when this changes. */
+  /** Group fold / sort. Pins are re-applied when this changes. */
   structureKey: string;
+  /**
+   * Publish a pinned `scrollTop` into React. Return whether the state
+   * changed. Motion defers this so the pin itself does not commit.
+   */
+  commitScrollTop: (top: number) => boolean;
 }): {
   openIndexes: ReadonlySet<number>;
+  /** Collapsing rows: layout height is final, expanded text stays until the clip ends. */
+  holdHeights: readonly Hold[];
   reportTruncation: (index: number, truncated: boolean) => void;
   /** Re-pin after sort's selection scroll. No-op unless a fold/sort pin is pending. */
   settleStructurePin: () => void;
@@ -255,11 +621,20 @@ export function useResultExpand(opts: {
    */
   prepareStructurePin: () => void;
 } {
-  const { listRef, virtualizer, hitVirtualIndex, hits, selectedIndex, structureKey } =
-    opts;
+  const {
+    listRef,
+    virtualizer,
+    hitVirtualIndex,
+    hits,
+    selectedIndex,
+    structureKey,
+    commitScrollTop,
+  } = opts;
   const [modelState, setModelState] = useState<ExpandModel>(EMPTY_MODEL);
+  const [holds, setHolds] = useState<Hold[]>([]);
   const [measureTick, setMeasureTick] = useState(0);
   const modelRef = useRef<ExpandModel>(EMPTY_MODEL);
+  const holdsRef = useRef<Hold[]>([]);
   const truncRef = useRef(new Map<number, boolean>());
   const pendingKey = useRef<number | null>(null);
   const pointerRef = useRef({
@@ -272,6 +647,7 @@ export function useResultExpand(opts: {
   const restTimer = useRef<number | null>(null);
   const scrollTimer = useRef<number | null>(null);
   const ignoreScroll = useRef(0);
+  const ownScroll = useRef<OwnScrollSlot>({ until: 0, tops: [] });
   const pinRef = useRef<Pin | null>(null);
   const pinSettled = useRef(true);
   /** Last hit the pointer was on. Not cleared when the pointer leaves a row. */
@@ -282,14 +658,65 @@ export function useResultExpand(opts: {
   const virtualizerRef = useRef(virtualizer);
   const lookupRef = useRef(hitVirtualIndex);
   const closedSizeRef = useRef(new Map<number, number>());
+  const openSizeRef = useRef(new Map<number, number>());
+  const closedGuess = useRef<ClosedGuess>({ chip: 0, plain: 0 });
+  const scrollGuard = useRef(0);
   const keyNav = useRef(false);
   const keyNavGen = useRef(0);
+  const keyRepeat = useRef(false);
   const truncGen = useRef(0);
+  const reducedRef = useRef(false);
+  const lastSwitchAt = useRef<number | null>(null);
+  const pendingPlay = useRef<PendingPlay | null>(null);
+  /** Scroll offset where the open row last sat still, before an in-flight switch. */
+  const motionHome = useRef<ScrollHome | null>(null);
+  /** performance.now() of the last real wheel. Scroll anchoring is not a wheel. */
+  const wheelAt = useRef(0);
+  /**
+   * Hold-release renders still measure, but they must not start motion again.
+   * Row refs measure during commit, before this layout effect, so the
+   * virtualizer notify is parked across that commit.
+   */
+  const skipMeasure = useRef(false);
+  const parkedSilence = useRef<(() => void) | null>(null);
+  const silenceHeld = useRef(false);
+  const parkSilence = useCallback((): void => {
+    if (silenceHeld.current || parkedSilence.current !== null) {
+      return;
+    }
+    parkedSilence.current = silenceVirtualizer(virtualizerRef.current);
+    silenceHeld.current = true;
+  }, []);
+  // useVirtualizer calls setOptions during render and puts the real
+  // onChange back. Re-park after that, still before commit-phase refs.
+  /* oxlint-disable react/refs */
+  reparkDuringRender(silenceHeld, parkedSilence, virtualizer);
+  /* oxlint-enable react/refs */
+  const releaseGen = useRef(0);
+  const commitScrollRef = useRef(commitScrollTop);
+  /* oxlint-disable react/refs */
+  publishScroll(commitScrollRef, commitScrollTop);
+  /* oxlint-enable react/refs */
+  /** Bumped when a search or fold/sort should drop in-flight motion before paint. */
+  const [motionCut, setMotionCut] = useState(0);
+  const appliedCut = useRef(0);
+  const registry = useRef(new MotionRegistry());
   const seriesHead = hits.length === 0 ? null : hits[0];
   const [trackedHead, setTrackedHead] = useState<unknown>(seriesHead);
   const [generation, setGeneration] = useState(0);
   const [trackedStructure, setTrackedStructure] = useState(structureKey);
   const [layoutEpoch, setLayoutEpoch] = useState(0);
+
+  const setHoldsTracked = useCallback(
+    (update: Hold[] | ((prev: Hold[]) => Hold[])) => {
+      setHolds((prev) => {
+        const next = typeof update === "function" ? update(prev) : update;
+        holdsRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
 
   let model = modelState;
   if (trackedHead !== seriesHead) {
@@ -297,6 +724,10 @@ export function useResultExpand(opts: {
     setGeneration((value) => value + 1);
     model = EMPTY_MODEL;
     setModelState(model);
+    if (holds.length > 0) {
+      setHolds([]);
+    }
+    setMotionCut((value) => value + 1);
   } else if (trackedStructure !== structureKey) {
     setTrackedStructure(structureKey);
     // Fold/sort already captured the anchor in prepareStructurePin, before
@@ -304,9 +735,9 @@ export function useResultExpand(opts: {
     // new row set commits. scrollTop that cannot absorb the shift is left
     // alone: no spacer, no delayed collapse (see absorbAnchorShift).
     setLayoutEpoch(layoutEpoch + 1);
-    if (model.retained.length > 0) {
-      model = { active: model.active, retained: [] };
-      setModelState(model);
+    setMotionCut((value) => value + 1);
+    if (holds.length > 0) {
+      setHolds([]);
     }
   } else {
     const clamped = clampModel(model, hits.length);
@@ -318,7 +749,12 @@ export function useResultExpand(opts: {
 
   const setModel = useCallback((next: ExpandModel) => {
     modelRef.current = next;
-    setModelState((prev) => (sameModel(prev, next) ? prev : next));
+    setModelState((prev) => {
+      if (sameModel(prev, next)) {
+        return prev;
+      }
+      return next;
+    });
   }, []);
 
   const capturePin = useCallback(
@@ -328,79 +764,299 @@ export function useResultExpand(opts: {
     [listRef],
   );
 
-  const measureHit = useCallback(
-    (hitIndex: number): { start: number; size: number } | null => {
-      const virtualIndex = lookupRef.current(hitIndex);
-      if (virtualIndex < 0) {
-        return null;
-      }
-      const item = measuredRows(virtualizerRef.current)[virtualIndex];
-      if (item === undefined) {
-        return null;
-      }
-      return { start: item.start, size: item.size };
-    },
-    [],
-  );
-
-  const planModel = useCallback(
-    (
-      nextActive: RowOpen | null,
-      anchor: number | null,
-      scrollTop: number,
-    ): ExpandModel => {
-      const closing = openHitIndexes(modelRef.current).filter(
-        (index) => index !== nextActive?.index,
-      );
-      if (closing.length === 0 || anchor === null) {
-        return { active: nextActive, retained: [] };
-      }
-      const anchorMeasure = measureHit(anchor);
-      if (anchorMeasure === null) {
-        return { active: nextActive, retained: closing };
-      }
-      const layouts: OpenRowLayout[] = [];
-      for (const index of closing) {
-        const measured = measureHit(index);
-        if (measured === null) {
-          layouts.push({
-            index,
-            start: anchorMeasure.start - 1,
-            shrink: Number.POSITIVE_INFINITY,
-          });
-          continue;
-        }
-        const closed = closedSizeRef.current.get(index);
-        const shrink =
-          closed === undefined
-            ? Number.POSITIVE_INFINITY
-            : measured.size - closed;
-        layouts.push({ index, start: measured.start, shrink });
-      }
-      const decision = decideRetainedRows(
-        scrollTop,
-        anchorMeasure.start,
-        layouts,
-      );
-      return { active: nextActive, retained: decision.retain };
-    },
-    [measureHit],
-  );
-
   const commitModel = useCallback(
-    (next: ExpandModel, anchor: number | null) => {
+    (next: ExpandModel, anchor: number | null, fromKey = false) => {
       if (sameModel(modelRef.current, next)) {
         modelRef.current = next;
         return;
       }
-      capturePin(anchor);
+      // Row refs measure in the commit phase, before the layout effect.
+      // Park the notify first so that measurement cannot schedule a render.
+      parkSilence();
+      const repeat = fromKey ? keyRepeat.current : false;
+      if (fromKey) {
+        keyRepeat.current = false;
+      }
+      const docStartOf = (hitIndex: number): number | null => {
+        const virtualIndex = lookupRef.current(hitIndex);
+        if (virtualIndex < 0) {
+          return null;
+        }
+        const start = measuredRows(virtualizerRef.current)[virtualIndex]?.start;
+        return start !== undefined && Number.isFinite(start) ? start : null;
+      };
+      const now = performance.now();
+      const since =
+        lastSwitchAt.current === null ? null : now - lastSwitchAt.current;
+      const play = shouldAnimateMotion({
+        reducedMotion: reducedRef.current,
+        scrolling: scrollingRef.current,
+        keyRepeat: repeat,
+        sinceLastMs: since,
+        waapi: hasWaapi(),
+      });
+      lastSwitchAt.current = now;
+      releaseGen.current += 1;
+      const prevOpen = openHitIndexes(modelRef.current);
+      const nextOpen = next.active?.index ?? null;
+      const closing = prevOpen.filter((index) => index !== nextOpen);
+      const opening =
+        nextOpen !== null && !prevOpen.includes(nextOpen) ? nextOpen : null;
+      const root = listRef.current;
+      let inFlight = false;
+      // Set again only when this switch restores a previous offset. A lock
+      // left from the last return would skip every later scrollToIndex.
+      let restoredScroll: number | null = null;
+      if (root !== null) {
+        delete root.dataset.motionLockScroll;
+      }
+      const motionClosing = [...closing];
+      for (const hold of holdsRef.current) {
+        if (hold.index !== opening && !motionClosing.includes(hold.index)) {
+          motionClosing.push(hold.index);
+        }
+      }
+      const selectKeys = (rows: readonly MotionRow[]): Set<string> => {
+        const anchorRow =
+          anchor === null
+            ? undefined
+            : rows.find((row) => row.hitIndex === anchor);
+        const anchorStart = anchorRow?.docStart ?? null;
+        const marks: { hitIndex: number; docStart: number }[] = [];
+        let unknown = false;
+        for (const index of motionClosing) {
+          const row = rows.find((item) => item.hitIndex === index);
+          if (row === undefined) {
+            continue;
+          }
+          marks.push({ hitIndex: index, docStart: row.docStart });
+          const closed = closedSizeRef.current.get(index);
+          if (
+            (closed === undefined || closed <= 0) &&
+            anchorStart !== null &&
+            row.docStart < anchorStart - 0.5
+          ) {
+            unknown = true;
+          }
+        }
+        if (opening !== null) {
+          const row = rows.find((item) => item.hitIndex === opening);
+          if (row !== undefined) {
+            marks.push({ hitIndex: opening, docStart: row.docStart });
+          }
+        }
+        return affectedKeys(rows, marks, unknown);
+      };
+      let scrollBefore = 0;
+      let settledIndex: number | undefined;
+      let userWheeling = false;
+      let homeBefore: ScrollHome | null = null;
+      let restoreBase: number | null = null;
+      if (root !== null && (motionClosing.length > 0 || opening !== null)) {
+        // Read scroll metrics before cancel. A later read would be its own layout.
+        scrollBefore = root.scrollTop;
+        const clientHeight = root.clientHeight;
+        const scrollHeight = root.scrollHeight;
+        const captured = snapshotForSwitch(
+          root,
+          registry.current,
+          selectKeys,
+        );
+        rememberOpenBorders(
+          captured,
+          openSizeRef.current,
+          closedSizeRef.current,
+        );
+        const keys = selectKeys(captured);
+        inFlight = captured.some(
+          (row) =>
+            keys.has(row.key) &&
+            Math.abs(row.visualHeight - row.borderHeight) > 1.5,
+        );
+        settledIndex = prevOpen[0];
+        // Decide before replacing home. A long gap finishes the clip, so
+        // this looks settled, but the row we left still owns that offset.
+        // Anchoring and our own follow-up scrolls set scrollingRef, but they
+        // are not a wheel. Yanking back is only wrong when the user wheeled.
+        // The start passed here is only the guard. The real delta is applied
+        // after resize, once late measurements have moved the document start.
+        userWheeling =
+          now - wheelAt.current < SCROLL_IDLE_MS && wheelAt.current !== 0;
+        homeBefore = motionHome.current;
+        restoreBase = scrollRestoreDelta(
+          homeBefore,
+          anchor,
+          scrollBefore,
+          settledIndex ?? null,
+          homeBefore?.start ?? null,
+          userWheeling,
+        );
+        if (
+          restoreBase === null &&
+          !inFlight &&
+          settledIndex !== undefined
+        ) {
+          const start = docStartOf(settledIndex);
+          if (start !== null) {
+            motionHome.current = {
+              index: settledIndex,
+              scrollTop: scrollBefore,
+              away: anchor,
+              start,
+            };
+          }
+        }
+        const retarget = shouldRetargetInFlight({
+          play,
+          scrolling: scrollingRef.current,
+          reducedMotion: reducedRef.current,
+          keyRepeat: repeat,
+          sinceLastMs: since,
+          waapi: hasWaapi(),
+          inFlight,
+        });
+        if (retarget) {
+          // Before the layout effect. scrollToIndex can run, and its
+          // scroll-end reconcile is ~150ms later — both must be noted.
+          armOwnScroll(ownScroll.current, now);
+          const anchorRow =
+            anchor === null
+              ? undefined
+              : captured.find((row) => row.hitIndex === anchor);
+          pendingPlay.current = {
+            capture: captured,
+            opening,
+            closing: motionClosing,
+            anchorStart: anchorRow?.docStart ?? null,
+            scrollBefore,
+            clientHeight,
+            scrollHeight,
+            applied: 0,
+            played: false,
+            restoreTop: null,
+          };
+          const kept = holdsRef.current.filter(
+            (hold) => hold.index !== opening,
+          );
+          const added: Hold[] = [];
+          for (const index of closing) {
+            const height = closedSizeRef.current.get(index);
+            if (height === undefined || height <= 0) {
+              continue;
+            }
+            if (kept.some((hold) => hold.index === index)) {
+              continue;
+            }
+            added.push({ index, height });
+          }
+          setHoldsTracked([...kept, ...added]);
+        } else {
+          for (const row of captured) {
+            if (keys.has(row.key)) {
+              clearMotionPaint(row);
+            }
+          }
+          pendingPlay.current = null;
+          setHoldsTracked([]);
+        }
+      } else {
+        pendingPlay.current = null;
+        setHoldsTracked([]);
+      }
+      // The render reads getTotalSize() before refs measure. Seed the cache
+      // from sizes we already know so that render writes the final inner
+      // height and does not dirty layout again after the measurement read.
+      const list = virtualizerRef.current;
+      const applySize = (hitIndex: number, height: number | undefined): void => {
+        if (height === undefined || !(height > 0)) {
+          return;
+        }
+        const virtualIndex = lookupRef.current(hitIndex);
+        if (virtualIndex < 0) {
+          return;
+        }
+        list.resizeItem(virtualIndex, height);
+      };
+      for (const index of closing) {
+        applySize(index, closedSizeRef.current.get(index));
+      }
+      if (opening !== null) {
+        applySize(opening, openSizeRef.current.get(opening));
+      }
+      if (restoreBase !== null && homeBefore !== null) {
+        restoredScroll = scrollRestoreDelta(
+          homeBefore,
+          anchor,
+          scrollBefore,
+          settledIndex ?? null,
+          docStartOf(homeBefore.index),
+          userWheeling,
+        );
+      }
+      const pendingNow = pendingPlay.current;
+      if (
+        pendingNow !== null &&
+        !pendingNow.played &&
+        root !== null &&
+        pendingNow.capture.length > 0
+      ) {
+        const anchorRow =
+          anchor === null
+            ? undefined
+            : pendingNow.capture.find((row) => row.hitIndex === anchor);
+        if (
+          anchor !== null &&
+          anchorRow !== undefined &&
+          anchorRow.borderHeight > 0
+        ) {
+          pinRef.current = {
+            index: anchor,
+            key: hitExpandKey(anchor),
+            top: anchorRow.top,
+          };
+          pinSettled.current = false;
+        } else {
+          capturePin(anchor);
+        }
+        // Same turn as setModel / setHolds, so the pin is not its own commit.
+        const pinApplied = predictPinShift(
+          root,
+          list,
+          pinRef.current,
+          pinSettled.current,
+          pendingNow.capture,
+          lookupRef.current,
+          {
+            scrollTop: pendingNow.scrollBefore,
+            clientHeight: pendingNow.clientHeight,
+            scrollHeight: pendingNow.scrollHeight,
+          },
+        );
+        // Coming back to the row that was settled: its layout matches that
+        // moment, so the old scroll offset puts its top back. scrollToIndex
+        // would otherwise pin it to the viewport edge. This includes a
+        // return after the previous clip has already finished.
+        const restored = restoredScroll;
+        const applied = restored ?? pinApplied;
+        if (restored !== null) {
+          root.dataset.motionLockScroll = "1";
+          stopListReconcile(list);
+          pendingNow.restoreTop = pendingNow.scrollBefore + restored;
+        }
+        pendingNow.applied = applied;
+        if (applied !== 0) {
+          commitScrollRef.current(pendingNow.scrollBefore + applied);
+        }
+      } else {
+        capturePin(anchor);
+      }
       setModel(next);
     },
-    [capturePin, setModel],
+    [capturePin, listRef, parkSilence, setHoldsTracked, setModel],
   );
 
   const reportTruncation = useCallback(
-    (index: number, truncated: boolean) => {
+    (index: number, truncated: boolean, remeasure = true) => {
       if (truncGen.current !== generation) {
         truncRef.current.clear();
         truncGen.current = generation;
@@ -408,9 +1064,13 @@ export function useResultExpand(opts: {
       }
       const prev = truncRef.current.get(index);
       truncRef.current.set(index, truncated);
-      // Parent remeasures once per flip so the long-line chip is in the
-      // virtualizer cache before paint. Same-value reports stay local.
-      if (prev !== truncated && (truncated || prev === true)) {
+      // The row already painted this chip, so the commit-phase measure saw
+      // the final height. A parent render here would be an extra commit.
+      if (
+        remeasure &&
+        prev !== truncated &&
+        (truncated || prev === true)
+      ) {
         setMeasureTick((tick) => tick + 1);
       }
       if (pendingKey.current !== index) {
@@ -420,17 +1080,9 @@ export function useResultExpand(opts: {
       if (!truncated) {
         return;
       }
-      const root = listRef.current;
-      commitModel(
-        planModel(
-          { index, source: "keyboard" },
-          index,
-          root?.scrollTop ?? 0,
-        ),
-        index,
-      );
+      commitModel({ active: { index, source: "keyboard" } }, index, true);
     },
-    [commitModel, generation, listRef, planModel],
+    [commitModel, generation],
   );
 
   const onKeyboardNav = useCallback(
@@ -441,25 +1093,20 @@ export function useResultExpand(opts: {
         pendingKey.current = null;
       }
       const known = truncRef.current.get(index);
-      const root = listRef.current;
-      const scrollTop = root?.scrollTop ?? 0;
       if (known === true) {
         pendingKey.current = null;
-        commitModel(
-          planModel({ index, source: "keyboard" }, index, scrollTop),
-          index,
-        );
+        commitModel({ active: { index, source: "keyboard" } }, index, true);
         return;
       }
       if (known === false) {
         pendingKey.current = null;
-        commitModel(planModel(null, index, scrollTop), index);
+        commitModel({ active: null }, index, true);
         return;
       }
       pendingKey.current = index;
-      commitModel(planModel(null, index, scrollTop), index);
+      commitModel({ active: null }, index, true);
     },
-    [commitModel, generation, listRef, planModel],
+    [commitModel, generation],
   );
   const onKeyboardNavRef = useRef(onKeyboardNav);
 
@@ -471,6 +1118,7 @@ export function useResultExpand(opts: {
   useLayoutEffect(() => {
     modelRef.current = model;
     onKeyboardNavRef.current = onKeyboardNav;
+    holdsRef.current = holds;
   });
 
   const seenSelected = useRef<number | null>(null);
@@ -500,6 +1148,18 @@ export function useResultExpand(opts: {
     structurePin.current = false;
     scrollingRef.current = false;
     closedSizeRef.current.clear();
+    openSizeRef.current.clear();
+    closedGuess.current.chip = 0;
+    closedGuess.current.plain = 0;
+    scrollGuard.current += 1;
+    pendingPlay.current = null;
+    lastSwitchAt.current = null;
+    motionHome.current = null;
+    const root = listRef.current;
+    if (root !== null) {
+      delete root.dataset.motionLockScroll;
+      cancelPaint(root, registry.current);
+    }
     if (restTimer.current !== null) {
       window.clearTimeout(restTimer.current);
       restTimer.current = null;
@@ -508,7 +1168,7 @@ export function useResultExpand(opts: {
       window.clearTimeout(scrollTimer.current);
       scrollTimer.current = null;
     }
-  }, [generation]);
+  }, [generation, listRef]);
 
   const measureVisible = useCallback((root: HTMLElement): void => {
     const list = virtualizerRef.current;
@@ -530,6 +1190,14 @@ export function useResultExpand(opts: {
       const hitIndex = Number(hit.dataset.hitIndex);
       if (size !== undefined && size > 0 && Number.isInteger(hitIndex)) {
         closedSizeRef.current.set(hitIndex, size);
+        const guess = closedGuess.current;
+        if (hit.querySelector(".result-lenchip") !== null) {
+          if (guess.chip === 0) {
+            guess.chip = size;
+          }
+        } else if (guess.plain === 0) {
+          guess.plain = size;
+        }
       }
     }
     if (!userScrolling) {
@@ -578,14 +1246,14 @@ export function useResultExpand(opts: {
       }
       const before = root.scrollTop;
       const maxScroll = Math.max(0, root.scrollHeight - root.clientHeight);
-      // Shortfall is not padded and does not put the collapse off. See
-      // absorbAnchorShift for the fold/sort/leave ruling.
+      // One correction for this layout pass. Not a per-frame nudge.
       const applied = absorbAnchorShift(before, delta, maxScroll);
       if (applied === 0) {
         pinSettled.current = true;
         return;
       }
       ignoreScroll.current += 1;
+      rememberOwnScroll(ownScroll.current, before + applied, performance.now());
       root.scrollTop = before + applied;
       if (root.scrollTop === before || stale) {
         if (root.scrollTop === before) {
@@ -605,23 +1273,214 @@ export function useResultExpand(opts: {
 
   useLayoutEffect(() => {
     const root = listRef.current;
-    if (root === null) {
-      return;
-    }
-    adjusting.current = true;
+    const restoreNotify =
+      parkedSilence.current ?? silenceVirtualizer(virtualizerRef.current);
+    parkedSilence.current = null;
+    silenceHeld.current = true;
+    let handoff = false;
+    let armedScroll = false;
     try {
-      measureVisible(root);
-      applyCapturedPin(root);
+      if (root === null) {
+        return;
+      }
+      if (appliedCut.current !== motionCut) {
+        appliedCut.current = motionCut;
+        cancelPaint(root, registry.current);
+        pendingPlay.current = null;
+        skipMeasure.current = false;
+      }
+      if (skipMeasure.current) {
+        skipMeasure.current = false;
+        adjusting.current = true;
+        try {
+          // Cancel finished fills before the read so that invalidation is
+          // flushed by the measure, not by the next frame.
+          for (const rowEl of root.querySelectorAll<HTMLElement>(
+            ".result-virtual-row",
+          )) {
+            registry.current.dropFinished(rowEl);
+          }
+          // The held row just swapped back to its closed content. Measure
+          // that height while notify is still parked, or the resize observer
+          // schedules another commit when the cache catches up.
+          measureVisible(root);
+          writeVirtualPositions(root, virtualizerRef.current);
+        } finally {
+          adjusting.current = false;
+        }
+        return;
+      }
+      adjusting.current = true;
+      try {
+      const pending = pendingPlay.current;
+      if (pending !== null && !pending.played) {
+        pending.played = true;
+        const applied = pending.applied;
+        // Write the scroll correction before any geometry read. The following
+        // measure then sees one layout, and later effects must not read again.
+        root.dataset.motionPin = "1";
+        let scrollDelta = 0;
+        // Cover the virtualizer's follow-up scrollTo after this pin clears.
+        armOwnScroll(ownScroll.current, performance.now());
+        if (applied !== 0) {
+          const next = pending.scrollBefore + applied;
+          if (next !== pending.scrollBefore) {
+            ignoreScroll.current += 1;
+            rememberOwnScroll(ownScroll.current, next, performance.now());
+            commitScrollTopDom(root, virtualizerRef.current, next);
+            const actual = root.scrollTop;
+            if (Math.abs(actual - next) > 1) {
+              rememberOwnScroll(ownScroll.current, actual, performance.now());
+            }
+            if (actual === pending.scrollBefore) {
+              ignoreScroll.current = Math.max(0, ignoreScroll.current - 1);
+            } else {
+              armedScroll = true;
+              scrollDelta = actual - pending.scrollBefore;
+            }
+          }
+        }
+        if (!armedScroll) {
+          queueMicrotask(() => {
+            if (root.dataset.motionPin === "1") {
+              delete root.dataset.motionPin;
+            }
+          });
+        }
+        measureVisible(root);
+        // Measurement can scroll-adjust and undo a restore. Put it back
+        // after that read, before the clip samples positions.
+        if (pending.restoreTop !== null) {
+          const back = pending.restoreTop;
+          pending.restoreTop = null;
+          if (Math.abs(root.scrollTop - back) > 1) {
+            ignoreScroll.current += 1;
+            rememberOwnScroll(ownScroll.current, back, performance.now());
+            commitScrollTopDom(root, virtualizerRef.current, back);
+            armedScroll = true;
+            scrollDelta = root.scrollTop - pending.scrollBefore;
+          }
+        }
+        const live = readMotionRows(root);
+        rememberOpenBorders(
+          live,
+          openSizeRef.current,
+          closedSizeRef.current,
+        );
+        pinSettled.current = true;
+        const releaseGenAtStart = releaseGen.current;
+        const releaseHolds = (): void => {
+          if (releaseGenAtStart !== releaseGen.current) {
+            return;
+          }
+          if (holdsRef.current.length === 0) {
+            return;
+          }
+          // Keep the notify parked through the commit that drops the hold.
+          parkSilence();
+          handoff = true;
+          skipMeasure.current = true;
+          const top = root.scrollTop;
+          holdsRef.current = [];
+          commitScrollRef.current(top);
+          setHoldsTracked([]);
+        };
+        let duringStart = true;
+        let releaseAfterScroll = false;
+        startSwitchMotion({
+          root,
+          registry: registry.current,
+          capture: pending.capture,
+          opening: pending.opening,
+          closing: pending.closing,
+          anchorStart: pending.anchorStart,
+          scrollDelta,
+          scrollApplied: 0,
+          liveRows: live,
+          pendingStart: (rowEl) => {
+            const index = Number(rowEl.dataset.index);
+            if (!Number.isInteger(index) || index < 0) {
+              return undefined;
+            }
+            return measuredRows(virtualizerRef.current)[index]?.start;
+          },
+          onCollapseSettled: () => {
+            if (duringStart) {
+              releaseAfterScroll = true;
+              return;
+            }
+            releaseHolds();
+          },
+          targetBorder: (hitIndex, opening) => {
+            const size = opening
+              ? openSizeRef.current.get(hitIndex)
+              : closedSizeRef.current.get(hitIndex);
+            return size !== undefined && size > 0 ? size : undefined;
+          },
+        });
+        duringStart = false;
+        writeVirtualPositions(root, virtualizerRef.current);
+        if (releaseAfterScroll) {
+          releaseHolds();
+        }
+      } else {
+        measureVisible(root);
+        applyCapturedPin(root);
+        writeVirtualPositions(root, virtualizerRef.current);
+      }
+      for (const rowEl of root.querySelectorAll<HTMLElement>(
+        ".result-virtual-row",
+      )) {
+        registry.current.dropFinished(rowEl);
+      }
+      } finally {
+        adjusting.current = false;
+      }
     } finally {
-      adjusting.current = false;
+      if (handoff) {
+        parkedSilence.current = restoreNotify;
+      } else {
+        restoreNotify();
+        silenceHeld.current = false;
+        if (armedScroll && root !== null) {
+          const host = virtualizerRef.current as VirtualizerHost;
+          // restoreNotify clears isScrolling. The scroll event is still
+          // queued and only bails while this flag is set.
+          host.isScrolling = true;
+          const real = host.options.onChange;
+          const guard = scrollGuard.current + 1;
+          scrollGuard.current = guard;
+          const wrapped = (): void => {
+            if (scrollGuard.current === guard) {
+              return;
+            }
+            real?.(host, false);
+          };
+          host.options.onChange = wrapped;
+          window.setTimeout(() => {
+            if (scrollGuard.current !== guard) {
+              return;
+            }
+            releasePinnedScroll(listRef.current, virtualizerRef.current);
+            if (host.options.onChange === wrapped) {
+              host.options.onChange = real;
+            }
+            scrollGuard.current = 0;
+          }, 0);
+        }
+      }
     }
   }, [
     applyCapturedPin,
+    holds,
     layoutEpoch,
     listRef,
     measureTick,
+    motionCut,
     measureVisible,
     model,
+    parkSilence,
+    setHoldsTracked,
     totalSize,
   ]);
 
@@ -655,6 +1514,50 @@ export function useResultExpand(opts: {
       adjusting.current = false;
     }
   }, [applyCapturedPin, listRef, measureVisible]);
+
+  useLayoutEffect(() => {
+    const root = listRef.current;
+    const probe = root?.querySelector<HTMLElement>(".result-log");
+    if (probe !== undefined && probe !== null) {
+      warmMotionColors(probe);
+    }
+  }, [generation, listRef]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      if (scrollingRef.current || holdsRef.current.length > 0) {
+        return;
+      }
+      const since = lastSwitchAt.current;
+      if (since !== null && performance.now() - since < 500) {
+        return;
+      }
+      const live = listRef.current;
+      const probe = live?.querySelector<HTMLElement>(".result-log");
+      if (live === null || probe === undefined || probe === null) {
+        return;
+      }
+      warmOpenHeights(live, probe.getBoundingClientRect().width, openSizeRef.current);
+    }, 0);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [generation, listRef, totalSize]);
+
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (media === undefined) {
+      return;
+    }
+    const apply = (): void => {
+      reducedRef.current = media.matches;
+    };
+    apply();
+    media.addEventListener("change", apply);
+    return () => {
+      media.removeEventListener("change", apply);
+    };
+  }, []);
 
   useEffect(() => {
     const root = listRef.current;
@@ -701,10 +1604,7 @@ export function useResultExpand(opts: {
       const nextActive: RowOpen | null = truncated
         ? { index, source: "pointer" }
         : null;
-      commitModel(
-        planModel(nextActive, index, root.scrollTop),
-        index,
-      );
+      commitModel({ active: nextActive }, index);
     };
 
     const scheduleRest = (): void => {
@@ -713,17 +1613,6 @@ export function useResultExpand(opts: {
         return;
       }
       restTimer.current = window.setTimeout(commitRest, HOVER_REST_MS);
-    };
-
-    const releaseRetained = (): void => {
-      const current = modelRef.current;
-      if (current.retained.length === 0) {
-        return;
-      }
-      const anchor = pointerRef.current.inside
-        ? (pointerRef.current.index ?? current.active?.index ?? null)
-        : (current.active?.index ?? null);
-      commitModel(planModel(current.active, anchor, root.scrollTop), anchor);
     };
 
     const onPointerMove = (event: PointerEvent): void => {
@@ -755,15 +1644,48 @@ export function useResultExpand(opts: {
       pointerRef.current.index = null;
       clearRest();
       const current = modelRef.current;
-      const keep = current.active?.source === "keyboard" ? current.active : null;
+      const keep =
+        current.active?.source === "keyboard" ? current.active : null;
       // The pointer has left the list, so it is not resting on a row. Pin the
       // last in-view pointer hit (else the first visible hit) by stable key
       // when scrollTop can absorb the shift; otherwise collapse anyway.
       const anchor = releaseAnchorIndex(root, lastPointerIndex.current);
-      commitModel({ active: keep, retained: [] }, anchor);
+      commitModel({ active: keep }, anchor);
+    };
+
+    const originalScrollTo = boundScrollTo(root);
+    if (originalScrollTo !== null) {
+      root.scrollTo = ((...args: unknown[]) => {
+        const requested = scrollArgTop(args);
+        // Note before the call. The scroll event can fire inside scrollTo,
+        // and only while a switch has armed the window — not on every
+        // virtualizer scroll, or a user wheel would be swallowed.
+        if (requested !== null && performance.now() < ownScroll.current.until) {
+          ownScroll.current.tops.push(requested);
+        }
+        originalScrollTo(...args);
+      }) as typeof root.scrollTo;
+    }
+
+    const onWheel = (): void => {
+      wheelAt.current = performance.now();
     };
 
     const onScroll = (): void => {
+      // Our own write, matched by value. motionPin may already be gone.
+      if (isOwnScrollTop(ownScroll.current, root.scrollTop, performance.now())) {
+        if (ignoreScroll.current > 0) {
+          ignoreScroll.current -= 1;
+        }
+        return;
+      }
+      // Programmatic pin. Reading geometry here, or warming heights, is a layout.
+      if (root.dataset.motionPin === "1") {
+        if (ignoreScroll.current > 0) {
+          ignoreScroll.current -= 1;
+        }
+        return;
+      }
       if (adjusting.current || structurePin.current) {
         if (ignoreScroll.current > 0) {
           ignoreScroll.current -= 1;
@@ -784,7 +1706,12 @@ export function useResultExpand(opts: {
       scrollTimer.current = window.setTimeout(() => {
         scrollTimer.current = null;
         scrollingRef.current = false;
-        releaseRetained();
+        const live = listRef.current;
+        const probe = live?.querySelector<HTMLElement>(".result-log");
+        if (live !== null && probe !== undefined && probe !== null) {
+          const width = probe.getBoundingClientRect().width;
+          warmOpenHeights(live, width, openSizeRef.current);
+        }
         scheduleRest();
       }, SCROLL_IDLE_MS);
     };
@@ -794,6 +1721,7 @@ export function useResultExpand(opts: {
         return;
       }
       keyNav.current = true;
+      keyRepeat.current = event.repeat;
       const mark = keyNavGen.current + 1;
       keyNavGen.current = mark;
       window.setTimeout(() => {
@@ -813,23 +1741,34 @@ export function useResultExpand(opts: {
     shell.addEventListener("pointermove", onPointerMove);
     shell.addEventListener("pointerleave", onPointerLeave);
     root.addEventListener("scroll", onScroll, { passive: true });
+    root.addEventListener("wheel", onWheel, { passive: true });
     return () => {
+      if (originalScrollTo !== null) {
+        root.scrollTo = originalScrollTo;
+      }
       window.removeEventListener("keydown", onKeyDown, true);
       window.removeEventListener("click", onClick, true);
       shell.removeEventListener("pointermove", onPointerMove);
       shell.removeEventListener("pointerleave", onPointerLeave);
       root.removeEventListener("scroll", onScroll);
+      root.removeEventListener("wheel", onWheel);
       clearRest();
       if (scrollTimer.current !== null) {
         window.clearTimeout(scrollTimer.current);
         scrollTimer.current = null;
       }
     };
-  }, [commitModel, listRef, planModel]);
+  }, [commitModel, listRef]);
 
   const openIndexes = useMemo(() => {
     return new Set(openHitIndexes(model));
   }, [model]);
 
-  return { openIndexes, reportTruncation, settleStructurePin, prepareStructurePin };
+  return {
+    openIndexes,
+    holdHeights: holds,
+    reportTruncation,
+    settleStructurePin,
+    prepareStructurePin,
+  };
 }

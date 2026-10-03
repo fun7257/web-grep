@@ -1,76 +1,11 @@
 /** Anchor movement still treated as steady, in CSS pixels. */
 export const PIN_SLOP_PX = 1;
 
-export type OpenRowLayout = {
-  /** Hit index. Not a visual order. */
-  index: number;
-  /** Document offset of the row top. Smaller is higher on the page. */
-  start: number;
-  /**
-   * Pixels the anchor moves up if this row collapses.
-   * Non-finite means the shrink is unknown and the row must stay open.
-   */
-  shrink: number;
-};
-
-export type RetainDecision = {
-  /** Rows that stay expanded so the anchor does not jump. */
-  retain: number[];
-  /** Rows that can collapse. Includes rows below the anchor. */
-  collapse: number[];
-  /** Upward shift, in px, from the collapsed rows that sit above the anchor. */
-  shrink: number;
-};
-
-function finiteShrink(shrink: number): number {
-  if (!Number.isFinite(shrink)) {
-    return Number.POSITIVE_INFINITY;
-  }
-  return Math.max(0, shrink);
-}
-
-/**
- * Decide which open rows may collapse without moving `anchorStart`.
- *
- * A row below the anchor only grows or shrinks underneath it, so it always
- * collapses. A row above the anchor moves the anchor up by `shrink`. That
- * shift is cancelled by decreasing `scrollTop`, which cannot go below 0.
- * Rows are folded from the top while the leftover shift stays within
- * `slopPx`. Anything that would leave a larger jump stays open.
- */
-export function decideRetainedRows(
-  scrollTop: number,
-  anchorStart: number,
-  rows: readonly OpenRowLayout[],
-  slopPx = PIN_SLOP_PX,
-): RetainDecision {
-  const budget = Math.max(0, scrollTop) + Math.max(0, slopPx);
-  const above: OpenRowLayout[] = [];
-  const collapse: number[] = [];
-  for (const row of rows) {
-    if (row.start >= anchorStart) {
-      collapse.push(row.index);
-      continue;
-    }
-    above.push(row);
-  }
-  above.sort((a, b) => a.start - b.start || a.index - b.index);
-  const retain: number[] = [];
-  let used = 0;
-  for (const row of above) {
-    const shrink = finiteShrink(row.shrink);
-    if (used + shrink <= budget) {
-      collapse.push(row.index);
-      used += shrink;
-    } else {
-      retain.push(row.index);
-    }
-  }
-  return { retain, collapse, shrink: used };
-}
-
 /** Pointer hover must not open or close while scrolling or outside the list. */
-export function pointerRestBlocked(scrolling: boolean, inside: boolean): boolean {
+export function pointerRestBlocked(
+  scrolling: boolean,
+  inside: boolean,
+): boolean {
   return scrolling || !inside;
 }
 
@@ -126,6 +61,59 @@ export function pickReleaseAnchor(
     return null;
   }
   return { index: first.index, key: first.key };
+}
+
+/** Scroll offset and document start of the row that was settled before a switch. */
+export type ScrollHome = {
+  index: number;
+  scrollTop: number;
+  /** Row switched to when this offset was saved. */
+  away: number | null;
+  /** Document start of `index` at save time, before that switch resized rows. */
+  start: number;
+};
+
+/**
+ * How much to add to `scrollBefore` so `home.index` returns to the screen
+ * position it had when `home` was saved.
+ *
+ * `home.away` is the row we switched to when that offset was saved. Coming
+ * back means leaving that row for `home.index` — a later, unrelated visit
+ * does not qualify, or a stale index would yank scroll. The clip may already
+ * have finished. A real wheel leaves the pin in charge.
+ *
+ * `currentStart` is the row's document start now. A measurement that lands
+ * while the clip runs (estimated rows above the fold becoming real heights)
+ * moves that start, and the virtualizer already adds the same amount to
+ * `scrollTop`. Restoring the raw saved offset would undo that compensation
+ * and slide the row by the whole growth. The target keeps the growth:
+ * `home.scrollTop + (currentStart - home.start)`.
+ */
+export function scrollRestoreDelta(
+  home: ScrollHome | null,
+  anchor: number | null,
+  scrollBefore: number,
+  leavingIndex: number | null,
+  currentStart: number | null,
+  userScrolling: boolean,
+): number | null {
+  if (
+    userScrolling ||
+    home === null ||
+    anchor === null ||
+    leavingIndex === null ||
+    currentStart === null ||
+    home.away === null ||
+    leavingIndex !== home.away ||
+    anchor !== home.index ||
+    !Number.isFinite(home.scrollTop) ||
+    !Number.isFinite(home.start) ||
+    !Number.isFinite(scrollBefore) ||
+    !Number.isFinite(currentStart)
+  ) {
+    return null;
+  }
+  return home.scrollTop + (currentStart - home.start) - scrollBefore;
 }
 
 /**

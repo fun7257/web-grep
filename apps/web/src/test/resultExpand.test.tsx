@@ -11,9 +11,14 @@ import type { SseHit } from "@web-grep/shared";
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ResultList } from "../components/ResultList.tsx";
-import { HOVER_REST_MS } from "../hooks/useResultExpand.ts";
 import { useHotkeys } from "../hooks/useHotkeys.ts";
 import { LocaleProvider } from "../hooks/useLocale.ts";
+import {
+  HOVER_REST_MS,
+  isOwnScrollTop,
+  rememberOwnScroll,
+  SELF_SCROLL_MS,
+} from "../hooks/useResultExpand.ts";
 
 const NEEDLE = "NEEDLE";
 
@@ -214,7 +219,7 @@ describe("result row expand", () => {
     restoreLayoutStubs();
   });
 
-  it("opens a truncated row only after the pointer rests 150ms", () => {
+  it("opens a truncated row only after the pointer rests 50ms", () => {
     const text = `${NEEDLE} ${"x".repeat(220)}`;
     render(<Harness hits={[hit(1, text), longLine(2)]} />);
     const count = text.length.toLocaleString("zh-CN");
@@ -225,7 +230,7 @@ describe("result row expand", () => {
     expect(hitButton(0).classList.contains("is-open")).toBe(false);
 
     moveTo(0);
-    settle(149);
+    settle(49);
     expect(openIndex()).toBeNull();
 
     settle(1);
@@ -295,7 +300,7 @@ describe("result row expand", () => {
     expect(openIndex()).toBe(0);
 
     moveTo(1);
-    settle(149);
+    settle(49);
     expect(openIndex()).toBe(0);
     settle(1);
     expect(openIndex()).toBe(1);
@@ -317,7 +322,9 @@ describe("result row expand", () => {
     // scroller (onto that header) keeps the row; leaving the shell closes it.
     fireEvent.pointerLeave(scrollEl());
     expect(openIndex()).toBe(0);
-    fireEvent.pointerMove(listShell().querySelector(".result-sticky-header") ?? listShell());
+    fireEvent.pointerMove(
+      listShell().querySelector(".result-sticky-header") ?? listShell(),
+    );
     settle(300);
     expect(openIndex()).toBe(0);
     fireEvent.pointerLeave(listShell());
@@ -330,7 +337,7 @@ describe("result row expand", () => {
     moveTo(0);
     settle(150);
     expect(openIndex()).toBeNull();
-    settle(149);
+    settle(49);
     expect(openIndex()).toBeNull();
     settle(1);
     expect(openIndex()).toBe(0);
@@ -486,7 +493,8 @@ function installMeasuredBoxes(): void {
     configurable: true,
     value(this: HTMLElement) {
       const scroller = this.closest(".result-list-scroll");
-      const scrollTop = scroller instanceof HTMLElement ? scroller.scrollTop : 0;
+      const scrollTop =
+        scroller instanceof HTMLElement ? scroller.scrollTop : 0;
       if (this.classList.contains("result-list-inner")) {
         return new DOMRect(0, -scrollTop, 400, 5000);
       }
@@ -501,18 +509,35 @@ function installMeasuredBoxes(): void {
       const start = match?.[1] === undefined ? 0 : Number(match[1]);
       const top = start - scrollTop;
       if (this.classList.contains("result-log")) {
-        const height = this.classList.contains("is-open") ? 240 : 50;
+        const forced = Number.parseFloat(this.style.height);
+        const height = Number.isFinite(forced)
+          ? forced
+          : this.classList.contains("is-open")
+            ? 240
+            : 50;
         return new DOMRect(0, top, 400, height);
       }
       if (
         this.classList.contains("result-virtual-row") ||
         this.classList.contains("result-group-header")
       ) {
+        const button = this.querySelector(".result-log");
+        const forced =
+          button instanceof HTMLElement
+            ? Number.parseFloat(button.style.height)
+            : Number.NaN;
         const open = this.querySelector(".result-log.is-open") !== null;
         const header =
           this.classList.contains("is-header") ||
           this.classList.contains("result-group-header");
-        return new DOMRect(0, top, 400, header ? 36 : open ? 240 : 50);
+        const height = header
+          ? 36
+          : Number.isFinite(forced)
+            ? forced
+            : open
+              ? 240
+              : 50;
+        return new DOMRect(0, top, 400, height);
       }
       return new DOMRect(0, 0, 0, 0);
     },
@@ -521,11 +546,15 @@ function installMeasuredBoxes(): void {
 
 function restoreMeasuredBoxes(): void {
   if (savedRect !== undefined) {
-    Object.defineProperty(HTMLElement.prototype, "getBoundingClientRect", savedRect);
+    Object.defineProperty(
+      HTMLElement.prototype,
+      "getBoundingClientRect",
+      savedRect,
+    );
   }
 }
 
-describe("scroll compensation and retained rows", () => {
+describe("scroll compensation without retained rows", () => {
   beforeEach(() => {
     localStorage.clear();
     vi.useFakeTimers();
@@ -556,18 +585,19 @@ describe("scroll compensation and retained rows", () => {
     expect(openIndexes()).toEqual([0]);
   }
 
-  it("keeps the row above when scrollTop cannot absorb the collapse", () => {
+  it("collapses the row above when scrollTop cannot absorb the shrink", () => {
     render(<Harness hits={[longLine(1), longLine(2), longLine(3)]} />);
     openPair();
     const before = rowStart(1);
     moveTo(1);
     settle(150);
-    expect(openIndexes()).toEqual([0, 1]);
-    expect(Math.abs(rowStart(1) - before)).toBeLessThanOrEqual(1);
+    expect(openIndexes()).toEqual([1]);
+    expect(hitButton(0).classList.contains("is-open")).toBe(false);
     expect(scrollEl().scrollTop).toBe(0);
+    expect(rowStart(1)).toBeLessThan(before - 1);
   });
 
-  it("keeps the row above when scrollTop is smaller than the shrink", () => {
+  it("absorbs only the scrollTop that exists and still collapses the row above", () => {
     render(<Harness hits={[longLine(1), longLine(2)]} />);
     openPair();
     scrollEl().scrollTop = 10;
@@ -576,8 +606,9 @@ describe("scroll compensation and retained rows", () => {
     const before = rowStart(1);
     moveTo(1);
     settle(150);
-    expect(openIndexes()).toEqual([0, 1]);
-    expect(Math.abs(rowStart(1) - before)).toBeLessThanOrEqual(1);
+    expect(openIndexes()).toEqual([1]);
+    expect(scrollEl().scrollTop).toBe(0);
+    expect(before - rowStart(1)).toBeGreaterThan(10);
   });
 
   it("collapses the row above and compensates scrollTop when the room is enough", () => {
@@ -596,29 +627,30 @@ describe("scroll compensation and retained rows", () => {
     settle(200);
     expect(openIndexes()).toEqual([1]);
     expect(before - scrollEl().scrollTop).toBeGreaterThan(shrink - 2);
-    expect(Math.abs(rowStart(1) - scrollEl().scrollTop - (startBefore - before))).toBeLessThanOrEqual(
-      1,
-    );
+    expect(
+      Math.abs(rowStart(1) - scrollEl().scrollTop - (startBefore - before)),
+    ).toBeLessThanOrEqual(1);
   });
 
-  it("collapses a retained row once scrolling leaves enough room", () => {
+  it("does not reopen a collapsed row when later scrolling leaves room", () => {
     render(<Harness hits={[longLine(1), longLine(2)]} />);
     openPair();
     moveTo(1);
     settle(150);
-    expect(openIndexes()).toEqual([0, 1]);
+    expect(openIndexes()).toEqual([1]);
     scrollEl().scrollTop = 800;
     fireEvent.scroll(scrollEl());
     settle(150);
     expect(openIndexes()).toEqual([1]);
+    expect(hitButton(0).classList.contains("is-open")).toBe(false);
   });
 
-  it("drops retained rows when the group is folded or sorted", () => {
+  it("keeps only the active row when the group is sorted or folded", () => {
     render(<Harness hits={[longLine(1), longLine(2)]} />);
     openPair();
     moveTo(1);
     settle(150);
-    expect(openIndexes()).toEqual([0, 1]);
+    expect(openIndexes()).toEqual([1]);
     const sort = document.querySelector(".result-sort");
     if (!(sort instanceof HTMLElement)) {
       throw new Error("missing sort button");
@@ -645,9 +677,9 @@ describe("scroll compensation and retained rows", () => {
         return true;
       }
       return (
-        el.closest(".result-group-header")?.querySelector(
-          `[data-file-path="${path}"]`,
-        ) !== null
+        el
+          .closest(".result-group-header")
+          ?.querySelector(`[data-file-path="${path}"]`) !== null
       );
     });
     if (!(button instanceof HTMLElement)) {
@@ -673,37 +705,36 @@ describe("scroll compensation and retained rows", () => {
   it("pins on sort when scrollTop can absorb the shift, and does not when it cannot", () => {
     const hits = [longLine(1), longLine(2), longLine(3)];
     render(<Harness hits={hits} />);
-    openPair();
-    moveTo(1);
+    moveTo(2);
     settle(150);
-    expect(openIndexes()).toEqual([0, 1]);
-    const shrink = hitButton(0).getBoundingClientRect().height - 50;
-    expect(shrink).toBeGreaterThan(1);
+    expect(openIndexes()).toEqual([2]);
 
     quietScroll(0);
-    const stuckTop = anchorTop(1);
+    const stuckTop = anchorTop(2);
+    const stuckStart = rowStart(2);
     clickSort();
-    expect(openIndexes()).toEqual([1]);
+    expect(openIndexes()).toEqual([2]);
     expect(scrollEl().scrollTop).toBe(0);
-    expect(anchorTop(1)).toBeLessThan(stuckTop - 1);
+    expect(rowStart(2)).toBeLessThan(stuckStart - 1);
+    expect(anchorTop(2)).toBeLessThan(stuckTop - 1);
 
     cleanup();
     render(<Harness hits={hits} />);
-    openPair();
-    moveTo(1);
+    moveTo(2);
     settle(150);
-    expect(openIndexes()).toEqual([0, 1]);
-    const room = shrink + 80;
-    quietScroll(room);
-    const beforeTop = anchorTop(1);
-    const beforeStart = rowStart(1);
+    expect(openIndexes()).toEqual([2]);
+    quietScroll(120);
+    const beforeTop = anchorTop(2);
+    const beforeStart = rowStart(2);
     const beforeScroll = scrollEl().scrollTop;
     clickSort();
-    expect(openIndexes()).toEqual([1]);
-    const startShift = rowStart(1) - beforeStart;
-    expect(Math.abs(anchorTop(1) - beforeTop)).toBeLessThanOrEqual(1);
-    expect(Math.abs(scrollEl().scrollTop - beforeScroll - startShift)).toBeLessThanOrEqual(1);
-    expect(Math.abs(startShift)).toBeGreaterThan(1);
+    expect(openIndexes()).toEqual([2]);
+    const startShift = rowStart(2) - beforeStart;
+    expect(startShift).toBeLessThan(-1);
+    expect(Math.abs(anchorTop(2) - beforeTop)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(scrollEl().scrollTop - beforeScroll - startShift),
+    ).toBeLessThanOrEqual(1);
   });
 
   it("pins on fold of another group when scrollTop can absorb the shift, and does not when it cannot", () => {
@@ -720,9 +751,8 @@ describe("scroll compensation and retained rows", () => {
     settle(150);
     moveTo(3);
     settle(150);
-    expect(openIndexes()).toEqual([2, 3]);
-    const shrink = hitButton(2).getBoundingClientRect().height - 50;
-    expect(shrink).toBeGreaterThan(1);
+    expect(openIndexes()).toEqual([3]);
+    expect(hitButton(2).classList.contains("is-open")).toBe(false);
 
     const stuckTop = anchorTop(3);
     clickToggle(above);
@@ -736,8 +766,8 @@ describe("scroll compensation and retained rows", () => {
     settle(150);
     moveTo(3);
     settle(150);
-    expect(openIndexes()).toEqual([2, 3]);
-    quietScroll(shrink + 200);
+    expect(openIndexes()).toEqual([3]);
+    quietScroll(400);
     const beforeTop = anchorTop(3);
     const beforeStart = rowStart(3);
     const beforeScroll = scrollEl().scrollTop;
@@ -745,7 +775,9 @@ describe("scroll compensation and retained rows", () => {
     expect(openIndexes()).toEqual([3]);
     const startShift = rowStart(3) - beforeStart;
     expect(Math.abs(anchorTop(3) - beforeTop)).toBeLessThanOrEqual(1);
-    expect(Math.abs(scrollEl().scrollTop - beforeScroll - startShift)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(scrollEl().scrollTop - beforeScroll - startShift),
+    ).toBeLessThanOrEqual(1);
     expect(Math.abs(startShift)).toBeGreaterThan(1);
   });
 
@@ -754,7 +786,7 @@ describe("scroll compensation and retained rows", () => {
     openPair();
     moveTo(1);
     settle(150);
-    expect(openIndexes()).toEqual([0, 1]);
+    expect(openIndexes()).toEqual([1]);
     quietScroll(400);
     const fold = document.querySelector(".result-fold-all");
     if (!(fold instanceof HTMLElement)) {
@@ -769,31 +801,33 @@ describe("scroll compensation and retained rows", () => {
     const hits = [longLine(1), longLine(2), longLine(3)];
     render(<Harness hits={hits} />);
     openPair();
-    moveTo(1);
-    settle(150);
-    expect(openIndexes()).toEqual([0, 1]);
+    moveTo(2);
+    settle(10);
+    expect(openIndexes()).toEqual([0]);
     const shrink = hitButton(0).getBoundingClientRect().height - 50;
     expect(shrink).toBeGreaterThan(1);
-    const stuckTop = anchorTop(1);
+    const stuckTop = anchorTop(2);
     fireEvent.pointerLeave(listShell());
     expect(openIndexes()).toEqual([]);
     expect(scrollEl().scrollTop).toBe(0);
-    expect(anchorTop(1)).toBeLessThan(stuckTop - 1);
+    expect(anchorTop(2)).toBeLessThan(stuckTop - 1);
 
     cleanup();
     render(<Harness hits={hits} />);
     openPair();
-    moveTo(1);
-    settle(150);
+    moveTo(2);
+    settle(10);
     quietScroll(shrink + 80);
-    const beforeTop = anchorTop(1);
-    const beforeStart = rowStart(1);
+    const beforeTop = anchorTop(2);
+    const beforeStart = rowStart(2);
     const beforeScroll = scrollEl().scrollTop;
     fireEvent.pointerLeave(listShell());
     expect(openIndexes()).toEqual([]);
-    const startShift = rowStart(1) - beforeStart;
-    expect(Math.abs(anchorTop(1) - beforeTop)).toBeLessThanOrEqual(1);
-    expect(Math.abs(scrollEl().scrollTop - beforeScroll - startShift)).toBeLessThanOrEqual(1);
+    const startShift = rowStart(2) - beforeStart;
+    expect(Math.abs(anchorTop(2) - beforeTop)).toBeLessThanOrEqual(1);
+    expect(
+      Math.abs(scrollEl().scrollTop - beforeScroll - startShift),
+    ).toBeLessThanOrEqual(1);
     expect(Math.abs(startShift)).toBeGreaterThan(1);
   });
 });
@@ -916,7 +950,11 @@ describe("j/k list movement", () => {
     act(() => {
       for (let i = 0; i < 2; i += 1) {
         window.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "j", bubbles: true, cancelable: true }),
+          new KeyboardEvent("keydown", {
+            key: "j",
+            bubbles: true,
+            cancelable: true,
+          }),
         );
       }
     });
@@ -941,7 +979,11 @@ describe("j/k list movement", () => {
     act(() => {
       for (let i = 0; i < 10; i += 1) {
         window.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "j", bubbles: true, cancelable: true }),
+          new KeyboardEvent("keydown", {
+            key: "j",
+            bubbles: true,
+            cancelable: true,
+          }),
         );
       }
     });
@@ -949,7 +991,11 @@ describe("j/k list movement", () => {
     act(() => {
       for (let i = 0; i < 6; i += 1) {
         window.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "k", bubbles: true, cancelable: true }),
+          new KeyboardEvent("keydown", {
+            key: "k",
+            bubbles: true,
+            cancelable: true,
+          }),
         );
       }
     });
@@ -962,7 +1008,11 @@ describe("j/k list movement", () => {
     act(() => {
       for (let i = 0; i < 80; i += 1) {
         window.dispatchEvent(
-          new KeyboardEvent("keydown", { key: "j", bubbles: true, cancelable: true }),
+          new KeyboardEvent("keydown", {
+            key: "j",
+            bubbles: true,
+            cancelable: true,
+          }),
         );
       }
     });
@@ -976,9 +1026,330 @@ describe("j/k list movement", () => {
     const input = document.createElement("input");
     document.body.appendChild(input);
     input.dispatchEvent(
-      new KeyboardEvent("keydown", { key: "j", bubbles: true, cancelable: true }),
+      new KeyboardEvent("keydown", {
+        key: "j",
+        bubbles: true,
+        cancelable: true,
+      }),
     );
     expect(selectedIndex()).toBe(0);
     input.remove();
+  });
+});
+
+type MotionCall = {
+  el: HTMLElement;
+  frames: Keyframe[];
+  options: KeyframeAnimationOptions;
+  finish: () => void;
+};
+
+function installMotionClock(): {
+  calls: MotionCall[];
+  advance: (ms: number) => void;
+} {
+  let clock = 1000;
+  vi.spyOn(performance, "now").mockImplementation(() => clock);
+  const calls: MotionCall[] = [];
+  HTMLElement.prototype.animate = function animate(
+    this: HTMLElement,
+    frames: Keyframe[] | PropertyIndexedKeyframes | null,
+    options?: number | KeyframeAnimationOptions,
+  ): Animation {
+    const list = Array.isArray(frames) ? frames : [];
+    const opt: KeyframeAnimationOptions =
+      typeof options === "number" ? { duration: options } : (options ?? {});
+    const rec: MotionCall = {
+      el: this,
+      frames: list,
+      options: opt,
+      finish: () => undefined,
+    };
+    const anim = {
+      onfinish: null as (() => void) | null,
+      oncancel: null as (() => void) | null,
+      playState: "running",
+      cancel(this: { oncancel: (() => void) | null; playState: string }) {
+        this.playState = "idle";
+        const callback = this.oncancel;
+        if (callback !== null) {
+          queueMicrotask(() => {
+            callback();
+          });
+        }
+      },
+      finish(this: { onfinish: (() => void) | null; playState: string }) {
+        this.playState = "finished";
+        this.onfinish?.();
+      },
+      addEventListener(): void {},
+      removeEventListener(): void {},
+    };
+    rec.finish = () => {
+      anim.finish();
+    };
+    calls.push(rec);
+    return anim as unknown as Animation;
+  };
+  return {
+    calls,
+    advance(ms: number) {
+      clock += ms;
+      act(() => {
+        vi.advanceTimersByTime(ms);
+      });
+    },
+  };
+}
+
+function residue(): string[] {
+  const bad: string[] = [];
+  for (const node of document.querySelectorAll<HTMLElement>(
+    ".result-virtual-row, .result-row-motion, .result-log",
+  )) {
+    if (node.classList.contains("anim")) {
+      bad.push("anim");
+    }
+    if (node.style.overflow !== "") {
+      bad.push("overflow");
+    }
+    if (node.style.clipPath !== "") {
+      bad.push("clip");
+    }
+    if (
+      node.classList.contains("result-row-motion") &&
+      node.style.transform !== ""
+    ) {
+      bad.push("transform");
+    }
+  }
+  return bad;
+}
+
+describe("result row motion", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    vi.useFakeTimers();
+    installLayoutStubs();
+    installMeasuredBoxes();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      },
+    );
+    document.elementFromPoint = () => null;
+    selectedSpy.mockClear();
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    Reflect.deleteProperty(HTMLElement.prototype, "animate");
+    restoreMeasuredBoxes();
+    restoreLayoutStubs();
+  });
+
+  it("plays expand and collapse together, then leaves the same DOM as the instant path", () => {
+    const motion = installMotionClock();
+    let scrollInFrame = 0;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      const before = scrollEl().scrollTop;
+      callback(0);
+      if (scrollEl().scrollTop !== before) {
+        scrollInFrame += 1;
+      }
+      return 0;
+    });
+    render(<Harness hits={[longLine(1), longLine(2), longLine(3)]} />);
+    moveTo(0);
+    motion.advance(50);
+    expect(openIndexes()).toEqual([0]);
+    expect(hitButton(0).style.height).toBe("");
+    const expandClips = motion.calls.filter(
+      (call) =>
+        call.options.duration === 240 &&
+        String(call.frames[0]?.clipPath ?? "").includes("inset"),
+    );
+    expect(expandClips.length).toBeGreaterThan(0);
+    expect(scrollInFrame).toBe(0);
+
+    motion.advance(200);
+    const before = motion.calls.length;
+    moveTo(1);
+    motion.advance(50);
+    expect(motion.calls.length).toBeGreaterThan(before);
+    expect(document.querySelector(".result-virtual-row.anim")).not.toBeNull();
+    expect(hitButton(0).style.height).not.toBe("");
+    expect(openIndexes().slice().sort((a, b) => a - b)).toEqual([0, 1]);
+    const collapse = motion.calls.filter(
+      (call) => call.options.duration === 170,
+    );
+    const expand = motion.calls.filter((call) => call.options.duration === 240);
+    expect(collapse.length).toBeGreaterThan(0);
+    expect(expand.length).toBeGreaterThan(0);
+    expect(
+      collapse.some((call) => call.options.composite === "add") ||
+        expand.some((call) => call.options.composite === "add"),
+    ).toBe(true);
+
+    act(() => {
+      for (const call of motion.calls) {
+        call.finish();
+      }
+    });
+    expect(openIndexes()).toEqual([1]);
+    expect(document.querySelector(".result-virtual-row.anim")).toBeNull();
+    expect(hitButton(0).style.height).toBe("");
+    expect(residue()).toEqual([]);
+
+    cleanup();
+    Reflect.deleteProperty(HTMLElement.prototype, "animate");
+    render(<Harness hits={[longLine(1), longLine(2), longLine(3)]} />);
+    moveTo(0);
+    motion.advance(50);
+    moveTo(1);
+    motion.advance(50);
+    expect(openIndexes()).toEqual([1]);
+    expect(hitButton(1).querySelector(".result-xnote")).not.toBeNull();
+    expect(hitButton(0).querySelector(".result-lenchip")).not.toBeNull();
+    expect(residue()).toEqual([]);
+  });
+
+  it("skips motion while scrolling, under reduced motion, on key repeat, and inside 120ms", () => {
+    const motion = installMotionClock();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query.includes("reduce"),
+      media: query,
+      addEventListener(): void {},
+      removeEventListener(): void {},
+      dispatchEvent(): boolean {
+        return false;
+      },
+    }));
+    render(
+      <Harness hits={[longLine(1), longLine(2), longLine(3), longLine(4)]} />,
+    );
+    press("j");
+    expect(openIndex()).toBe(1);
+    expect(motion.calls).toHaveLength(0);
+
+    cleanup();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: false,
+      media: query,
+      addEventListener(): void {},
+      removeEventListener(): void {},
+      dispatchEvent(): boolean {
+        return false;
+      },
+    }));
+    render(
+      <Harness hits={[longLine(1), longLine(2), longLine(3), longLine(4)]} />,
+    );
+    fireEvent.scroll(scrollEl());
+    press("j");
+    expect(openIndex()).toBe(1);
+    expect(motion.calls).toHaveLength(0);
+    motion.advance(150);
+
+    const beforeRepeat = motion.calls.length;
+    press("j");
+    expect(motion.calls.length).toBeGreaterThan(beforeRepeat);
+    const afterFirst = motion.calls.length;
+    motion.advance(200);
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "j", bubbles: true, repeat: true }),
+      );
+    });
+    expect(motion.calls).toHaveLength(afterFirst);
+    expect(openIndex()).not.toBeNull();
+
+    motion.advance(40);
+    const beforeGap = motion.calls.length;
+    press("j");
+    expect(motion.calls).toHaveLength(beforeGap);
+  });
+
+  it("leaves no anim class, overflow, clip-path, or motion transform after 14 rapid switches", () => {
+    const motion = installMotionClock();
+    render(<Harness hits={[longLine(1), longLine(2), longLine(3)]} />);
+    for (let i = 0; i < 14; i += 1) {
+      moveTo(i % 2);
+      motion.advance(60);
+    }
+    act(() => {
+      for (const call of motion.calls) {
+        call.finish();
+      }
+    });
+    expect(residue()).toEqual([]);
+    expect(openIndexes().length).toBeLessThanOrEqual(1);
+  });
+
+  it("does not treat a scroll event from our own scrollTop as user scrolling", () => {
+    const motion = installMotionClock();
+    render(
+      <Harness hits={[longLine(1), longLine(2), longLine(3), longLine(4)]} />,
+    );
+    moveTo(0);
+    motion.advance(50);
+    expect(openIndexes()).toEqual([0]);
+    const end = rowStart(0) + hitButton(0).getBoundingClientRect().height;
+    scrollEl().scrollTop = end - 10;
+    fireEvent.scroll(scrollEl());
+    motion.advance(160);
+
+    const beforeSwitch = scrollEl().scrollTop;
+    moveTo(1);
+    motion.advance(50);
+    const written = scrollEl().scrollTop;
+    expect(written).not.toBe(beforeSwitch);
+    // The follow-up scroll arrives after the pin is gone. Two events: the
+    // first can still be the one ignoreScroll counted; the second is the
+    // virtualizer adjustment the pin no longer covers.
+    motion.advance(0);
+    delete scrollEl().dataset.motionPin;
+    fireEvent.scroll(scrollEl());
+    fireEvent.scroll(scrollEl());
+
+    const beforeRetarget = motion.calls.length;
+    motion.advance(70);
+    moveTo(2);
+    motion.advance(50);
+    const retargetClips = motion.calls
+      .slice(beforeRetarget)
+      .filter((call) => String(call.frames[0]?.clipPath ?? "").includes("inset"));
+    expect(retargetClips.length).toBeGreaterThan(0);
+
+    // Let the self-scroll note expire. A real wheel then moves scrollTop off
+    // every value we wrote. One leftover ignoreScroll from the write above
+    // can swallow a single event; the second event is the user.
+    motion.advance(SELF_SCROLL_MS + 40);
+    const userTop = scrollEl().scrollTop + 400;
+    scrollEl().scrollTop = userTop;
+    expect(scrollEl().scrollTop).toBe(userTop);
+    delete scrollEl().dataset.motionPin;
+    fireEvent.scroll(scrollEl());
+    fireEvent.scroll(scrollEl());
+    const beforeUser = motion.calls.length;
+    press("j");
+    expect(selectedIndex()).toBe(1);
+    expect(motion.calls).toHaveLength(beforeUser);
+  });
+});
+
+describe("own scroll notes", () => {
+  it("matches a scrollTop we wrote and ignores a different one after expiry", () => {
+    const slot = { until: 0, tops: [] as number[] };
+    rememberOwnScroll(slot, 17621, 1000);
+    expect(isOwnScrollTop(slot, 17621, 1000)).toBe(true);
+    expect(isOwnScrollTop(slot, 17621.4, 1000 + SELF_SCROLL_MS - 1)).toBe(true);
+    expect(isOwnScrollTop(slot, 17127, 1000)).toBe(false);
+    expect(isOwnScrollTop(slot, 17621, 1000 + SELF_SCROLL_MS + 1)).toBe(false);
   });
 });
